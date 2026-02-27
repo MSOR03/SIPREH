@@ -1,0 +1,209 @@
+@import "tailwindcss";
+
+/* ✅ CRITICAL for Tailwind v4 — enables class-based dark mode */
+@variant dark (&:where(.dark, .dark *));
+
+:root {
+  /* Light mode - Earth tones with blue accents */
+  --background: #f8f9fa;
+  --foreground: #1a1a1a;
+  --card-bg: #ffffff;
+  --sidebar-bg: #ffffff;
+  --border-color: #e5e7eb;
+
+  /* Primary colors - Blue for water/hydrology */
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --primary-light: #dbeafe;
+
+  /* Drought severity colors */
+  --drought-extreme: #991b1b;
+  --drought-severe: #dc2626;
+  --drought-moderate: #f59e0b;
+  --drought-mild: #fbbf24;
+  --drought-normal: #10b981;
+  --drought-wet: #3b82f6;
+
+  /* Accent colors */
+  --accent-earth: #92400e;
+  --accent-green: #059669;
+  --accent-amber: #d97706;
+
+  /* UI elements */
+  --button-bg: #2563eb;
+  --button-hover: #1d4ed8;
+  --input-bg: #ffffff;
+  --shadow: rgba(0, 0, 0, 0.1);
+}
+
+.dark {
+  /* Dark mode - Darker earth tones */
+  --background: #0f1419;
+  --foreground: #e5e7eb;
+  --card-bg: #1a1f2e;
+  --sidebar-bg: #141920;
+  --border-color: #2d3748;
+
+  /* Primary colors adjusted for dark mode */
+  --primary: #3b82f6;
+  --primary-hover: #2563eb;
+  --primary-light: #1e3a5f;
+
+  /* Drought severity colors */
+  --drought-extreme: #dc2626;
+  --drought-severe: #ef4444;
+  --drought-moderate: #f59e0b;
+  --drought-mild: #fbbf24;
+  --drought-normal: #10b981;
+  --drought-wet: #3b82f6;
+
+  /* Accent colors */
+  --accent-earth: #d97706;
+  --accent-green: #10b981;
+  --accent-amber: #f59e0b;
+
+  /* UI elements */
+  --button-bg: #3b82f6;
+  --button-hover: #2563eb;
+  --input-bg: #1a1f2e;
+  --shadow: rgba(0, 0, 0, 0.3);
+}
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
+  overflow-x: hidden;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--background);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--primary);
+}
+
+/* Leaflet map styles */
+.leaflet-container {
+  background: var(--card-bg);
+  font-family: var(--font-inter), sans-serif;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  border-radius: 1rem;
+}
+
+.leaflet-container:active {
+  cursor: grabbing;
+}
+
+.leaflet-grab {
+  cursor: grab !important;
+}
+
+.leaflet-dragging .leaflet-grab {
+  cursor: grabbing !important;
+}
+
+.leaflet-control-attribution {
+  background: var(--card-bg) !important;
+  color: var(--foreground) !important;
+}
+
+/* Custom animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-slide-down {
+  animation: slideDown 0.4s ease-out;
+}
+
+@keyframes shimmer {
+  0%   { background-position: -1000px 0; }
+  100% { background-position:  1000px 0; }
+}
+
+.animate-shimmer {
+  animation: shimmer 2s infinite;
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    rgba(255, 255, 255, 0.2) 50%,
+    transparent 100%
+  );
+  background-size: 1000px 100%;
+}
+
+/* Toast animations */
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in-right {
+  animation: slideInRight 0.3s ease-out;
+}
+
+@keyframes shrinkWidth {
+  from {
+    width: 100%;
+  }
+  to {
+    width: 0%;
+  }
+}
+
+.animate-shrink-width {
+  animation: shrinkWidth linear forwards;
+}
+
+/* Modal animations */
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.2s ease-out;
+}
