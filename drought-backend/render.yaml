@@ -1,0 +1,29 @@
+# Render.com deployment configuration
+services:
+  - type: web
+    name: droughtmonitor-backend
+    env: python
+    region: oregon
+    plan: free
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: droughtmonitor-db
+          property: connectionString
+      - key: ADMIN_EMAIL
+        value: admin@droughtmonitor.com
+      - key: ADMIN_PASSWORD
+        generateValue: true
+
+databases:
+  - name: droughtmonitor-db
+    databaseName: droughtmonitor
+    region: oregon
+    plan: free

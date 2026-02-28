@@ -1,0 +1,19 @@
+# Development dependencies
+# Install with: pip install -r requirements-dev.txt
+
+# Testing
+pytest==7.4.4
+pytest-cov==4.1.0
+pytest-asyncio==0.23.3
+httpx==0.26.0  # For testing FastAPI
+
+# Code quality
+black==24.1.1
+flake8==7.0.0
+mypy==1.8.0
+isort==5.13.2
+
+# Type stubs
+types-python-jose==3.3.4.8
+types-passlib==1.7.7.20240106
+sqlalchemy-stubs==0.4
