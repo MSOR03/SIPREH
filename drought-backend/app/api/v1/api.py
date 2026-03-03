@@ -2,7 +2,7 @@
 API v1 router configuration.
 """
 from fastapi import APIRouter
-from app.api.v1.endpoints import auth, dashboard, dashboard_v2, admin, parquet, drought
+from app.api.v1.endpoints import auth, dashboard, dashboard_v2, admin, parquet, drought, historical
 
 
 api_router = APIRouter()
@@ -47,4 +47,11 @@ api_router.include_router(
     drought.router,
     prefix="/drought",
     tags=["drought-monitoring"]
+)
+
+# Historical data endpoints (optimized with DuckDB)
+api_router.include_router(
+    historical.router,
+    prefix="/historical",
+    tags=["historical-data"]
 )

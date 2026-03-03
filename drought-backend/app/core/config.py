@@ -3,6 +3,12 @@ Core configuration settings for DroughtMonitor backend.
 """
 from pydantic_settings import BaseSettings
 from typing import Optional
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load .env file from backend root directory
+env_path = Path(__file__).parent.parent.parent / ".env"
+load_dotenv(dotenv_path=env_path)
 
 
 class Settings(BaseSettings):
@@ -27,9 +33,12 @@ class Settings(BaseSettings):
     # Cloud Storage Settings
     CLOUD_STORAGE_PROVIDER: str = "cloudflare-r2"  # or "aws-s3", "backblaze-b2"
     CLOUD_STORAGE_ENDPOINT: Optional[str] = None
+    CLOUD_ACCOUNT_ID: Optional[str] = None  # For Cloudflare R2
+    CLOUD_STORAGE_TOKEN: str | None = None
     CLOUD_STORAGE_BUCKET: str = "drought-data"
     CLOUD_STORAGE_ACCESS_KEY: Optional[str] = None
     CLOUD_STORAGE_SECRET_KEY: Optional[str] = None
+    CLOUD_STORAGE_ACCOUNT_ID: Optional[str] = None  # For Cloudflare R2
     CLOUD_STORAGE_REGION: str = "auto"
     
     # File Upload Settings
@@ -40,6 +49,12 @@ class Settings(BaseSettings):
     # Export Settings
     EXPORT_DIR: str = "./exports"
     EXPORT_MAX_AGE_HOURS: int = 24  # Files older than this are deleted
+    
+    # 🚀 Cache Strategy: Direct Cloudflare + Redis only
+    # DEPRECADO: Cache de disco local removido por problemas de performance
+    # PARQUET_CACHE_DIR: str = ".cache_parquet"
+    # PARQUET_CACHE_MAX_SIZE_GB: float = 10.0
+    # PARQUET_CACHE_ENABLED: bool = False
     
     # Admin Settings
     ADMIN_EMAIL: str = "admin@droughtmonitor.com"

@@ -51,6 +51,9 @@ Thumbs.db
 uploads/
 temp/
 
+# Parquet cache (archivos descargados de Cloudflare)
+.cache_parquet/
+
 # Logs
 *.log
 logs/

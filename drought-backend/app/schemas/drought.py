@@ -61,14 +61,17 @@ class TimeSeriesDataPoint(BaseModel):
 
 class TimeSeriesRequest(BaseModel):
     """Request para obtener serie de tiempo."""
-    file_id: int
-    variable_or_index: str  # ID de variable o índice
+    file_id: int = Field(..., alias="parquet_file_id", description="ID del archivo parquet")
+    variable_or_index: str = Field(..., alias="variable", description="Variable o índice (precip, SPI, SPEI, etc.)")
     start_date: date
     end_date: date
     station_id: Optional[str] = None  # ID de estación
     cell_id: Optional[str] = None  # ID de celda
     lat: Optional[float] = None
     lon: Optional[float] = None
+    
+    class Config:
+        populate_by_name = True  # Acepta tanto el alias como el nombre original
 
 
 class TimeSeriesResponse(BaseModel):
@@ -88,10 +91,13 @@ class TimeSeriesResponse(BaseModel):
 
 class SpatialDataRequest(BaseModel):
     """Request para obtener datos espaciales (mapa 2D)."""
-    file_id: int
-    variable_or_index: str
+    file_id: int = Field(..., alias="parquet_file_id", description="ID del archivo parquet")
+    variable_or_index: str = Field(..., alias="variable", description="Variable o índice")
     target_date: date
     bounds: Optional[Dict[str, float]] = None  # {min_lat, max_lat, min_lon, max_lon}
+    
+    class Config:
+        populate_by_name = True
 
 
 class GridCell(BaseModel):
@@ -157,10 +163,13 @@ class GridMeshResponse(BaseModel):
 
 class PredictionRequest(BaseModel):
     """Request para obtener predicción."""
-    file_id: int
-    drought_index: str
+    file_id: int = Field(..., alias="parquet_file_id", description="ID del archivo parquet")
+    drought_index: str = Field(..., alias="variable", description="Índice de sequía (SPI, SPEI, etc.)")
     horizon: Literal["1m", "3m", "6m"]  # 1, 3 o 6 meses
     reference_date: Optional[date] = None  # Fecha de referencia, default=hoy
+    
+    class Config:
+        populate_by_name = True
 
 
 class PredictionDataPoint(BaseModel):
@@ -196,12 +205,15 @@ class MacroClimateIndex(BaseModel):
 
 class CorrelationRequest(BaseModel):
     """Request para correlaciones."""
-    file_id: int
-    drought_index: str
+    file_id: int = Field(..., alias="parquet_file_id", description="ID del archivo parquet")
+    drought_index: str = Field(..., alias="variable", description="Índice de sequía")
     macro_index: str  # ENSO, NAO, PDO, etc.
     start_date: date
     end_date: date
     lag_months: Optional[int] = 0  # Desfase temporal
+    
+    class Config:
+        populate_by_name = True
 
 
 class CorrelationResponse(BaseModel):
@@ -223,13 +235,16 @@ class CorrelationResponse(BaseModel):
 class ExportRequest(BaseModel):
     """Request para exportar datos o gráficas."""
     export_type: Literal["timeseries_csv", "spatial_csv", "chart_png", "chart_jpeg"]
-    file_id: int
-    variable_or_index: str
+    file_id: int = Field(..., alias="parquet_file_id", description="ID del archivo parquet")
+    variable_or_index: str = Field(..., alias="variable", description="Variable o índice")
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     target_date: Optional[date] = None
     location_id: Optional[str] = None
     chart_config: Optional[Dict[str, Any]] = None  # Configuración de gráfica
+    
+    class Config:
+        populate_by_name = True
 
 
 class ExportResponse(BaseModel):
@@ -247,13 +262,16 @@ class ExportResponse(BaseModel):
 
 class HistoricalAnalysisRequest(BaseModel):
     """Request para análisis histórico completo."""
-    file_id: int
+    file_id: int = Field(..., alias="parquet_file_id", description="ID del archivo parquet")
     variables: List[str]  # Lista de variables o índices
     start_date: date
     end_date: date
     analysis_type: Literal["1D", "2D"]  # Serie de tiempo o espacial
     location_id: Optional[str] = None  # Para análisis 1D
     aggregation: Optional[Literal["daily", "weekly", "monthly", "yearly"]] = "daily"
+    
+    class Config:
+        populate_by_name = True
 
 
 class HistoricalAnalysisResponse(BaseModel):

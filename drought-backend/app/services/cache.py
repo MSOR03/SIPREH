@@ -30,9 +30,9 @@ class CacheService:
                     settings.REDIS_URL,
                     decode_responses=False
                 )
-                print("✓ Redis cache connected")
+                print("Redis cache connected")
         except (ImportError, Exception) as e:
-            print(f"ℹ Redis not available, using memory cache: {e}")
+            print(f"Redis not available, using memory cache: {e}")
     
     def _generate_key(self, prefix: str, **kwargs) -> str:
         """

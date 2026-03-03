@@ -13,97 +13,95 @@ import pyarrow.parquet as pq
 class DroughtAnalysisService:
     """Servicio para análisis de datos de sequía."""
     
-    # Catálogo de variables hidrometeorológicas
+    # Catálogo de variables hidrometeorológicas (columnas reales del parquet)
     HYDROMETEOROLOGICAL_VARIABLES = {
-        "precipitation": {
+        "precip": {
             "name": "Precipitación",
             "description": "Precipitación acumulada",
             "unit": "mm",
             "category": "meteorological",
-            "column_names": ["precipitation", "precip", "prec", "pp"]
+            "column_names": ["precip", "precipitation", "prec"]
         },
-        "temperature": {
-            "name": "Temperatura",
+        "tmean": {
+            "name": "Temperatura Media",
             "description": "Temperatura media del aire",
             "unit": "°C",
             "category": "meteorological",
-            "column_names": ["temperature", "temp", "t_mean", "tmean"]
+            "column_names": ["tmean", "t_mean", "temperature"]
         },
-        "evapotranspiration": {
-            "name": "Evapotranspiración",
+        "tmin": {
+            "name": "Temperatura Mínima",
+            "description": "Temperatura mínima del aire",
+            "unit": "°C",
+            "category": "meteorological",
+            "column_names": ["tmin", "t_min", "temp_min"]
+        },
+        "tmax": {
+            "name": "Temperatura Máxima",
+            "description": "Temperatura máxima del aire",
+            "unit": "°C",
+            "category": "meteorological",
+            "column_names": ["tmax", "t_max", "temp_max"]
+        },
+        "pet": {
+            "name": "Evapotranspiración Potencial",
             "description": "Evapotranspiración potencial",
             "unit": "mm",
             "category": "meteorological",
-            "column_names": ["evapotranspiration", "et", "etp", "pet"]
+            "column_names": ["pet", "etp", "evapotranspiration"]
         },
-        "streamflow": {
-            "name": "Caudal",
-            "description": "Caudal de corriente",
-            "unit": "m³/s",
+        "balance": {
+            "name": "Balance Hídrico",
+            "description": "Balance entre precipitación y evapotranspiración",
+            "unit": "mm",
             "category": "hydrological",
-            "column_names": ["streamflow", "discharge", "flow", "q"]
+            "column_names": ["balance", "water_balance", "wb"]
         }
     }
     
-    # Catálogo de índices de sequía
+    # Catálogo de índices de sequía (columnas reales del parquet)
     DROUGHT_INDICES = {
         # Índices meteorológicos
-        "spi1": {
-            "name": "SPI-1",
-            "description": "Standardized Precipitation Index - 1 mes",
+        "SPI": {
+            "name": "SPI",
+            "description": "Standardized Precipitation Index",
             "category": "meteorological",
             "unit": "adimensional",
             "supports_prediction": True,
-            "column_names": ["spi1", "spi_1", "spi_1m"]
+            "column_names": ["SPI", "spi"]
         },
-        "spi3": {
-            "name": "SPI-3",
-            "description": "Standardized Precipitation Index - 3 meses",
-            "category": "meteorological",
-            "unit": "adimensional",
-            "supports_prediction": True,
-            "column_names": ["spi3", "spi_3", "spi_3m"]
-        },
-        "spi6": {
-            "name": "SPI-6",
-            "description": "Standardized Precipitation Index - 6 meses",
-            "category": "meteorological",
-            "unit": "adimensional",
-            "supports_prediction": True,
-            "column_names": ["spi6", "spi_6", "spi_6m"]
-        },
-        "spei": {
+        "SPEI": {
             "name": "SPEI",
             "description": "Standardized Precipitation Evapotranspiration Index",
             "category": "meteorological",
             "unit": "adimensional",
             "supports_prediction": True,
-            "column_names": ["spei", "spei_3", "spei_6"]
+            "column_names": ["SPEI", "spei"]
         },
-        "edi": {
-            "name": "EDI",
-            "description": "Effective Drought Index",
+        "RAI": {
+            "name": "RAI",
+            "description": "Rainfall Anomaly Index",
             "category": "meteorological",
             "unit": "adimensional",
             "supports_prediction": False,
-            "column_names": ["edi"]
+            "column_names": ["RAI", "rai"]
         },
-        # Índices hidrológicos
-        "ssi": {
-            "name": "SSI",
-            "description": "Standardized Streamflow Index",
-            "category": "hydrological",
+        "EDDI": {
+            "name": "EDDI",
+            "description": "Evaporative Demand Drought Index",
+            "category": "meteorological",
             "unit": "adimensional",
             "supports_prediction": True,
-            "column_names": ["ssi", "ssi_3", "ssi_6"]
+            "column_names": ["EDDI", "eddi"]
         },
-        "swsi": {
-            "name": "SWSI",
-            "description": "Surface Water Supply Index",
+        # Índice hidrológico
+        "PDSI": {
+            "name": "PDSI",
+            "description": "Palmer Drought Severity Index",
             "category": "hydrological",
             "unit": "adimensional",
             "supports_prediction": False,
-            "column_names": ["swsi"]
+            "column_names": ["PDSI", "pdsi"]
         }
     }
     
