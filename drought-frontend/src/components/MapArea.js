@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { RotateCcw, Download, MapPin } from 'lucide-react';
 import Button from './ui/Button';
 import dynamic from 'next/dynamic';
+import TimeSeriesChart from './TimeSeriesChart';
 
 // Dynamic import for Leaflet to avoid SSR issues
 const LeafletMap = dynamic(
@@ -24,6 +25,7 @@ const LeafletMap = dynamic(
 export default function MapArea({ plotData, onReset }) {
   const [mapKey, setMapKey] = useState(() => Date.now());
   const [selectedStation, setSelectedStation] = useState(null);
+  const [selectedCell, setSelectedCell] = useState(null);
 
   const handleReset = () => {
     // Force complete remount with new timestamp
@@ -36,6 +38,12 @@ export default function MapArea({ plotData, onReset }) {
     setSelectedStation(station);
     console.log('Estación seleccionada:', station);
     // TODO: Trigger data loading for this station
+  };
+
+  const handleGridCellClick = (cell) => {
+    setSelectedCell(cell);
+    console.log('Celda seleccionada del grid:', cell);
+    // TODO: fetch or display data for this grid cell
   };
 
   return (
@@ -78,6 +86,7 @@ export default function MapArea({ plotData, onReset }) {
           <LeafletMap 
             onStationSelect={handleStationSelect}
             selectedStation={selectedStation}
+            onGridCellClick={handleGridCellClick}
           />
         </div>
       </div>
@@ -104,29 +113,52 @@ export default function MapArea({ plotData, onReset }) {
               </Button>
             </div>
             
-            {/* Placeholder for chart - will be populated with real data */}
-            <div className="relative h-80 bg-gradient-to-br from-blue-50/30 via-blue-50/20 to-blue-50/30 dark:from-[#1a1f2e] dark:via-[#141920] dark:to-blue-950/20 rounded-2xl flex items-center justify-center border-2 border-dashed border-gray-300 dark:border-gray-600 shadow-inner overflow-hidden">
-              {/* Animated background */}
-              <div className="absolute inset-0 opacity-10">
-                <div className="absolute top-0 left-0 w-40 h-40 bg-blue-500 rounded-full blur-3xl animate-pulse"></div>
-                <div className="absolute bottom-0 right-0 w-40 h-40 bg-purple-500 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }}></div>
+            {/* Chart area: show time series when available or placeholder */}
+            {plotData.type === 'Serie de Tiempo' && plotData.data ? (
+              <div className="relative h-80">
+                <TimeSeriesChart
+                  data={plotData.data}
+                  xKey="date"
+                  dataKey="value"
+                  height={280}
+                />
               </div>
-              
-              <div className="text-center text-gray-500 dark:text-gray-400 relative z-10">
-                <div className="relative inline-block">
-                  <div className="absolute inset-0 bg-blue-500/20 rounded-full blur-2xl"></div>
-                  <BarChart3 className="relative w-20 h-20 mx-auto mb-4 text-blue-600 dark:text-blue-400" strokeWidth={1.5} />
+            ) : (
+              <div className="relative h-80 bg-gradient-to-br from-blue-50/30 via-blue-50/20 to-blue-50/30 dark:from-[#1a1f2e] dark:via-[#141920] dark:to-blue-950/20 rounded-2xl flex items-center justify-center border-2 border-dashed border-gray-300 dark:border-gray-600 shadow-inner overflow-hidden">
+                {/* Animated background */}
+                <div className="absolute inset-0 opacity-10">
+                  <div className="absolute top-0 left-0 w-40 h-40 bg-blue-500 rounded-full blur-3xl animate-pulse"></div>
+                  <div className="absolute bottom-0 right-0 w-40 h-40 bg-purple-500 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }}></div>
                 </div>
-                <p className="font-bold text-xl text-gray-900 dark:text-gray-100">Gráfico: {plotData.type}</p>
-                <p className="text-sm mt-3 max-w-md mx-auto text-gray-600 dark:text-gray-400">Los datos se visualizarán aquí una vez conectado al backend</p>
-                {selectedStation && (
-                  <div className="inline-flex items-center gap-2 mt-4 px-4 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full text-sm font-medium shadow-md">
-                    <span className="inline-block w-2 h-2 bg-blue-600 dark:bg-blue-400 rounded-full animate-pulse"></span>
-                    Mostrando datos para: {selectedStation.name}
+                
+                <div className="text-center text-gray-500 dark:text-gray-400 relative z-10">
+                  <div className="relative inline-block">
+                    <div className="absolute inset-0 bg-blue-500/20 rounded-full blur-2xl"></div>
+                    <BarChart3 className="relative w-20 h-20 mx-auto mb-4 text-blue-600 dark:text-blue-400" strokeWidth={1.5} />
+                  </div>
+                  <p className="font-bold text-xl text-gray-900 dark:text-gray-100">Gráfico: {plotData.type}</p>
+                  <p className="text-sm mt-3 max-w-md mx-auto text-gray-600 dark:text-gray-400">Los datos se visualizarán aquí una vez conectado al backend</p>
+                  {selectedStation && (
+                    <div className="inline-flex items-center gap-2 mt-4 px-4 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full text-sm font-medium shadow-md">
+                      <span className="inline-block w-2 h-2 bg-blue-600 dark:bg-blue-400 rounded-full animate-pulse"></span>
+                      Mostrando datos para: {selectedStation.name}
+                    </div>
+                  )}
+                {selectedCell && (
+                  <div className="inline-flex items-center gap-2 mt-2 px-4 py-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-sm font-medium shadow-md">
+                    <span className="inline-block w-2 h-2 bg-green-600 dark:bg-green-400 rounded-full animate-pulse"></span>
+                    Celda: {selectedCell.center[0].toFixed(3)}, {selectedCell.center[1].toFixed(3)}
                   </div>
                 )}
+                  {selectedCell && (
+                    <div className="inline-flex items-center gap-2 mt-2 px-4 py-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-sm font-medium shadow-md">
+                      <span className="inline-block w-2 h-2 bg-green-600 dark:bg-green-400 rounded-full animate-pulse"></span>
+                      Celda del grid: {selectedCell.center[0].toFixed(3)}, {selectedCell.center[1].toFixed(3)}
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       )}

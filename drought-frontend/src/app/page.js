@@ -44,11 +44,15 @@ export default function Home() {
     
     showSuccess('Gráfico generado exitosamente', '¡Listo!');
     
+    // use mock data for now
+    const { generateMockSeries } = await import('@/utils/mockData');
+    const mock = generateMockSeries({ years: 10 });
+
     // Set plot data for display
     setPlotData({
       title: `Análisis Histórico: ${analysisState.variable || analysisState.droughtIndex}`,
       type: 'Serie de Tiempo',
-      data: analysisState,
+      data: mock,
     });
   };
 
