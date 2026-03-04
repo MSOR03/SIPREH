@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { getCellStyle } from '../utils/gridLevels';
 
 const BOGOTA_CENTER = [4.7110, -74.0721];
 
@@ -12,32 +13,32 @@ const stations = [
   { id: 5, position: [4.7200, -74.0400], name: 'Estación Oriental', area: 'Zona Oriental', type: 'secundaria' },
 ];
 
-const generateGridCells = () => {
-  const cells = [];
-  const latStart = 4.45;
-  const latEnd = 4.85;
-  const lonStart = -74.25;
-  const lonEnd = -73.95;
-  const cellSize = 0.05;
-
-  for (let lat = latStart; lat < latEnd; lat += cellSize) {
-    for (let lon = lonStart; lon < lonEnd; lon += cellSize) {
-      cells.push({
-        bounds: [[lat, lon], [lat + cellSize, lon + cellSize]],
-        center: [lat + cellSize / 2, lon + cellSize / 2],
-      });
-    }
-  }
-  return cells;
-};
-
-export default function LeafletMap({ onStationSelect, selectedStation, onGridCellClick }) {
+export default function LeafletMap({ 
+  onStationSelect, 
+  selectedStation, 
+  onGridCellClick, 
+  selectedCell,
+  gridCells = [],
+  currentLevel = 'LOW',
+  hoveredCell = null,
+  onCellDoubleClick,
+  onCellMouseOver,
+  onCellMouseOut,
+  spatialDataCells = null, // Datos espaciales 2D para visualización
+  spatialResolution = 0.05, // Resolución de las celdas espaciales
+}) {
   const mapRef = useRef(null);
   const containerRef = useRef(null);
   const markersRef = useRef([]);
   const gridLayerRef = useRef(null);
+  const gridCellsRef = useRef([]);
+  const spatialLayerRef = useRef(null); // Capa para datos 2D
+  const spatialCellsRef = useRef([]);
   const onStationSelectRef = useRef(onStationSelect);
   const onGridCellClickRef = useRef(onGridCellClick);
+  const onCellDoubleClickRef = useRef(onCellDoubleClick);
+  const onCellMouseOverRef = useRef(onCellMouseOver);
+  const onCellMouseOutRef = useRef(onCellMouseOut);
   const initAttemptedRef = useRef(false);
 
   useEffect(() => {
@@ -47,6 +48,18 @@ export default function LeafletMap({ onStationSelect, selectedStation, onGridCel
   useEffect(() => {
     onGridCellClickRef.current = onGridCellClick;
   }, [onGridCellClick]);
+
+  useEffect(() => {
+    onCellDoubleClickRef.current = onCellDoubleClick;
+  }, [onCellDoubleClick]);
+
+  useEffect(() => {
+    onCellMouseOverRef.current = onCellMouseOver;
+  }, [onCellMouseOver]);
+
+  useEffect(() => {
+    onCellMouseOutRef.current = onCellMouseOut;
+  }, [onCellMouseOut]);
 
   useEffect(() => {
     // Use ResizeObserver to wait until the container actually has dimensions
@@ -91,6 +104,17 @@ export default function LeafletMap({ onStationSelect, selectedStation, onGridCel
         L.control.zoom({ position: 'topright' }).addTo(map);
         L.control.scale({ position: 'bottomleft', metric: true, imperial: false, maxWidth: 200 }).addTo(map);
 
+        // Use CartoDB tiles - faster and more reliable than OSM
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+          subdomains: 'abcd',
+          maxZoom: 19,
+          minZoom: 8,
+          updateWhenIdle: true,
+          updateWhenZooming: false,
+          keepBuffer: 2,
+        }).addTo(map);
+
         // North arrow
         const NorthArrow = L.Control.extend({
           options: { position: 'topright' },
@@ -114,10 +138,6 @@ export default function LeafletMap({ onStationSelect, selectedStation, onGridCel
         });
         new NorthArrow().addTo(map);
 
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-        }).addTo(map);
-
         const makeIcon = (isSelected, isPrincipal, L) => {
           const color = isSelected ? '#dc2626' : isPrincipal ? '#2563eb' : '#059669';
           const size = isSelected ? 16 : isPrincipal ? 14 : 12;
@@ -132,23 +152,58 @@ export default function LeafletMap({ onStationSelect, selectedStation, onGridCel
           });
         };
 
-        // Grid
+        // Grid with selection support
         const gridGroup = L.layerGroup();
+        gridCellsRef.current = [];
 
-        generateGridCells().forEach(cell => {
-          const rect = L.rectangle(cell.bounds, {
-            color: '#3b82f6', weight: 1, fillOpacity: 0.05, fillColor: '#3b82f6',
-          }).addTo(gridGroup);
+        const cellStyle = getCellStyle(currentLevel, false, false);
+        
+        gridCells.forEach(cell => {
+          const rect = L.rectangle(cell.bounds, cellStyle).addTo(gridGroup);
 
+          // Single click
           rect.on('click', () => {
             console.log('Grid cell clicked', cell);
             onGridCellClickRef.current?.(cell);
           });
-          rect.on('mouseover', () => rect.setStyle({ fillOpacity: 0.2, weight: 2, color: '#2563eb' }));
-          rect.on('mouseout', () => rect.setStyle({ fillOpacity: 0.05, weight: 1, color: '#3b82f6' }));
+
+          // Double click  
+          rect.on('dblclick', () => {
+            console.log('Grid cell double-clicked', cell);
+            onCellDoubleClickRef.current?.(cell);
+          });
+          
+          // Mouse over
+          rect.on('mouseover', () => {
+            onCellMouseOverRef.current?.(cell);
+            const isSelected = isCellSelected(cell, selectedCell);
+            if (!isSelected) {
+              const hoverStyle = getCellStyle(currentLevel, false, true);
+              rect.setStyle(hoverStyle);
+            }
+          });
+          
+          // Mouse out
+          rect.on('mouseout', () => {
+            onCellMouseOutRef.current?.();
+            const isSelected = isCellSelected(cell, selectedCell);
+            if (!isSelected) {
+              const normalStyle = getCellStyle(currentLevel, false, false);
+              rect.setStyle(normalStyle);
+            }
+          });
+
+          // Store reference with cell data
+          gridCellsRef.current.push({ rect, cell });
         });
+        
         gridGroup.addTo(map);
         gridLayerRef.current = gridGroup;
+        
+        // Crear capa para datos espaciales 2D (inicialmente vacía)
+        const spatialGroup = L.layerGroup();
+        spatialGroup.addTo(map);
+        spatialLayerRef.current = spatialGroup;
 
         // Station markers
         stations.forEach(station => {
@@ -219,6 +274,7 @@ export default function LeafletMap({ onStationSelect, selectedStation, onGridCel
           markersRef.current.forEach(({ marker }) => marker.remove());
           markersRef.current = [];
           gridLayerRef.current?.remove();
+          spatialLayerRef.current?.remove(); // Limpiar capa espacial
           mapRef.current.remove();
           mapRef.current = null;
           initAttemptedRef.current = false;
@@ -253,5 +309,164 @@ export default function LeafletMap({ onStationSelect, selectedStation, onGridCel
     });
   }, [selectedStation]);
 
+  // Update grid cell styles when selection changes
+  useEffect(() => {
+    if (!mapRef.current || gridCellsRef.current.length === 0) return;
+
+    gridCellsRef.current.forEach(({ rect, cell }) => {
+      const isSelected = isCellSelected(cell, selectedCell);
+      const isHovered = isCellSelected(cell, hoveredCell);
+      
+      const style = getCellStyle(currentLevel, isSelected, isHovered);
+      rect.setStyle(style);
+    });
+  }, [selectedCell, hoveredCell, currentLevel]);
+
+  // Regenerate grid when cells change
+  useEffect(() => {
+    if (!mapRef.current || !gridLayerRef.current) return;
+    
+    // Ocultar celdas de navegación si hay datos espaciales 2D mostrados
+    if (spatialDataCells && spatialDataCells.length > 0) {
+      gridLayerRef.current.remove();
+      return;
+    }
+
+    import('leaflet').then(({ default: L }) => {
+      // Asegurar que la capa de grid esté visible
+      if (!mapRef.current.hasLayer(gridLayerRef.current)) {
+        gridLayerRef.current.addTo(mapRef.current);
+      }
+      
+      // Clear existing grid
+      gridCellsRef.current.forEach(({ rect }) => rect.remove());
+      gridCellsRef.current = [];
+
+      // Add new cells
+      gridCells.forEach(cell => {
+        const cellStyle = getCellStyle(currentLevel, false, false);
+        const rect = L.rectangle(cell.bounds, cellStyle).addTo(gridLayerRef.current);
+
+        // Single click
+        rect.on('click', () => {
+          console.log('Grid cell clicked', cell);
+          onGridCellClickRef.current?.(cell);
+        });
+
+        // Double click
+        rect.on('dblclick', () => {
+          console.log('Grid cell double-clicked', cell);
+          onCellDoubleClickRef.current?.(cell);
+        });
+
+        // Mouse over
+        rect.on('mouseover', () => {
+          onCellMouseOverRef.current?.(cell);
+          const isSelected = isCellSelected(cell, selectedCell);
+          if (!isSelected) {
+            const hoverStyle = getCellStyle(currentLevel, false, true);
+            rect.setStyle(hoverStyle);
+          }
+        });
+
+        // Mouse out
+        rect.on('mouseout', () => {
+          onCellMouseOutRef.current?.();
+          const isSelected = isCellSelected(cell, selectedCell);
+          if (!isSelected) {
+            const normalStyle = getCellStyle(currentLevel, false, false);
+            rect.setStyle(normalStyle);
+          }
+        });
+
+        gridCellsRef.current.push({ rect, cell });
+      });
+    });
+  }, [gridCells, currentLevel, spatialDataCells]);
+
+  // Renderizar celdas espaciales 2D cuando cambien
+  useEffect(() => {
+    if (!mapRef.current || !spatialLayerRef.current) return;
+    
+    import('leaflet').then(({ default: L }) => {
+      // Limpiar celdas espaciales existentes
+      spatialCellsRef.current.forEach(({ rect }) => rect.remove());
+      spatialCellsRef.current = [];
+      
+      // Si no hay datos espaciales, salir
+      if (!spatialDataCells || !Array.isArray(spatialDataCells) || spatialDataCells.length === 0) {
+        return;
+      }
+      
+      console.log(`Renderizando ${spatialDataCells.length} celdas espaciales 2D`);
+      
+      // Debug: Ver muestra de datos
+      if (spatialDataCells.length > 0) {
+        console.log('Muestra de celda espacial:', spatialDataCells[0]);
+      }
+      
+      // Renderizar cada celda espacial con su color
+      spatialDataCells.forEach(cell => {
+        // Calcular bounds de la celda basándose en resolución
+        const halfRes = spatialResolution / 2;
+        const bounds = [
+          [cell.lat - halfRes, cell.lon - halfRes],  // Southwest
+          [cell.lat + halfRes, cell.lon + halfRes],  // Northeast
+        ];
+        
+        // Asegurar que value sea número
+        const cellValue = typeof cell.value === 'number' ? cell.value : parseFloat(cell.value);
+        
+        // Estilo basado en el color del backend o un default
+        const cellStyle = {
+          fillColor: cell.color || '#3b82f6', // Usar color del backend o azul default
+          fillOpacity: 0.7,
+          color: '#fff', // Borde blanco
+          weight: 1,
+          opacity: 0.8,
+        };
+        
+        const rect = L.rectangle(bounds, cellStyle).addTo(spatialLayerRef.current);
+        
+        // Tooltip con información de la celda
+        const tooltipContent = `
+          <div style="font-size:12px;">
+            <strong>${cell.cell_id || `[${cell.lat.toFixed(3)}, ${cell.lon.toFixed(3)}]`}</strong><br/>
+            Valor: ${!isNaN(cellValue) && cellValue !== null ? cellValue.toFixed(3) : 'N/A'}<br/>
+            ${cell.category ? `Categoría: ${cell.category}<br/>` : ''}
+            ${cell.severity !== null && cell.severity !== undefined ? `Severidad: ${cell.severity}` : ''}
+          </div>
+        `;
+        
+        rect.bindTooltip(tooltipContent, {
+          sticky: true,
+          direction: 'top',
+        });
+        
+        spatialCellsRef.current.push({ rect, cell });
+      });
+      
+      // Ajustar vista del mapa para mostrar todas las celdas
+      if (spatialDataCells.length > 0) {
+        const lats = spatialDataCells.map(c => c.lat);
+        const lons = spatialDataCells.map(c => c.lon);
+        const bounds = [
+          [Math.min(...lats), Math.min(...lons)],
+          [Math.max(...lats), Math.max(...lons)],
+        ];
+        mapRef.current.fitBounds(bounds, { padding: [50, 50] });
+      }
+    });
+  }, [spatialDataCells, spatialResolution]);
+
   return <div ref={containerRef} className="w-full h-full" />;
+}
+
+// Helper function to check if a cell is selected
+function isCellSelected(cell, selectedCell) {
+  if (!selectedCell) return false;
+  return (
+    cell.center[0] === selectedCell.center[0] &&
+    cell.center[1] === selectedCell.center[1]
+  );
 }

@@ -1,23 +1,27 @@
 'use client';
 
-import { BarChart3, TrendingUp, Download, Info } from 'lucide-react';
+import { BarChart3, TrendingUp, Download, Info, AlertCircle, CheckCircle2 } from 'lucide-react';
 import Select from './ui/Select';
 import Button from './ui/Button';
 import DateRangePicker from './ui/DateRangePicker';
 
+// Variables hidrometeorológicas disponibles en el backend
 const hydrometeorologicalVariables = [
-  { value: 'precipitation', label: 'Precipitación' },
-  { value: 'temperature', label: 'Temperatura' },
-  { value: 'evapotranspiration', label: 'Evapotranspiración (ET)' },
-  { value: 'streamflow', label: 'Caudal' },
+  { value: 'precip', label: 'Precipitación' },
+  { value: 'tmean', label: 'Temperatura Media' },
+  { value: 'tmin', label: 'Temperatura Mínima' },
+  { value: 'tmax', label: 'Temperatura Máxima' },
+  { value: 'pet', label: 'Evapotranspiración Potencial (PET)' },
+  { value: 'balance', label: 'Balance Hídrico' },
 ];
 
+// Índices de sequía disponibles en el backend
 const droughtIndices = [
-  { value: 'spi', label: 'SPI - Índice de Precipitación Estandarizado' },
-  { value: 'spei', label: 'SPEI - Índice de Precipitación-Evapotranspiración Estandarizado' },
-  { value: 'pdsi', label: 'PDSI - Índice de Severidad de Sequía de Palmer' },
-  { value: 'ssi', label: 'SSI - Índice de Caudal Estandarizado' },
-  { value: 'swi', label: 'SWI - Índice de Agua del Suelo' },
+  { value: 'SPI', label: 'SPI - Índice de Precipitación Estandarizado', category: 'meteorological' },
+  { value: 'SPEI', label: 'SPEI - Índice de Precipitación-Evapotranspiración Estandarizado', category: 'meteorological' },
+  { value: 'RAI', label: 'RAI - Índice de Anomalía de Lluvia', category: 'meteorological' },
+  { value: 'EDDI', label: 'EDDI - Índice de Demanda de Evaporación por Sequía', category: 'meteorological' },
+  { value: 'PDSI', label: 'PDSI - Índice de Severidad de Sequía de Palmer', category: 'hydrological' },
 ];
 
 const macroclimaticIndices = [
@@ -40,11 +44,60 @@ export default function Sidebar({
   onAnalysisPlot,
   onPredictionPlot,
   onAnalysisSave,
-  onPredictionSave
+  onPredictionSave,
+  selectedStation,
+  selectedCell
 }) {
+  const hasSelection = selectedStation || selectedCell;
+  const selectionText = selectedStation 
+    ? selectedStation.name 
+    : selectedCell 
+      ? `Celda [${selectedCell.center[0].toFixed(2)}, ${selectedCell.center[1].toFixed(2)}]`
+      : null;
+  
+  // Para 2D, no requiere selección de celda
+  const is2DMode = analysisState.visualizationType === '2D';
+  const needsSelection = !is2DMode; // Solo requiere selección en modo 1D
+  
   return (
     <aside className="w-96 bg-gradient-to-b from-gray-50 to-gray-100/50 dark:from-[#141920] dark:to-[#0f1419] border border-gray-200 dark:border-gray-700 overflow-y-auto shadow-2xl rounded-xl">
       <div className="px-6 py-5 space-y-8">
+        
+        {/* Selection Indicator */}
+        <div className={`p-4 rounded-xl border-2 transition-all duration-300 ${
+          !needsSelection || hasSelection 
+            ? 'bg-green-50 dark:bg-green-900/20 border-green-500 dark:border-green-600' 
+            : 'bg-amber-50 dark:bg-amber-900/20 border-amber-500 dark:border-amber-600 animate-pulse'
+        }`}>
+          <div className="flex items-start gap-3">
+            {!needsSelection || hasSelection ? (
+              <CheckCircle2 className="w-5 h-5 text-green-600 dark:text-green-400 shrink-0 mt-0.5" />
+            ) : (
+              <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+            )}
+            <div className="flex-1">
+              <p className={`text-sm font-semibold ${
+                !needsSelection || hasSelection 
+                  ? 'text-green-800 dark:text-green-300' 
+                  : 'text-amber-800 dark:text-amber-300'
+              }`}>
+                {is2DMode ? 'Modo Espacial (2D)' : hasSelection ? 'Ubicación Seleccionada' : 'Falta Selección'}
+              </p>
+              <p className={`text-xs mt-1 ${
+                !needsSelection || hasSelection 
+                  ? 'text-green-700 dark:text-green-400' 
+                  : 'text-amber-700 dark:text-amber-400'
+              }`}>
+                {is2DMode 
+                  ? 'Visualización 2D: muestra todas las celdas del dominio'
+                  : hasSelection 
+                    ? selectionText
+                    : 'Selecciona una estación o celda del mapa para continuar'
+                }
+              </p>
+            </div>
+          </div>
+        </div>
         
         {/* Historical Analysis Section */}
         <div className="animate-fade-in">
@@ -67,6 +120,90 @@ export default function Sidebar({
           </div>
           
           <div className="space-y-5 p-5 bg-gradient-to-br from-blue-50/50 via-blue-50/20 to-blue-50/30 dark:from-[#1a1f2e] dark:via-[#141920] dark:to-blue-950/10 rounded-2xl border border-blue-200/50 dark:border-blue-900/30 shadow-lg">
+            
+            {/* Visualization Type Selector */}
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
+                Tipo de Visualización
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAnalysisState({ ...analysisState, visualizationType: '1D' })}
+                  className={`px-4 py-2.5 rounded-lg font-medium text-sm transition-all ${
+                    analysisState.visualizationType === '1D'
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-blue-50 dark:hover:bg-gray-700'
+                  }`}
+                >
+                  Serie Temporal (1D)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAnalysisState({ ...analysisState, visualizationType: '2D' })}
+                  className={`px-4 py-2.5 rounded-lg font-medium text-sm transition-all ${
+                    analysisState.visualizationType === '2D'
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-blue-50 dark:hover:bg-gray-700'
+                  }`}
+                >
+                  Mapa Espacial (2D)
+                </button>
+              </div>
+              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                {is2DMode 
+                  ? '📍 Modo 2D: Muestra todas las celdas coloreadas según el valor en una fecha específica' 
+                  : '📈 Modo 1D: Muestra la evolución temporal de una celda seleccionada'}
+              </p>
+            </div>
+            
+            {/* Resolution Selector - Solo visible en modo 2D */}
+            {is2DMode && (
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
+                  Resolución Espacial
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAnalysisState({ ...analysisState, spatialResolution: 0.25 })}
+                    className={`px-3 py-2 rounded-lg font-medium text-xs transition-all ${
+                      analysisState.spatialResolution === 0.25
+                        ? 'bg-purple-600 text-white shadow-md'
+                        : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-purple-50 dark:hover:bg-gray-700'
+                    }`}
+                  >
+                    LOW<br/>0.25°
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAnalysisState({ ...analysisState, spatialResolution: 0.1 })}
+                    className={`px-3 py-2 rounded-lg font-medium text-xs transition-all ${
+                      analysisState.spatialResolution === 0.1
+                        ? 'bg-purple-600 text-white shadow-md'
+                        : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-purple-50 dark:hover:bg-gray-700'
+                    }`}
+                  >
+                    MEDIUM<br/>0.1°
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAnalysisState({ ...analysisState, spatialResolution: 0.05 })}
+                    className={`px-3 py-2 rounded-lg font-medium text-xs transition-all ${
+                      analysisState.spatialResolution === 0.05
+                        ? 'bg-purple-600 text-white shadow-md'
+                        : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-purple-50 dark:hover:bg-gray-700'
+                    }`}
+                  >
+                    HIGH<br/>0.05°
+                  </button>
+                </div>
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  Mayor resolución = más celdas, más detalle
+                </p>
+              </div>
+            )}
+            
             <Select
               label="Variables Hidrometeorológicas"
               options={hydrometeorologicalVariables}
@@ -85,21 +222,35 @@ export default function Sidebar({
             
             <div>
               <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
-                Periodo de Tiempo
+                {is2DMode ? 'Fecha para Mapa 2D' : 'Periodo de Tiempo'}
               </label>
-              <DateRangePicker
-                startDate={analysisState.startDate}
-                endDate={analysisState.endDate}
-                onStartDateChange={(date) => setAnalysisState({ ...analysisState, startDate: date })}
-                onEndDateChange={(date) => setAnalysisState({ ...analysisState, endDate: date })}
-              />
+              {is2DMode ? (
+                <input
+                  type="date"
+                  value={analysisState.startDate}
+                  onChange={(e) => setAnalysisState({ ...analysisState, startDate: e.target.value, endDate: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              ) : (
+                <DateRangePicker
+                  startDate={analysisState.startDate}
+                  endDate={analysisState.endDate}
+                  onStartDateChange={(date) => setAnalysisState({ ...analysisState, startDate: date })}
+                  onEndDateChange={(date) => setAnalysisState({ ...analysisState, endDate: date })}
+                />
+              )}
             </div>
             
             <div className="flex gap-3 pt-3">
               <Button
                 onClick={onAnalysisPlot}
                 variant="primary"
-                className="flex-1 shadow-md hover:shadow-lg"
+                className={`flex-1 shadow-md hover:shadow-lg transition-all ${
+                  ((needsSelection && !hasSelection) || (!analysisState.variable && !analysisState.droughtIndex) || !analysisState.startDate || (needsSelection && !analysisState.endDate)) 
+                    ? 'opacity-50 cursor-not-allowed' 
+                    : ''
+                }`}
+                disabled={(needsSelection && !hasSelection) || (!analysisState.variable && !analysisState.droughtIndex) || !analysisState.startDate || (needsSelection && !analysisState.endDate)}
               >
                 <BarChart3 className="w-4 h-4" />
                 Graficar
@@ -177,7 +328,10 @@ export default function Sidebar({
               <Button
                 onClick={onPredictionPlot}
                 variant="success"
-                className="flex-1 shadow-md hover:shadow-lg"
+                className={`flex-1 shadow-md hover:shadow-lg transition-all ${
+                  !hasSelection ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
+                disabled={!hasSelection}
               >
                 <TrendingUp className="w-4 h-4" />
                 Graficar

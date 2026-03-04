@@ -13,6 +13,7 @@ from app.models.parquet_file import ParquetFile
 from app.services.historical_data_service import HistoricalDataService
 from app.services.cache import cache_service
 from pydantic import BaseModel, Field
+import json
 
 
 # ============================================================================
@@ -64,7 +65,7 @@ class TimeSeriesRequest(BaseModel):
     lat: Optional[float] = Field(None, description="Latitud del punto")
     lon: Optional[float] = Field(None, description="Longitud del punto")
     cell_id: Optional[str] = Field(None, description="ID de celda específica")
-    limit: int = Field(50000, description="Máximo de registros a retornar (default: 50000)")
+    limit: int = Field(70000, description="Máximo de registros a retornar (default: 70000)")
 
 
 class TimeSeriesResponse(BaseModel):
@@ -115,7 +116,7 @@ class FileInfoResponse(BaseModel):
     """Información sobre un archivo parquet."""
     file_id: int
     filename: str
-    resolution: Optional[str] = None
+    resolution: Optional[float] = None
     date_range: dict
     spatial_bounds: dict
     size_mb: Optional[float] = None
@@ -130,6 +131,28 @@ router = APIRouter()
 
 # Inicializar servicios (usando singleton global)
 historical_service = HistoricalDataService(cache_service=cache_service)
+
+
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+def get_file_metadata(file: ParquetFile) -> dict:
+    """
+    Parse file_metadata JSON string to dict.
+    
+    Args:
+        file: ParquetFile instance
+        
+    Returns:
+        Dict with metadata or empty dict if parsing fails
+    """
+    if file.file_metadata:
+        try:
+            return json.loads(file.file_metadata)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+    return {}
 
 
 # ============================================================================
@@ -339,14 +362,15 @@ def list_available_files(
     
     result = []
     for file in files:
+        metadata = get_file_metadata(file)
         file_info = {
             "file_id": file.id,
             "filename": file.filename,
-            "resolution": file.metadata.get("resolution") if file.metadata else None,
+            "resolution": metadata.get("resolution"),
             "date_range": {"start": None, "end": None},
             "spatial_bounds": {},
-            "size_mb": file.size_mb if hasattr(file, 'size_mb') else None,
-            "record_count": file.metadata.get("num_rows") if file.metadata else None
+            "size_mb": file.file_size / (1024 * 1024) if file.file_size else None,
+            "record_count": metadata.get("num_rows")
         }
         
         # Intentar obtener rango de fechas y bounds (si está en cache)
@@ -391,23 +415,71 @@ def get_file_info(
     try:
         date_range = historical_service.get_date_range(file.cloud_url)
         bounds = historical_service.get_spatial_bounds(file.cloud_url)
+        metadata = get_file_metadata(file)
         
         return {
             "file_id": file.id,
             "filename": file.filename,
-            "resolution": file.metadata.get("resolution") if file.metadata else None,
+            "resolution": metadata.get("resolution"),
             "date_range": {
                 "start": date_range[0],
                 "end": date_range[1]
             },
             "spatial_bounds": bounds,
-            "size_mb": file.size_mb if hasattr(file, 'size_mb') else None,
-            "record_count": file.metadata.get("num_rows") if file.metadata else None
+            "size_mb": file.file_size / (1024 * 1024) if file.file_size else None,
+            "record_count": metadata.get("num_rows")
         }
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error obteniendo información del archivo: {str(e)}"
+        )
+
+
+@router.get("/files/{file_id}/cells")
+def get_file_cells(
+    file_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene los cell_ids únicos de un archivo parquet.
+    Útil para navegación jerárquica de grillas.
+    
+    Returns:
+        {
+            "file_id": int,
+            "resolution": float,
+            "total_cells": int,
+            "cells": List[str]  # ["LON_LAT", ...]
+        }
+    """
+    file = db.query(ParquetFile).filter(
+        ParquetFile.id == file_id,
+        ParquetFile.status == "active"
+    ).first()
+    
+    if not file:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Archivo no encontrado"
+        )
+    
+    # Obtener celdas únicas del servicio
+    try:
+        cells = historical_service.get_unique_cells(file.cloud_url)
+        metadata = get_file_metadata(file)
+        
+        return {
+            "file_id": file.id,
+            "filename": file.filename,
+            "resolution": metadata.get("resolution"),
+            "total_cells": len(cells),
+            "cells": cells
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error obteniendo celdas: {str(e)}"
         )
 
 

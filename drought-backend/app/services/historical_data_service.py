@@ -560,7 +560,7 @@ class HistoricalDataService:
         lat: Optional[float] = None,
         lon: Optional[float] = None,
         cell_id: Optional[str] = None,
-        limit: int = 50000
+        limit: int = 70000
     ) -> Tuple[List[Dict[str, Any]], Dict[str, float], Dict[str, Optional[float]]]:
         """
         Consulta serie de tiempo de una variable/índice usando DuckDB.
@@ -577,7 +577,7 @@ class HistoricalDataService:
             lat: Latitud (opcional)
             lon: Longitud (opcional)
             cell_id: ID de celda (opcional)
-            limit: Máximo de registros a retornar (default: 50000)
+            limit: Máximo de registros a retornar (default: 70000)
             
         Returns:
             Tupla (data_points, estadísticas, coordenadas)
@@ -731,11 +731,12 @@ class HistoricalDataService:
                     bins=bins,
                     labels=[c[1] for c in categories_list]
                 ).astype(str)
+                # Usar Int64 nullable para manejar NaN sin errores
                 result_df['severity'] = pd.cut(
                     result_df['value'],
                     bins=bins,
                     labels=[c[2] for c in categories_list]
-                ).astype(int)
+                ).astype('Int64')
             
             # 🎯 OPTIMIZACIÓN: Extraer coordenadas ANTES de convertir a dict
             # Para timeseries, lat/lon son constantes - no repetir en cada punto
@@ -884,7 +885,7 @@ class HistoricalDataService:
             # Convertir valores y crear cell_id vectorizadamente
             result_df['value'] = pd.to_numeric(result_df['value'], errors='coerce')
             result_df['cell_id'] = result_df.apply(
-                lambda row: f"{row['lat']:.4f}_{row['lon']:.4f}", axis=1
+                lambda row: f"{row['lon']:.6f}_{row['lat']:.6f}", axis=1  # LON_LAT format
             )
             
             # Si es índice de sequía, categorizar vectorizadamente
@@ -909,11 +910,59 @@ class HistoricalDataService:
                     bins=bins,
                     labels=[c[1] for c in categories_list]
                 ).astype(str)
+                # Usar Int64 nullable para manejar NaN sin errores
                 result_df['severity'] = pd.cut(
                     result_df['value'],
                     bins=bins,
                     labels=[c[2] for c in categories_list]
-                ).astype(int)
+                ).astype('Int64')
+            else:
+                # Para variables meteorológicas, crear escala de colores basada en percentiles
+                def get_color_for_value(value, vmin, vmax):
+                    """Genera color de azul (bajo) a rojo (alto) basado en valor normalizado."""
+                    if pd.isna(value) or vmin == vmax:
+                        return "#CCCCCC"  # Gris para NaN o sin variación
+                    
+                    # Normalizar valor entre 0 y 1
+                    normalized = (value - vmin) / (vmax - vmin)
+                    normalized = max(0, min(1, normalized))  # Clamp entre 0-1
+                    
+                    # Escala de colores: azul (0) -> cyan (0.25) -> verde (0.5) -> amarillo (0.75) -> rojo (1)
+                    if normalized < 0.25:
+                        # Azul a Cyan
+                        r = 0
+                        g = int(255 * (normalized / 0.25))
+                        b = 255
+                    elif normalized < 0.5:
+                        # Cyan a Verde
+                        r = 0
+                        g = 255
+                        b = int(255 * (1 - (normalized - 0.25) / 0.25))
+                    elif normalized < 0.75:
+                        # Verde a Amarillo
+                        r = int(255 * ((normalized - 0.5) / 0.25))
+                        g = 255
+                        b = 0
+                    else:
+                        # Amarillo a Rojo
+                        r = 255
+                        g = int(255 * (1 - (normalized - 0.75) / 0.25))
+                        b = 0
+                    
+                    return f"#{r:02x}{g:02x}{b:02x}"
+                
+                # Calcular min/max para escala de colores
+                valid_values = result_df['value'].dropna()
+                if len(valid_values) > 0:
+                    vmin = float(valid_values.min())
+                    vmax = float(valid_values.max())
+                    
+                    # Aplicar colores vectorizadamente
+                    result_df['color'] = result_df['value'].apply(
+                        lambda v: get_color_for_value(v, vmin, vmax)
+                    )
+                else:
+                    result_df['color'] = "#CCCCCC"
             
             # Convertir a lista de diccionarios
             grid_cells = result_df.to_dict('records')
@@ -1104,3 +1153,41 @@ class HistoricalDataService:
             
         except Exception as e:
             raise Exception(f"Error obteniendo límites espaciales: {str(e)}")
+
+    def get_unique_cells(self, parquet_url: str) -> List[str]:
+        """
+        Obtiene los cell_ids únicos de un archivo parquet.
+        Útil para navegación jerárquica de grillas (0.25° → 0.1° → 0.05°).
+        
+        Args:
+            parquet_url: URL del archivo parquet
+            
+        Returns:
+            Lista de cell_ids únicos ordenados (formato "LON_LAT")
+        """
+        cache_key = f"unique_cells:{hashlib.md5(parquet_url.encode()).hexdigest()}"
+        
+        cached = self.cache.get(cache_key)
+        if cached:
+            return cached
+        
+        try:
+            conn = self._get_connection()
+            url = self._get_parquet_url(parquet_url)
+            
+            query = f"""
+            SELECT DISTINCT cell_id
+            FROM read_parquet('{url}')
+            ORDER BY cell_id
+            """
+            
+            result = conn.execute(query).fetchall()
+            cells = [row[0] for row in result]
+            
+            # Cache por 24 horas (las celdas son fijas, no cambian)
+            self.cache.set(cache_key, cells, expire=86400)
+            
+            return cells
+            
+        except Exception as e:
+            raise Exception(f"Error obteniendo celdas únicas: {str(e)}")
