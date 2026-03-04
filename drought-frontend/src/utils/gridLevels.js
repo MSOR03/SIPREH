@@ -243,19 +243,17 @@ export function formatLevelLabel(level) {
 
 /**
  * Determina la acción al hacer click en una celda
- * - Si es un click y hay siguiente nivel: drill-down
- * - Si es doble-click o shift-click: seleccionar para graficar
+ * - Single-click: seleccionar para graficar
+ * - Double-click: drill-down si hay siguiente nivel, sino seleccionar
  */
 export function determineClickAction(level, clickType = 'single') {
-  if (clickType === 'double' || clickType === 'shift') {
-    return 'SELECT'; // Seleccionar para graficar
-  }
-  
-  if (hasNextLevel(level)) {
+  // Para doble-click: intentar drill down si hay siguiente nivel
+  if (clickType === 'double' && hasNextLevel(level)) {
     return 'DRILL_DOWN'; // Navegar al siguiente nivel
   }
   
-  return 'SELECT'; // Último nivel, solo se puede seleccionar
+  // Para cualquier otro caso: seleccionar para graficar
+  return 'SELECT';
 }
 
 /**

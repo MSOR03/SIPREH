@@ -287,7 +287,7 @@ export const historicalApi = {
       lat = null,
       lon = null,
       cellId = null,
-      limit = 50000,
+      limit = 70000,
     } = params;
 
     return fetchApi('/historical/timeseries', {

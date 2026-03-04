@@ -560,7 +560,7 @@ class HistoricalDataService:
         lat: Optional[float] = None,
         lon: Optional[float] = None,
         cell_id: Optional[str] = None,
-        limit: int = 50000
+        limit: int = 70000
     ) -> Tuple[List[Dict[str, Any]], Dict[str, float], Dict[str, Optional[float]]]:
         """
         Consulta serie de tiempo de una variable/índice usando DuckDB.
@@ -577,7 +577,7 @@ class HistoricalDataService:
             lat: Latitud (opcional)
             lon: Longitud (opcional)
             cell_id: ID de celda (opcional)
-            limit: Máximo de registros a retornar (default: 50000)
+            limit: Máximo de registros a retornar (default: 70000)
             
         Returns:
             Tupla (data_points, estadísticas, coordenadas)
@@ -731,11 +731,12 @@ class HistoricalDataService:
                     bins=bins,
                     labels=[c[1] for c in categories_list]
                 ).astype(str)
+                # Usar Int64 nullable para manejar NaN sin errores
                 result_df['severity'] = pd.cut(
                     result_df['value'],
                     bins=bins,
                     labels=[c[2] for c in categories_list]
-                ).astype(int)
+                ).astype('Int64')
             
             # 🎯 OPTIMIZACIÓN: Extraer coordenadas ANTES de convertir a dict
             # Para timeseries, lat/lon son constantes - no repetir en cada punto
@@ -909,11 +910,12 @@ class HistoricalDataService:
                     bins=bins,
                     labels=[c[1] for c in categories_list]
                 ).astype(str)
+                # Usar Int64 nullable para manejar NaN sin errores
                 result_df['severity'] = pd.cut(
                     result_df['value'],
                     bins=bins,
                     labels=[c[2] for c in categories_list]
-                ).astype(int)
+                ).astype('Int64')
             
             # Convertir a lista de diccionarios
             grid_cells = result_df.to_dict('records')

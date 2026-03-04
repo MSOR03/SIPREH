@@ -65,7 +65,7 @@ class TimeSeriesRequest(BaseModel):
     lat: Optional[float] = Field(None, description="Latitud del punto")
     lon: Optional[float] = Field(None, description="Longitud del punto")
     cell_id: Optional[str] = Field(None, description="ID de celda específica")
-    limit: int = Field(50000, description="Máximo de registros a retornar (default: 50000)")
+    limit: int = Field(70000, description="Máximo de registros a retornar (default: 70000)")
 
 
 class TimeSeriesResponse(BaseModel):
