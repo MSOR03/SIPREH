@@ -31,17 +31,22 @@ const generateGridCells = () => {
   return cells;
 };
 
-export default function LeafletMap({ onStationSelect, selectedStation }) {
+export default function LeafletMap({ onStationSelect, selectedStation, onGridCellClick }) {
   const mapRef = useRef(null);
   const containerRef = useRef(null);
   const markersRef = useRef([]);
   const gridLayerRef = useRef(null);
   const onStationSelectRef = useRef(onStationSelect);
+  const onGridCellClickRef = useRef(onGridCellClick);
   const initAttemptedRef = useRef(false);
 
   useEffect(() => {
     onStationSelectRef.current = onStationSelect;
   }, [onStationSelect]);
+
+  useEffect(() => {
+    onGridCellClickRef.current = onGridCellClick;
+  }, [onGridCellClick]);
 
   useEffect(() => {
     // Use ResizeObserver to wait until the container actually has dimensions
@@ -129,10 +134,18 @@ export default function LeafletMap({ onStationSelect, selectedStation }) {
 
         // Grid
         const gridGroup = L.layerGroup();
+
         generateGridCells().forEach(cell => {
-          L.rectangle(cell.bounds, {
+          const rect = L.rectangle(cell.bounds, {
             color: '#3b82f6', weight: 1, fillOpacity: 0.05, fillColor: '#3b82f6',
           }).addTo(gridGroup);
+
+          rect.on('click', () => {
+            console.log('Grid cell clicked', cell);
+            onGridCellClickRef.current?.(cell);
+          });
+          rect.on('mouseover', () => rect.setStyle({ fillOpacity: 0.2, weight: 2, color: '#2563eb' }));
+          rect.on('mouseout', () => rect.setStyle({ fillOpacity: 0.05, weight: 1, color: '#3b82f6' }));
         });
         gridGroup.addTo(map);
         gridLayerRef.current = gridGroup;
