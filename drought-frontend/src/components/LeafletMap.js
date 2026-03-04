@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { getCellStyle } from '../utils/gridLevels';
 
 const BOGOTA_CENTER = [4.7110, -74.0721];
 
@@ -12,32 +13,28 @@ const stations = [
   { id: 5, position: [4.7200, -74.0400], name: 'Estación Oriental', area: 'Zona Oriental', type: 'secundaria' },
 ];
 
-const generateGridCells = () => {
-  const cells = [];
-  const latStart = 4.45;
-  const latEnd = 4.85;
-  const lonStart = -74.25;
-  const lonEnd = -73.95;
-  const cellSize = 0.05;
-
-  for (let lat = latStart; lat < latEnd; lat += cellSize) {
-    for (let lon = lonStart; lon < lonEnd; lon += cellSize) {
-      cells.push({
-        bounds: [[lat, lon], [lat + cellSize, lon + cellSize]],
-        center: [lat + cellSize / 2, lon + cellSize / 2],
-      });
-    }
-  }
-  return cells;
-};
-
-export default function LeafletMap({ onStationSelect, selectedStation, onGridCellClick }) {
+export default function LeafletMap({ 
+  onStationSelect, 
+  selectedStation, 
+  onGridCellClick, 
+  selectedCell,
+  gridCells = [],
+  currentLevel = 'LOW',
+  hoveredCell = null,
+  onCellDoubleClick,
+  onCellMouseOver,
+  onCellMouseOut,
+}) {
   const mapRef = useRef(null);
   const containerRef = useRef(null);
   const markersRef = useRef([]);
   const gridLayerRef = useRef(null);
+  const gridCellsRef = useRef([]);
   const onStationSelectRef = useRef(onStationSelect);
   const onGridCellClickRef = useRef(onGridCellClick);
+  const onCellDoubleClickRef = useRef(onCellDoubleClick);
+  const onCellMouseOverRef = useRef(onCellMouseOver);
+  const onCellMouseOutRef = useRef(onCellMouseOut);
   const initAttemptedRef = useRef(false);
 
   useEffect(() => {
@@ -47,6 +44,18 @@ export default function LeafletMap({ onStationSelect, selectedStation, onGridCel
   useEffect(() => {
     onGridCellClickRef.current = onGridCellClick;
   }, [onGridCellClick]);
+
+  useEffect(() => {
+    onCellDoubleClickRef.current = onCellDoubleClick;
+  }, [onCellDoubleClick]);
+
+  useEffect(() => {
+    onCellMouseOverRef.current = onCellMouseOver;
+  }, [onCellMouseOver]);
+
+  useEffect(() => {
+    onCellMouseOutRef.current = onCellMouseOut;
+  }, [onCellMouseOut]);
 
   useEffect(() => {
     // Use ResizeObserver to wait until the container actually has dimensions
@@ -91,6 +100,17 @@ export default function LeafletMap({ onStationSelect, selectedStation, onGridCel
         L.control.zoom({ position: 'topright' }).addTo(map);
         L.control.scale({ position: 'bottomleft', metric: true, imperial: false, maxWidth: 200 }).addTo(map);
 
+        // Use CartoDB tiles - faster and more reliable than OSM
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+          subdomains: 'abcd',
+          maxZoom: 19,
+          minZoom: 8,
+          updateWhenIdle: true,
+          updateWhenZooming: false,
+          keepBuffer: 2,
+        }).addTo(map);
+
         // North arrow
         const NorthArrow = L.Control.extend({
           options: { position: 'topright' },
@@ -114,10 +134,6 @@ export default function LeafletMap({ onStationSelect, selectedStation, onGridCel
         });
         new NorthArrow().addTo(map);
 
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-        }).addTo(map);
-
         const makeIcon = (isSelected, isPrincipal, L) => {
           const color = isSelected ? '#dc2626' : isPrincipal ? '#2563eb' : '#059669';
           const size = isSelected ? 16 : isPrincipal ? 14 : 12;
@@ -132,21 +148,51 @@ export default function LeafletMap({ onStationSelect, selectedStation, onGridCel
           });
         };
 
-        // Grid
+        // Grid with selection support
         const gridGroup = L.layerGroup();
+        gridCellsRef.current = [];
 
-        generateGridCells().forEach(cell => {
-          const rect = L.rectangle(cell.bounds, {
-            color: '#3b82f6', weight: 1, fillOpacity: 0.05, fillColor: '#3b82f6',
-          }).addTo(gridGroup);
+        const cellStyle = getCellStyle(currentLevel, false, false);
+        
+        gridCells.forEach(cell => {
+          const rect = L.rectangle(cell.bounds, cellStyle).addTo(gridGroup);
 
+          // Single click
           rect.on('click', () => {
             console.log('Grid cell clicked', cell);
             onGridCellClickRef.current?.(cell);
           });
-          rect.on('mouseover', () => rect.setStyle({ fillOpacity: 0.2, weight: 2, color: '#2563eb' }));
-          rect.on('mouseout', () => rect.setStyle({ fillOpacity: 0.05, weight: 1, color: '#3b82f6' }));
+
+          // Double click  
+          rect.on('dblclick', () => {
+            console.log('Grid cell double-clicked', cell);
+            onCellDoubleClickRef.current?.(cell);
+          });
+          
+          // Mouse over
+          rect.on('mouseover', () => {
+            onCellMouseOverRef.current?.(cell);
+            const isSelected = isCellSelected(cell, selectedCell);
+            if (!isSelected) {
+              const hoverStyle = getCellStyle(currentLevel, false, true);
+              rect.setStyle(hoverStyle);
+            }
+          });
+          
+          // Mouse out
+          rect.on('mouseout', () => {
+            onCellMouseOutRef.current?.();
+            const isSelected = isCellSelected(cell, selectedCell);
+            if (!isSelected) {
+              const normalStyle = getCellStyle(currentLevel, false, false);
+              rect.setStyle(normalStyle);
+            }
+          });
+
+          // Store reference with cell data
+          gridCellsRef.current.push({ rect, cell });
         });
+        
         gridGroup.addTo(map);
         gridLayerRef.current = gridGroup;
 
@@ -253,5 +299,78 @@ export default function LeafletMap({ onStationSelect, selectedStation, onGridCel
     });
   }, [selectedStation]);
 
+  // Update grid cell styles when selection changes
+  useEffect(() => {
+    if (!mapRef.current || gridCellsRef.current.length === 0) return;
+
+    gridCellsRef.current.forEach(({ rect, cell }) => {
+      const isSelected = isCellSelected(cell, selectedCell);
+      const isHovered = isCellSelected(cell, hoveredCell);
+      
+      const style = getCellStyle(currentLevel, isSelected, isHovered);
+      rect.setStyle(style);
+    });
+  }, [selectedCell, hoveredCell, currentLevel]);
+
+  // Regenerate grid when cells change
+  useEffect(() => {
+    if (!mapRef.current || !gridLayerRef.current) return;
+
+    import('leaflet').then(({ default: L }) => {
+      // Clear existing grid
+      gridCellsRef.current.forEach(({ rect }) => rect.remove());
+      gridCellsRef.current = [];
+
+      // Add new cells
+      gridCells.forEach(cell => {
+        const cellStyle = getCellStyle(currentLevel, false, false);
+        const rect = L.rectangle(cell.bounds, cellStyle).addTo(gridLayerRef.current);
+
+        // Single click
+        rect.on('click', () => {
+          console.log('Grid cell clicked', cell);
+          onGridCellClickRef.current?.(cell);
+        });
+
+        // Double click
+        rect.on('dblclick', () => {
+          console.log('Grid cell double-clicked', cell);
+          onCellDoubleClickRef.current?.(cell);
+        });
+
+        // Mouse over
+        rect.on('mouseover', () => {
+          onCellMouseOverRef.current?.(cell);
+          const isSelected = isCellSelected(cell, selectedCell);
+          if (!isSelected) {
+            const hoverStyle = getCellStyle(currentLevel, false, true);
+            rect.setStyle(hoverStyle);
+          }
+        });
+
+        // Mouse out
+        rect.on('mouseout', () => {
+          onCellMouseOutRef.current?.();
+          const isSelected = isCellSelected(cell, selectedCell);
+          if (!isSelected) {
+            const normalStyle = getCellStyle(currentLevel, false, false);
+            rect.setStyle(normalStyle);
+          }
+        });
+
+        gridCellsRef.current.push({ rect, cell });
+      });
+    });
+  }, [gridCells, currentLevel]);
+
   return <div ref={containerRef} className="w-full h-full" />;
+}
+
+// Helper function to check if a cell is selected
+function isCellSelected(cell, selectedCell) {
+  if (!selectedCell) return false;
+  return (
+    cell.center[0] === selectedCell.center[0] &&
+    cell.center[1] === selectedCell.center[1]
+  );
 }

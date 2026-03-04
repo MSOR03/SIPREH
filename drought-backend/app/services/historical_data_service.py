@@ -1104,3 +1104,41 @@ class HistoricalDataService:
             
         except Exception as e:
             raise Exception(f"Error obteniendo límites espaciales: {str(e)}")
+
+    def get_unique_cells(self, parquet_url: str) -> List[str]:
+        """
+        Obtiene los cell_ids únicos de un archivo parquet.
+        Útil para navegación jerárquica de grillas (0.25° → 0.1° → 0.05°).
+        
+        Args:
+            parquet_url: URL del archivo parquet
+            
+        Returns:
+            Lista de cell_ids únicos ordenados (formato "LON_LAT")
+        """
+        cache_key = f"unique_cells:{hashlib.md5(parquet_url.encode()).hexdigest()}"
+        
+        cached = self.cache.get(cache_key)
+        if cached:
+            return cached
+        
+        try:
+            conn = self._get_connection()
+            url = self._get_parquet_url(parquet_url)
+            
+            query = f"""
+            SELECT DISTINCT cell_id
+            FROM read_parquet('{url}')
+            ORDER BY cell_id
+            """
+            
+            result = conn.execute(query).fetchall()
+            cells = [row[0] for row in result]
+            
+            # Cache por 24 horas (las celdas son fijas, no cambian)
+            self.cache.set(cache_key, cells, expire=86400)
+            
+            return cells
+            
+        except Exception as e:
+            raise Exception(f"Error obteniendo celdas únicas: {str(e)}")

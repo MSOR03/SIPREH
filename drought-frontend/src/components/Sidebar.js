@@ -1,23 +1,27 @@
 'use client';
 
-import { BarChart3, TrendingUp, Download, Info } from 'lucide-react';
+import { BarChart3, TrendingUp, Download, Info, AlertCircle, CheckCircle2 } from 'lucide-react';
 import Select from './ui/Select';
 import Button from './ui/Button';
 import DateRangePicker from './ui/DateRangePicker';
 
+// Variables hidrometeorológicas disponibles en el backend
 const hydrometeorologicalVariables = [
-  { value: 'precipitation', label: 'Precipitación' },
-  { value: 'temperature', label: 'Temperatura' },
-  { value: 'evapotranspiration', label: 'Evapotranspiración (ET)' },
-  { value: 'streamflow', label: 'Caudal' },
+  { value: 'precip', label: 'Precipitación' },
+  { value: 'tmean', label: 'Temperatura Media' },
+  { value: 'tmin', label: 'Temperatura Mínima' },
+  { value: 'tmax', label: 'Temperatura Máxima' },
+  { value: 'pet', label: 'Evapotranspiración Potencial (PET)' },
+  { value: 'balance', label: 'Balance Hídrico' },
 ];
 
+// Índices de sequía disponibles en el backend
 const droughtIndices = [
-  { value: 'spi', label: 'SPI - Índice de Precipitación Estandarizado' },
-  { value: 'spei', label: 'SPEI - Índice de Precipitación-Evapotranspiración Estandarizado' },
-  { value: 'pdsi', label: 'PDSI - Índice de Severidad de Sequía de Palmer' },
-  { value: 'ssi', label: 'SSI - Índice de Caudal Estandarizado' },
-  { value: 'swi', label: 'SWI - Índice de Agua del Suelo' },
+  { value: 'SPI', label: 'SPI - Índice de Precipitación Estandarizado', category: 'meteorological' },
+  { value: 'SPEI', label: 'SPEI - Índice de Precipitación-Evapotranspiración Estandarizado', category: 'meteorological' },
+  { value: 'RAI', label: 'RAI - Índice de Anomalía de Lluvia', category: 'meteorological' },
+  { value: 'EDDI', label: 'EDDI - Índice de Demanda de Evaporación por Sequía', category: 'meteorological' },
+  { value: 'PDSI', label: 'PDSI - Índice de Severidad de Sequía de Palmer', category: 'hydrological' },
 ];
 
 const macroclimaticIndices = [
@@ -40,11 +44,54 @@ export default function Sidebar({
   onAnalysisPlot,
   onPredictionPlot,
   onAnalysisSave,
-  onPredictionSave
+  onPredictionSave,
+  selectedStation,
+  selectedCell
 }) {
+  const hasSelection = selectedStation || selectedCell;
+  const selectionText = selectedStation 
+    ? selectedStation.name 
+    : selectedCell 
+      ? `Celda [${selectedCell.center[0].toFixed(2)}, ${selectedCell.center[1].toFixed(2)}]`
+      : null;
+  
   return (
     <aside className="w-96 bg-gradient-to-b from-gray-50 to-gray-100/50 dark:from-[#141920] dark:to-[#0f1419] border border-gray-200 dark:border-gray-700 overflow-y-auto shadow-2xl rounded-xl">
       <div className="px-6 py-5 space-y-8">
+        
+        {/* Selection Indicator */}
+        <div className={`p-4 rounded-xl border-2 transition-all duration-300 ${
+          hasSelection 
+            ? 'bg-green-50 dark:bg-green-900/20 border-green-500 dark:border-green-600' 
+            : 'bg-amber-50 dark:bg-amber-900/20 border-amber-500 dark:border-amber-600 animate-pulse'
+        }`}>
+          <div className="flex items-start gap-3">
+            {hasSelection ? (
+              <CheckCircle2 className="w-5 h-5 text-green-600 dark:text-green-400 shrink-0 mt-0.5" />
+            ) : (
+              <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+            )}
+            <div className="flex-1">
+              <p className={`text-sm font-semibold ${
+                hasSelection 
+                  ? 'text-green-800 dark:text-green-300' 
+                  : 'text-amber-800 dark:text-amber-300'
+              }`}>
+                {hasSelection ? 'Ubicación Seleccionada' : 'Falta Selección'}
+              </p>
+              <p className={`text-xs mt-1 ${
+                hasSelection 
+                  ? 'text-green-700 dark:text-green-400' 
+                  : 'text-amber-700 dark:text-amber-400'
+              }`}>
+                {hasSelection 
+                  ? selectionText
+                  : 'Selecciona una estación o celda del mapa para continuar'
+                }
+              </p>
+            </div>
+          </div>
+        </div>
         
         {/* Historical Analysis Section */}
         <div className="animate-fade-in">
@@ -99,7 +146,12 @@ export default function Sidebar({
               <Button
                 onClick={onAnalysisPlot}
                 variant="primary"
-                className="flex-1 shadow-md hover:shadow-lg"
+                className={`flex-1 shadow-md hover:shadow-lg transition-all ${
+                  (!hasSelection || (!analysisState.variable && !analysisState.droughtIndex) || !analysisState.startDate || !analysisState.endDate) 
+                    ? 'opacity-50 cursor-not-allowed' 
+                    : ''
+                }`}
+                disabled={!hasSelection || (!analysisState.variable && !analysisState.droughtIndex) || !analysisState.startDate || !analysisState.endDate}
               >
                 <BarChart3 className="w-4 h-4" />
                 Graficar
@@ -177,7 +229,10 @@ export default function Sidebar({
               <Button
                 onClick={onPredictionPlot}
                 variant="success"
-                className="flex-1 shadow-md hover:shadow-lg"
+                className={`flex-1 shadow-md hover:shadow-lg transition-all ${
+                  !hasSelection ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
+                disabled={!hasSelection}
               >
                 <TrendingUp className="w-4 h-4" />
                 Graficar
