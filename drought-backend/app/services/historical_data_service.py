@@ -885,7 +885,7 @@ class HistoricalDataService:
             # Convertir valores y crear cell_id vectorizadamente
             result_df['value'] = pd.to_numeric(result_df['value'], errors='coerce')
             result_df['cell_id'] = result_df.apply(
-                lambda row: f"{row['lat']:.4f}_{row['lon']:.4f}", axis=1
+                lambda row: f"{row['lon']:.6f}_{row['lat']:.6f}", axis=1  # LON_LAT format
             )
             
             # Si es índice de sequía, categorizar vectorizadamente
@@ -916,6 +916,53 @@ class HistoricalDataService:
                     bins=bins,
                     labels=[c[2] for c in categories_list]
                 ).astype('Int64')
+            else:
+                # Para variables meteorológicas, crear escala de colores basada en percentiles
+                def get_color_for_value(value, vmin, vmax):
+                    """Genera color de azul (bajo) a rojo (alto) basado en valor normalizado."""
+                    if pd.isna(value) or vmin == vmax:
+                        return "#CCCCCC"  # Gris para NaN o sin variación
+                    
+                    # Normalizar valor entre 0 y 1
+                    normalized = (value - vmin) / (vmax - vmin)
+                    normalized = max(0, min(1, normalized))  # Clamp entre 0-1
+                    
+                    # Escala de colores: azul (0) -> cyan (0.25) -> verde (0.5) -> amarillo (0.75) -> rojo (1)
+                    if normalized < 0.25:
+                        # Azul a Cyan
+                        r = 0
+                        g = int(255 * (normalized / 0.25))
+                        b = 255
+                    elif normalized < 0.5:
+                        # Cyan a Verde
+                        r = 0
+                        g = 255
+                        b = int(255 * (1 - (normalized - 0.25) / 0.25))
+                    elif normalized < 0.75:
+                        # Verde a Amarillo
+                        r = int(255 * ((normalized - 0.5) / 0.25))
+                        g = 255
+                        b = 0
+                    else:
+                        # Amarillo a Rojo
+                        r = 255
+                        g = int(255 * (1 - (normalized - 0.75) / 0.25))
+                        b = 0
+                    
+                    return f"#{r:02x}{g:02x}{b:02x}"
+                
+                # Calcular min/max para escala de colores
+                valid_values = result_df['value'].dropna()
+                if len(valid_values) > 0:
+                    vmin = float(valid_values.min())
+                    vmax = float(valid_values.max())
+                    
+                    # Aplicar colores vectorizadamente
+                    result_df['color'] = result_df['value'].apply(
+                        lambda v: get_color_for_value(v, vmin, vmax)
+                    )
+                else:
+                    result_df['color'] = "#CCCCCC"
             
             # Convertir a lista de diccionarios
             grid_cells = result_df.to_dict('records')

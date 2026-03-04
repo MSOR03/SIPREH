@@ -251,6 +251,8 @@ export default function MapArea({
             gridCells={gridNav.gridCells}
             currentLevel={gridNav.currentLevel}
             hoveredCell={gridNav.hoveredCell}
+            spatialDataCells={plotData?.type === '2D' ? plotData.gridCells : null}
+            spatialResolution={plotData?.type === '2D' ? (plotData.resolution || 0.05) : 0.05}
           />
         </div>
       </div>
@@ -277,8 +279,91 @@ export default function MapArea({
               </Button>
             </div>
             
-            {/* Chart area: show time series when available or placeholder */}
-            {(plotData.type === 'Serie de Tiempo' || plotData.type === '1D') && plotData.data ? (
+            {/* Chart area: show time series when available or 2D spatial info */}
+            {plotData.type === '2D' && plotData.gridCells ? (
+              <div className="relative">
+                {plotData.subtitle && (
+                  <div className="mb-4 px-4 py-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                    <p className="text-sm text-blue-700 dark:text-blue-300 font-medium">
+                      {plotData.subtitle}
+                    </p>
+                  </div>
+                )}
+                
+                {/* Statistics summary */}
+                {plotData.statistics && (
+                  <div className="mb-4 grid grid-cols-5 gap-3">
+                    <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Media</p>
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.mean?.toFixed(2) || 'N/A'}</p>
+                    </div>
+                    <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Mínimo</p>
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.min?.toFixed(2) || 'N/A'}</p>
+                    </div>
+                    <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Máximo</p>
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.max?.toFixed(2) || 'N/A'}</p>
+                    </div>
+                    <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Celdas</p>
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.gridCells.length}</p>
+                    </div>
+                    <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Datos válidos</p>
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.count || 'N/A'}</p>
+                    </div>
+                  </div>
+                )}
+                
+                <div className="bg-white dark:bg-gray-900/50 rounded-xl p-6 shadow-inner">
+                  <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
+                    Visualización Espacial 2D
+                  </h4>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 mb-4">
+                    Las celdas en el mapa muestran los valores de <strong>{plotData.variable}</strong> para la fecha seleccionada.
+                    Los colores representan {plotData.variable.includes('SPI') || plotData.variable.includes('SPEI') || plotData.variable.includes('PDSI') ? 'las categorías de sequía' : 'los valores de la variable'}.
+                  </p>
+                  
+                  {/* Leyenda de colores para índices de sequía */}
+                  {(plotData.variable === 'SPI' || plotData.variable === 'SPEI' || plotData.variable === 'PDSI') && (
+                    <div className="mt-4">
+                      <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">Leyenda:</p>
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div className="flex items-center gap-2">
+                          <div className="w-4 h-4 rounded" style={{backgroundColor: '#000080'}}></div>
+                          <span className="text-gray-700 dark:text-gray-300">Extremadamente Húmedo</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-4 h-4 rounded" style={{backgroundColor: '#0000FF'}}></div>
+                          <span className="text-gray-700 dark:text-gray-300">Muy Húmedo</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-4 h-4 rounded" style={{backgroundColor: '#00FFFF'}}></div>
+                          <span className="text-gray-700 dark:text-gray-300">Moderadamente Húmedo</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-4 h-4 rounded" style={{backgroundColor: '#00FF00'}}></div>
+                          <span className="text-gray-700 dark:text-gray-300">Normal</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-4 h-4 rounded" style={{backgroundColor: '#FFFF00'}}></div>
+                          <span className="text-gray-700 dark:text-gray-300">Moderadamente Seco</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-4 h-4 rounded" style={{backgroundColor: '#FFA500'}}></div>
+                          <span className="text-gray-700 dark:text-gray-300">Severamente Seco</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-4 h-4 rounded" style={{backgroundColor: '#FF0000'}}></div>
+                          <span className="text-gray-700 dark:text-gray-300">Extremadamente Seco</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (plotData.type === 'Serie de Tiempo' || plotData.type === '1D') && plotData.data ? (
               <div className="relative">
                 {plotData.subtitle && (
                   <div className="mb-4 px-4 py-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">

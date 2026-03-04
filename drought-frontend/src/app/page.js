@@ -16,6 +16,8 @@ export default function Home() {
   
   // Historical Analysis State
   const [analysisState, setAnalysisState] = useState({
+    visualizationType: '1D', // '1D' = Serie Temporal, '2D' = Mapa Espacial
+    spatialResolution: 0.05, // Resolución para modo 2D (0.25, 0.1, 0.05)
     variable: '',
     droughtIndex: '',
     startDate: '',
@@ -34,8 +36,10 @@ export default function Home() {
 
   // Handle Analysis Plot
   const handleAnalysisPlot = async () => {
-    // Validate selection first
-    if (!selectedStation && !selectedCell) {
+    const is2DMode = analysisState.visualizationType === '2D';
+    
+    // Validaciones: para 1D requiere celda/estación, para 2D no
+    if (!is2DMode && !selectedStation && !selectedCell) {
       showError(
         'Debes seleccionar una estación o celda del mapa antes de graficar',
         'Selección Requerida'
@@ -48,13 +52,18 @@ export default function Home() {
       return;
     }
     
-    if (!analysisState.startDate || !analysisState.endDate) {
+    if (!analysisState.startDate) {
+      showWarning('Por favor selecciona la fecha', 'Fecha requerida');
+      return;
+    }
+    
+    if (!is2DMode && !analysisState.endDate) {
       showWarning('Por favor selecciona el rango de fechas completo', 'Fechas requeridas');
       return;
     }
 
     try {
-      showInfo('Consultando datos históricos...', 'Cargando');
+      showInfo(is2DMode ? 'Consultando datos espaciales...' : 'Consultando datos históricos...', 'Cargando');
 
       // Importar API
       const { historicalApi } = await import('@/services/api');
@@ -65,50 +74,93 @@ export default function Home() {
       // Obtener archivos disponibles
       const files = await historicalApi.getFiles();
       
-      let fileId;
-      
-      if (selectedCell) {
-        // Si hay celda seleccionada, buscar archivo con la resolución de la celda
-        const resolution = selectedCell.resolution || 0.1;
-        const file = files.find(f => Math.abs((f.resolution || 0.1) - resolution) < 0.01);
+      // ===== MODO 2D: VISUALIZACIÓN ESPACIAL =====
+      if (is2DMode) {
+        // Usar la resolución seleccionada por el usuario
+        const targetResolution = analysisState.spatialResolution || 0.05;
+        const file = files.find(f => Math.abs((f.resolution || 0.1) - targetResolution) < 0.01);
         
         if (!file) {
-          showError(`No se encontró archivo para resolución ${resolution}°`, 'Error');
+          showError(`No se encontró archivo para resolución ${targetResolution}°`, 'Error');
           return;
         }
         
-        fileId = file.file_id;
+        const fileResolution = file.resolution || 0.1;
         
-        // Llamar API con cell_id para serie de tiempo 1D
-        const response = await historicalApi.getTimeSeries({
-          fileId: fileId,
+        // Llamar API para datos espaciales
+        const response = await historicalApi.getSpatialData({
+          fileId: file.file_id,
           variable: variable,
-          startDate: analysisState.startDate,
-          endDate: analysisState.endDate,
-          cellId: selectedCell.cell_id,
+          targetDate: analysisState.startDate, // Usar startDate como fecha única
         });
 
-        // Procesar respuesta y mostrar gráfico
+        // Procesar respuesta y actualizar plotData para modo 2D
         setPlotData({
-          type: '1D',
-          title: `${response.variable_name} - Serie de Tiempo`,
-          subtitle: `Celda: ${selectedCell.cell_id}`,
+          type: '2D',
+          title: `${response.variable_name} - Mapa Espacial`,
+          subtitle: `Fecha: ${response.date} | Resolución: ${targetResolution}°`,
           variable: response.variable,
           unit: response.unit,
-          data: response.data,
+          date: response.date,
+          gridCells: response.grid_cells,  // Array de celdas con lat, lon, value, color, etc.
           statistics: response.statistics,
-          location: response.location,
+          bounds: response.bounds,
+          resolution: fileResolution, // Pasar resolución del archivo
         });
 
         showSuccess(
-          `Serie de tiempo generada para celda ${selectedCell.cell_id}`,
+          `Mapa 2D generado: ${response.grid_cells.length} celdas (${targetResolution}°)`,
           '¡Listo!'
         );
+        
+      } 
+      // ===== MODO 1D: SERIE TEMPORAL =====
+      else {
+        let fileId;
+        
+        if (selectedCell) {
+          // Si hay celda seleccionada, buscar archivo con la resolución de la celda
+          const resolution = selectedCell.resolution || 0.1;
+          const file = files.find(f => Math.abs((f.resolution || 0.1) - resolution) < 0.01);
+          
+          if (!file) {
+            showError(`No se encontró archivo para resolución ${resolution}°`, 'Error');
+            return;
+          }
+          
+          fileId = file.file_id;
+          
+          // Llamar API con cell_id para serie de tiempo 1D
+          const response = await historicalApi.getTimeSeries({
+            fileId: fileId,
+            variable: variable,
+            startDate: analysisState.startDate,
+            endDate: analysisState.endDate,
+            cellId: selectedCell.cell_id,
+          });
 
-      } else if (selectedStation) {
-        // TODO: Implementar para estaciones
-        showWarning('Análisis para estaciones estará disponible próximamente', 'En desarrollo');
-        return;
+          // Procesar respuesta y mostrar gráfico
+          setPlotData({
+            type: '1D',
+            title: `${response.variable_name} - Serie de Tiempo`,
+            subtitle: `Celda: ${selectedCell.cell_id}`,
+            variable: response.variable,
+            unit: response.unit,
+            data: response.data,
+            statistics: response.statistics,
+            location: response.location,
+          });
+
+          showSuccess(
+            `Serie de tiempo generada para celda ${selectedCell.cell_id}`,
+            '¡Listo!'
+          );
+
+        } else if (selectedStation) {
+          // TODO: Implementar para estaciones
+          showWarning('Análisis para estaciones estará disponible próximamente', 'En desarrollo');
+          return;
+        }
       }
 
     } catch (error) {

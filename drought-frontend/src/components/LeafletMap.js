@@ -24,12 +24,16 @@ export default function LeafletMap({
   onCellDoubleClick,
   onCellMouseOver,
   onCellMouseOut,
+  spatialDataCells = null, // Datos espaciales 2D para visualización
+  spatialResolution = 0.05, // Resolución de las celdas espaciales
 }) {
   const mapRef = useRef(null);
   const containerRef = useRef(null);
   const markersRef = useRef([]);
   const gridLayerRef = useRef(null);
   const gridCellsRef = useRef([]);
+  const spatialLayerRef = useRef(null); // Capa para datos 2D
+  const spatialCellsRef = useRef([]);
   const onStationSelectRef = useRef(onStationSelect);
   const onGridCellClickRef = useRef(onGridCellClick);
   const onCellDoubleClickRef = useRef(onCellDoubleClick);
@@ -195,6 +199,11 @@ export default function LeafletMap({
         
         gridGroup.addTo(map);
         gridLayerRef.current = gridGroup;
+        
+        // Crear capa para datos espaciales 2D (inicialmente vacía)
+        const spatialGroup = L.layerGroup();
+        spatialGroup.addTo(map);
+        spatialLayerRef.current = spatialGroup;
 
         // Station markers
         stations.forEach(station => {
@@ -265,6 +274,7 @@ export default function LeafletMap({
           markersRef.current.forEach(({ marker }) => marker.remove());
           markersRef.current = [];
           gridLayerRef.current?.remove();
+          spatialLayerRef.current?.remove(); // Limpiar capa espacial
           mapRef.current.remove();
           mapRef.current = null;
           initAttemptedRef.current = false;
@@ -315,8 +325,19 @@ export default function LeafletMap({
   // Regenerate grid when cells change
   useEffect(() => {
     if (!mapRef.current || !gridLayerRef.current) return;
+    
+    // Ocultar celdas de navegación si hay datos espaciales 2D mostrados
+    if (spatialDataCells && spatialDataCells.length > 0) {
+      gridLayerRef.current.remove();
+      return;
+    }
 
     import('leaflet').then(({ default: L }) => {
+      // Asegurar que la capa de grid esté visible
+      if (!mapRef.current.hasLayer(gridLayerRef.current)) {
+        gridLayerRef.current.addTo(mapRef.current);
+      }
+      
       // Clear existing grid
       gridCellsRef.current.forEach(({ rect }) => rect.remove());
       gridCellsRef.current = [];
@@ -361,7 +382,82 @@ export default function LeafletMap({
         gridCellsRef.current.push({ rect, cell });
       });
     });
-  }, [gridCells, currentLevel]);
+  }, [gridCells, currentLevel, spatialDataCells]);
+
+  // Renderizar celdas espaciales 2D cuando cambien
+  useEffect(() => {
+    if (!mapRef.current || !spatialLayerRef.current) return;
+    
+    import('leaflet').then(({ default: L }) => {
+      // Limpiar celdas espaciales existentes
+      spatialCellsRef.current.forEach(({ rect }) => rect.remove());
+      spatialCellsRef.current = [];
+      
+      // Si no hay datos espaciales, salir
+      if (!spatialDataCells || !Array.isArray(spatialDataCells) || spatialDataCells.length === 0) {
+        return;
+      }
+      
+      console.log(`Renderizando ${spatialDataCells.length} celdas espaciales 2D`);
+      
+      // Debug: Ver muestra de datos
+      if (spatialDataCells.length > 0) {
+        console.log('Muestra de celda espacial:', spatialDataCells[0]);
+      }
+      
+      // Renderizar cada celda espacial con su color
+      spatialDataCells.forEach(cell => {
+        // Calcular bounds de la celda basándose en resolución
+        const halfRes = spatialResolution / 2;
+        const bounds = [
+          [cell.lat - halfRes, cell.lon - halfRes],  // Southwest
+          [cell.lat + halfRes, cell.lon + halfRes],  // Northeast
+        ];
+        
+        // Asegurar que value sea número
+        const cellValue = typeof cell.value === 'number' ? cell.value : parseFloat(cell.value);
+        
+        // Estilo basado en el color del backend o un default
+        const cellStyle = {
+          fillColor: cell.color || '#3b82f6', // Usar color del backend o azul default
+          fillOpacity: 0.7,
+          color: '#fff', // Borde blanco
+          weight: 1,
+          opacity: 0.8,
+        };
+        
+        const rect = L.rectangle(bounds, cellStyle).addTo(spatialLayerRef.current);
+        
+        // Tooltip con información de la celda
+        const tooltipContent = `
+          <div style="font-size:12px;">
+            <strong>${cell.cell_id || `[${cell.lat.toFixed(3)}, ${cell.lon.toFixed(3)}]`}</strong><br/>
+            Valor: ${!isNaN(cellValue) && cellValue !== null ? cellValue.toFixed(3) : 'N/A'}<br/>
+            ${cell.category ? `Categoría: ${cell.category}<br/>` : ''}
+            ${cell.severity !== null && cell.severity !== undefined ? `Severidad: ${cell.severity}` : ''}
+          </div>
+        `;
+        
+        rect.bindTooltip(tooltipContent, {
+          sticky: true,
+          direction: 'top',
+        });
+        
+        spatialCellsRef.current.push({ rect, cell });
+      });
+      
+      // Ajustar vista del mapa para mostrar todas las celdas
+      if (spatialDataCells.length > 0) {
+        const lats = spatialDataCells.map(c => c.lat);
+        const lons = spatialDataCells.map(c => c.lon);
+        const bounds = [
+          [Math.min(...lats), Math.min(...lons)],
+          [Math.max(...lats), Math.max(...lons)],
+        ];
+        mapRef.current.fitBounds(bounds, { padding: [50, 50] });
+      }
+    });
+  }, [spatialDataCells, spatialResolution]);
 
   return <div ref={containerRef} className="w-full h-full" />;
 }
