@@ -152,21 +152,26 @@ class HistoricalDataService:
                     # Si ya existe, continuar
                     pass
             
-            # ⚡ Optimización para PLAN GRATUITO
-            # Configuración minimalista: 512 MB RAM, 2 threads
-            self.conn.execute("SET threads TO 2")  # Reducido para plan gratuito
-            self.conn.execute("SET memory_limit = '512MB'")  # Optimizado para Render/Railway free
-            self.conn.execute("SET temp_directory = '/tmp'")  # Usar ephemeral storage
+            # Recursos: ajustar según entorno
+            if self.is_production:
+                self.conn.execute("SET threads TO 2")
+                self.conn.execute("SET memory_limit = '512MB'")
+            else:
+                # Desarrollo: aprovechar todos los cores disponibles
+                self.conn.execute("SET threads TO 4")
+                self.conn.execute("SET memory_limit = '2GB'")
+            
+            self.conn.execute("SET temp_directory = '/tmp'")
             
             # HTTP/Network optimizations
             self.conn.execute("SET http_timeout = 120000")  # 2 minutos
-            self.conn.execute("SET http_retries = 2")  # Menos retries = más rápido
+            self.conn.execute("SET http_retries = 2")
             self.conn.execute("SET enable_http_metadata_cache = true")
             self.conn.execute("SET http_keep_alive = true")
             
             # Performance optimizations
             self.conn.execute("SET force_download = false")
-            self.conn.execute("SET enable_object_cache = false")  # No usar cache interno de DuckDB
+            self.conn.execute("SET enable_object_cache = true")  # Cache footers/metadata de parquet en RAM
             self.conn.execute("SET preserve_insertion_order = false")
             self.conn.execute("SET enable_progress_bar = false")
         
@@ -634,14 +639,25 @@ class HistoricalDataService:
             where_clauses.append(f"{date_col} >= CAST('{start_date}' AS DATE)")
             where_clauses.append(f"{date_col} <= CAST('{end_date}' AS DATE)")
             
-            # 🔥 OPTIMIZACIÓN CRÍTICA: Filtro de ubicación más estricto
+            # 🔥 OPTIMIZACIÓN CRÍTICA: BETWEEN en vez de ABS() / cell_id string
+            # DuckDB puede usar las estadísticas min/max de cada row-group del parquet
+            # con predicados BETWEEN/>=/<= pero NO con ABS() ni cell_id string equality.
+            # Esto puede saltar 90%+ de los row-groups en archivos grandes.
             if cell_id:
-                where_clauses.append(f"cell_id = '{cell_id}'")
+                # Parsear cell_id (formato LON_LAT) → filtro numérico exacto por lat/lon
+                try:
+                    _lon_s, _lat_s = cell_id.split('_', 1)
+                    _eps = 0.0001  # sub-mm precision para absorber redondeo float
+                    _clat, _clon = float(_lat_s), float(_lon_s)
+                    where_clauses.append(f"lat BETWEEN {_clat - _eps} AND {_clat + _eps}")
+                    where_clauses.append(f"lon BETWEEN {_clon - _eps} AND {_clon + _eps}")
+                except (ValueError, IndexError):
+                    where_clauses.append(f"cell_id = '{cell_id}'")  # fallback
             elif lat is not None and lon is not None:
-                # Tolerancia reducida para descargar menos datos (0.05 = ~5km)
-                tolerance = 0.01
-                where_clauses.append(f"ABS(lat - {lat}) < {tolerance}")
-                where_clauses.append(f"ABS(lon - {lon}) < {tolerance}")
+                # BETWEEN permite pushdown de row-groups; 0.15° captura celda más cercana en res 0.25°
+                tolerance = 0.15
+                where_clauses.append(f"lat BETWEEN {lat - tolerance} AND {lat + tolerance}")
+                where_clauses.append(f"lon BETWEEN {lon - tolerance} AND {lon + tolerance}")
             
             # 🚀 Construir query SIN ORDER BY (permite early stopping con LIMIT)
             # DuckDB puede usar HTTP Range Requests para leer solo row groups necesarios
@@ -680,9 +696,10 @@ class HistoricalDataService:
             result_df = conn.execute(query).fetchdf()
             t6 = time_module.time()
             
-            # Log solo si demora más de 5s (debug)
-            if (t6 - t5) > 5:
-                print(f"⚠️ Query lenta: {(t6-t5):.2f}s - considera configurar R2_PUBLIC_URL")
+            # Log de timing siempre (útil para detectar regresiones)
+            elapsed = t6 - t5
+            level = "⚠️" if elapsed > 5 else "⚡"
+            print(f"{level} timeseries query: {elapsed:.2f}s | file={parquet_url} var={variable} cell={cell_id} rows={len(result_df)}")
             
             # 🎯 Si buscamos por lat/lon, filtrar por el punto más cercano (en pandas, rápido)
             if lat is not None and lon is not None and len(result_df) > 0:
@@ -749,8 +766,19 @@ class HistoricalDataService:
                 # Eliminar lat/lon del DataFrame (datos repetitivos)
                 result_df = result_df.drop(columns=['lat', 'lon'])
             
-            # Convertir a lista de diccionarios (mucho más rápido que iterrows)
-            # Ahora solo incluye: date, value, quality, [category, color, severity]
+            # ⚡ Convertir fecha a string ISO ANTES de to_dict
+            # Evita pandas.Timestamp en los dicts → FastAPI no necesita llamar
+            # jsonable_encoder sobre toda la lista (10-100x más rápido para datasets grandes)
+            if len(result_df) > 0 and 'date' in result_df.columns:
+                result_df['date'] = result_df['date'].dt.strftime('%Y-%m-%d')
+            
+            # ⚡ Limpiar Inf→NaN (bug de datos). NaN queda como np.nan en el DataFrame;
+            # orjson los serializa a null nativo sin recursión.
+            if 'value' in result_df.columns:
+                result_df['value'] = result_df['value'].replace([np.inf, -np.inf], np.nan)
+            
+            # Convertir a lista de diccionarios
+            # Ahora solo incluye: date (str), value (float|None), [category, color, severity]
             data_points = result_df.to_dict('records')
             
             # Calcular estadísticas

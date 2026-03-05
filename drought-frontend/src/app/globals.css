@@ -128,6 +128,21 @@ body {
   color: var(--foreground) !important;
 }
 
+/* Tooltip para celdas 2D — compatible con modo oscuro */
+.drought-cell-tooltip {
+  background: var(--card-bg) !important;
+  color: var(--foreground) !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: 6px !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2) !important;
+  padding: 6px 10px !important;
+  font-size: 12px !important;
+  pointer-events: none;
+}
+.drought-cell-tooltip::before {
+  border-top-color: var(--border-color) !important;
+}
+
 /* Custom animations */
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(10px); }

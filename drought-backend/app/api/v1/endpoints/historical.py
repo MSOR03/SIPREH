@@ -3,11 +3,12 @@ Endpoints optimizados para análisis histórico de datos de sequía.
 Utiliza DuckDB para consultas rápidas sobre archivos .parquet en Cloudflare.
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import date, datetime
 import math
+import orjson
 
 from app.db.session import get_db
 from app.models.parquet_file import ParquetFile
@@ -192,6 +193,18 @@ def to_json_safe(value):
         pass
 
     return value
+
+
+def _orjson_response(data: dict) -> Response:
+    """
+    Serialize a dict to a JSON Response using orjson.
+    orjson handles natively: float NaN/Inf → null, numpy scalars, pd.NA → null,
+    datetime.date → ISO string.  3-10x faster than stdlib json for large payloads.
+    """
+    return Response(
+        content=orjson.dumps(data, option=orjson.OPT_NON_STR_KEYS | orjson.OPT_SERIALIZE_NUMPY),
+        media_type="application/json",
+    )
 
 
 # ============================================================================
@@ -547,7 +560,7 @@ def get_timeseries(
     
     cached = cache_service.get(endpoint_cache_key)
     if cached and isinstance(cached, dict):
-        return to_json_safe(cached)  # Evita errores por NaN/Inf en caché heredada
+        return _orjson_response(cached)
     
     # Cachear el cloud_key para evitar consulta DB en cada request
     cache_key_for_file = f"file_cloud_key:{request.parquet_file_id}"
@@ -593,22 +606,20 @@ def get_timeseries(
         var_info = historical_service.COLUMN_MAPPING.get(request.variable, {})
         
         # 🎯 OPTIMIZACIÓN: Usar coordenadas reales del servicio (punto más cercano)
-        # En vez de repetir request.lat/lon que son aproximados
         response_data = {
             "variable": request.variable,
             "variable_name": var_info.get("name", request.variable),
             "unit": var_info.get("unit", ""),
-            "location": coordinates,  # Coordenadas exactas, UNA SOLA VEZ
-            "data": data_points,  # Sin lat/lon repetidos
+            "location": coordinates,
+            "data": data_points,
             "statistics": statistics
         }
 
-        response_data = to_json_safe(response_data)
-        
         # Guardar respuesta completa en caché (15 min)
         cache_service.set(endpoint_cache_key, response_data, expire=900)
-        
-        return response_data
+
+        # orjson serializa NaN/Inf→null, np/pd types nativo — sin recursión O(n)
+        return _orjson_response(response_data)
         
     except ValueError as e:
         raise HTTPException(
@@ -646,7 +657,7 @@ def get_spatial_data(
     
     cached = cache_service.get(endpoint_cache_key)
     if cached and isinstance(cached, dict):
-        return to_json_safe(cached)
+        return _orjson_response(cached)
     
     # Cachear el cloud_key para evitar consulta DB
     cache_key_for_file = f"file_cloud_key:{request.parquet_file_id}"
@@ -723,12 +734,11 @@ def get_spatial_data(
             "bounds": actual_bounds
         }
 
-        response_data = to_json_safe(response_data)
-        
         # 🚀 Cachear respuesta completa (15 min)
         cache_service.set(endpoint_cache_key, response_data, expire=900)
-        
-        return response_data
+
+        # orjson serializa NaN/Inf→null, np/pd types nativo — sin recursión O(n)
+        return _orjson_response(response_data)
         
     except ValueError as e:
         raise HTTPException(
