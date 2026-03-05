@@ -108,8 +108,15 @@ export default function Home() {
           resolution: fileResolution, // Pasar resolución del archivo
         });
 
+        const uniqueCells = response.statistics?.unique_cells ?? response.grid_cells.length;
+        const validCells = response.statistics?.valid_cells ?? response.statistics?.count ?? response.grid_cells.length;
+        const usedFallbackDate = Boolean(response.fallback_used);
+        const dateNote = usedFallbackDate
+          ? ` | fecha solicitada ${response.requested_date}, usada ${response.date}`
+          : '';
+
         showSuccess(
-          `Mapa 2D generado: ${response.grid_cells.length} celdas (${targetResolution}°)`,
+          `Mapa 2D generado: ${uniqueCells} celdas únicas, ${validCells} con dato válido (${targetResolution}°)${dateNote}`,
           '¡Listo!'
         );
         

@@ -26,6 +26,7 @@ export default function LeafletMap({
   onCellMouseOut,
   spatialDataCells = null, // Datos espaciales 2D para visualización
   spatialResolution = 0.05, // Resolución de las celdas espaciales
+  theme = 'light', // Tema para tiles del mapa
 }) {
   const mapRef = useRef(null);
   const containerRef = useRef(null);
@@ -34,6 +35,9 @@ export default function LeafletMap({
   const gridCellsRef = useRef([]);
   const spatialLayerRef = useRef(null); // Capa para datos 2D
   const spatialCellsRef = useRef([]);
+  const tileLayerRef = useRef(null);         // Referencia al tile layer para swap dark/light
+  const canvasRendererRef = useRef(null);    // Renderer canvas compartido — 1 <canvas> en vez de miles de SVG
+  const spatialTooltipRef = useRef(null);    // Tooltip compartido para celdas 2D
   const onStationSelectRef = useRef(onStationSelect);
   const onGridCellClickRef = useRef(onGridCellClick);
   const onCellDoubleClickRef = useRef(onCellDoubleClick);
@@ -99,20 +103,38 @@ export default function LeafletMap({
           boxZoom: true,
           keyboard: true,
           tap: true,
+          preferCanvas: true, // Hint map to prefer canvas globally
+        });
+
+        // Canvas renderer compartido: 1 elemento <canvas> en lugar de miles de <path> SVG
+        canvasRendererRef.current = L.canvas({ padding: 0.5, tolerance: 5 });
+
+        // Tooltip compartido para celdas espaciales 2D (no crear uno por celda)
+        spatialTooltipRef.current = L.tooltip({
+          permanent: false,
+          direction: 'top',
+          offset: [0, -4],
+          className: 'drought-cell-tooltip',
         });
 
         L.control.zoom({ position: 'topright' }).addTo(map);
         L.control.scale({ position: 'bottomleft', metric: true, imperial: false, maxWidth: 200 }).addTo(map);
 
-        // Use CartoDB tiles - faster and more reliable than OSM
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        // CartoDB tiles — light_all / dark_all según tema activo
+        const initialTheme = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+        const tileUrl = initialTheme === 'dark'
+          ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+          : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+        tileLayerRef.current = L.tileLayer(tileUrl, {
           attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
           subdomains: 'abcd',
           maxZoom: 19,
           minZoom: 8,
+          crossOrigin: true,
+          detectRetina: true,
+          keepBuffer: 4,
           updateWhenIdle: true,
           updateWhenZooming: false,
-          keepBuffer: 2,
         }).addTo(map);
 
         // North arrow
@@ -152,14 +174,14 @@ export default function LeafletMap({
           });
         };
 
-        // Grid with selection support
+        // Grid with selection support — canvas renderer
         const gridGroup = L.layerGroup();
         gridCellsRef.current = [];
 
         const cellStyle = getCellStyle(currentLevel, false, false);
         
         gridCells.forEach(cell => {
-          const rect = L.rectangle(cell.bounds, cellStyle).addTo(gridGroup);
+          const rect = L.rectangle(cell.bounds, { ...cellStyle, renderer: canvasRendererRef.current }).addTo(gridGroup);
 
           // Single click
           rect.on('click', () => {
@@ -275,6 +297,8 @@ export default function LeafletMap({
           markersRef.current = [];
           gridLayerRef.current?.remove();
           spatialLayerRef.current?.remove(); // Limpiar capa espacial
+          spatialTooltipRef.current = null;
+          canvasRendererRef.current = null;
           mapRef.current.remove();
           mapRef.current = null;
           initAttemptedRef.current = false;
@@ -284,6 +308,15 @@ export default function LeafletMap({
       }
     };
   }, []);
+
+  // Swap tile layer URL when theme changes (dark_all <-> light_all)
+  useEffect(() => {
+    if (!tileLayerRef.current) return;
+    const url = theme === 'dark'
+      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+      : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+    tileLayerRef.current.setUrl(url);
+  }, [theme]);
 
   // Update marker icons when selection changes
   useEffect(() => {
@@ -322,7 +355,7 @@ export default function LeafletMap({
     });
   }, [selectedCell, hoveredCell, currentLevel]);
 
-  // Regenerate grid when cells change
+  // Regenerate grid when cells change — canvas renderer for better perf
   useEffect(() => {
     if (!mapRef.current || !gridLayerRef.current) return;
     
@@ -338,24 +371,24 @@ export default function LeafletMap({
         gridLayerRef.current.addTo(mapRef.current);
       }
       
-      // Clear existing grid
-      gridCellsRef.current.forEach(({ rect }) => rect.remove());
+      // O(1) batch clear vs O(n) forEach remove
+      gridLayerRef.current.clearLayers();
       gridCellsRef.current = [];
 
-      // Add new cells
+      const renderer = canvasRendererRef.current || L.canvas({ padding: 0.5 });
+
+      // Add new cells with canvas renderer
       gridCells.forEach(cell => {
         const cellStyle = getCellStyle(currentLevel, false, false);
-        const rect = L.rectangle(cell.bounds, cellStyle).addTo(gridLayerRef.current);
+        const rect = L.rectangle(cell.bounds, { ...cellStyle, renderer }).addTo(gridLayerRef.current);
 
         // Single click
         rect.on('click', () => {
-          console.log('Grid cell clicked', cell);
           onGridCellClickRef.current?.(cell);
         });
 
         // Double click
         rect.on('dblclick', () => {
-          console.log('Grid cell double-clicked', cell);
           onCellDoubleClickRef.current?.(cell);
         });
 
@@ -364,8 +397,7 @@ export default function LeafletMap({
           onCellMouseOverRef.current?.(cell);
           const isSelected = isCellSelected(cell, selectedCell);
           if (!isSelected) {
-            const hoverStyle = getCellStyle(currentLevel, false, true);
-            rect.setStyle(hoverStyle);
+            rect.setStyle(getCellStyle(currentLevel, false, true));
           }
         });
 
@@ -374,8 +406,7 @@ export default function LeafletMap({
           onCellMouseOutRef.current?.();
           const isSelected = isCellSelected(cell, selectedCell);
           if (!isSelected) {
-            const normalStyle = getCellStyle(currentLevel, false, false);
-            rect.setStyle(normalStyle);
+            rect.setStyle(getCellStyle(currentLevel, false, false));
           }
         });
 
@@ -397,64 +428,80 @@ export default function LeafletMap({
       if (!spatialDataCells || !Array.isArray(spatialDataCells) || spatialDataCells.length === 0) {
         return;
       }
-      
-      console.log(`Renderizando ${spatialDataCells.length} celdas espaciales 2D`);
-      
-      // Debug: Ver muestra de datos
-      if (spatialDataCells.length > 0) {
-        console.log('Muestra de celda espacial:', spatialDataCells[0]);
-      }
-      
-      // Renderizar cada celda espacial con su color
-      spatialDataCells.forEach(cell => {
-        // Calcular bounds de la celda basándose en resolución
+
+      // Deduplicar por cell_id (o por coordenadas) para evitar sobrepintar la misma celda.
+      const uniqueCellMap = new Map();
+      spatialDataCells.forEach((cell) => {
+        const key = cell.cell_id || `${Number(cell.lon).toFixed(6)}_${Number(cell.lat).toFixed(6)}`;
+        if (!uniqueCellMap.has(key)) {
+          uniqueCellMap.set(key, cell);
+        }
+      });
+      const uniqueSpatialCells = Array.from(uniqueCellMap.values());
+
+      console.log(`Renderizando ${uniqueSpatialCells.length} celdas 2D (deduplicadas desde ${spatialDataCells.length}) — canvas`);
+
+      const renderer = canvasRendererRef.current || L.canvas({ padding: 0.5, tolerance: 5 });
+      // Tooltip compartido: 1 objeto en vez de uno por celda
+      const sharedTooltip = spatialTooltipRef.current
+        || (spatialTooltipRef.current = L.tooltip({ permanent: false, direction: 'top', offset: [0, -4] }));
+
+      // Pre-calcular bounds sin spread de arrays grandes (evita stack overflow con 3500+ items)
+      let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
+
+      uniqueSpatialCells.forEach(cell => {
         const halfRes = spatialResolution / 2;
-        const bounds = [
-          [cell.lat - halfRes, cell.lon - halfRes],  // Southwest
-          [cell.lat + halfRes, cell.lon + halfRes],  // Northeast
+        const cellBounds = [
+          [cell.lat - halfRes, cell.lon - halfRes],
+          [cell.lat + halfRes, cell.lon + halfRes],
         ];
-        
-        // Asegurar que value sea número
+
+        if (cell.lat - halfRes < minLat) minLat = cell.lat - halfRes;
+        if (cell.lat + halfRes > maxLat) maxLat = cell.lat + halfRes;
+        if (cell.lon - halfRes < minLon) minLon = cell.lon - halfRes;
+        if (cell.lon + halfRes > maxLon) maxLon = cell.lon + halfRes;
+
         const cellValue = typeof cell.value === 'number' ? cell.value : parseFloat(cell.value);
-        
-        // Estilo basado en el color del backend o un default
-        const cellStyle = {
-          fillColor: cell.color || '#3b82f6', // Usar color del backend o azul default
+
+        const rect = L.rectangle(cellBounds, {
+          fillColor: cell.color || '#3b82f6',
           fillOpacity: 0.7,
-          color: '#fff', // Borde blanco
+          color: '#fff',
           weight: 1,
           opacity: 0.8,
-        };
-        
-        const rect = L.rectangle(bounds, cellStyle).addTo(spatialLayerRef.current);
-        
-        // Tooltip con información de la celda
-        const tooltipContent = `
-          <div style="font-size:12px;">
-            <strong>${cell.cell_id || `[${cell.lat.toFixed(3)}, ${cell.lon.toFixed(3)}]`}</strong><br/>
-            Valor: ${!isNaN(cellValue) && cellValue !== null ? cellValue.toFixed(3) : 'N/A'}<br/>
-            ${cell.category ? `Categoría: ${cell.category}<br/>` : ''}
-            ${cell.severity !== null && cell.severity !== undefined ? `Severidad: ${cell.severity}` : ''}
-          </div>
-        `;
-        
-        rect.bindTooltip(tooltipContent, {
-          sticky: true,
-          direction: 'top',
+          renderer,       // Canvas — un único <canvas> en vez de miles de <path>
+          interactive: true,
+        }).addTo(spatialLayerRef.current);
+
+        // Actualizar tooltip compartido en hover (no bindTooltip por celda)
+        rect.on('mouseover', (e) => {
+          sharedTooltip.setContent(
+            `<div style="font-size:12px;line-height:1.4">
+              <strong style="color:#1f2937">${cell.cell_id || `[${cell.lat.toFixed(3)}, ${cell.lon.toFixed(3)}]`}</strong><br/>
+              Valor: <b>${!isNaN(cellValue) && cellValue !== null ? cellValue.toFixed(3) : 'N/A'}</b><br/>
+              ${cell.category ? `Categoría: ${cell.category}<br/>` : ''}
+              ${cell.severity != null ? `Severidad: ${cell.severity}` : ''}
+            </div>`
+          );
+          sharedTooltip.setLatLng(e.latlng);
+          if (!mapRef.current.hasLayer(sharedTooltip)) sharedTooltip.addTo(mapRef.current);
         });
-        
+        rect.on('mousemove', (e) => sharedTooltip.setLatLng(e.latlng));
+        rect.on('mouseout', () => {
+          if (mapRef.current && mapRef.current.hasLayer(sharedTooltip)) {
+            sharedTooltip.removeFrom(mapRef.current);
+          }
+        });
+
         spatialCellsRef.current.push({ rect, cell });
       });
-      
-      // Ajustar vista del mapa para mostrar todas las celdas
-      if (spatialDataCells.length > 0) {
-        const lats = spatialDataCells.map(c => c.lat);
-        const lons = spatialDataCells.map(c => c.lon);
-        const bounds = [
-          [Math.min(...lats), Math.min(...lons)],
-          [Math.max(...lats), Math.max(...lons)],
-        ];
-        mapRef.current.fitBounds(bounds, { padding: [50, 50] });
+
+      // fitBounds sin animación ni spread de arrays grandes
+      if (isFinite(minLat)) {
+        mapRef.current.fitBounds(
+          [[minLat, minLon], [maxLat, maxLon]],
+          { padding: [30, 30], animate: false }
+        );
       }
     });
   }, [spatialDataCells, spatialResolution]);
