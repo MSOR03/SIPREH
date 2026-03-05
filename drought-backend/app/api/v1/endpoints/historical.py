@@ -3,10 +3,11 @@ Endpoints optimizados para análisis histórico de datos de sequía.
 Utiliza DuckDB para consultas rápidas sobre archivos .parquet en Cloudflare.
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from fastapi.responses import ORJSONResponse
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import date, datetime
+import math
 
 from app.db.session import get_db
 from app.models.parquet_file import ParquetFile
@@ -14,6 +15,7 @@ from app.services.historical_data_service import HistoricalDataService
 from app.services.cache import cache_service
 from pydantic import BaseModel, Field
 import json
+import ast
 
 
 # ============================================================================
@@ -149,10 +151,47 @@ def get_file_metadata(file: ParquetFile) -> dict:
     """
     if file.file_metadata:
         try:
-            return json.loads(file.file_metadata)
+            parsed = json.loads(file.file_metadata)
+            return parsed if isinstance(parsed, dict) else {}
         except (json.JSONDecodeError, TypeError):
-            return {}
+            # Compatibilidad con datos viejos guardados como str(dict)
+            try:
+                parsed = ast.literal_eval(file.file_metadata)
+                return parsed if isinstance(parsed, dict) else {}
+            except (ValueError, SyntaxError):
+                return {}
     return {}
+
+
+def to_json_safe(value):
+    """Recursively convert values to JSON-safe types (replace NaN/Inf with None)."""
+    if isinstance(value, dict):
+        return {k: to_json_safe(v) for k, v in value.items()}
+
+    if isinstance(value, list):
+        return [to_json_safe(v) for v in value]
+
+    if isinstance(value, tuple):
+        return [to_json_safe(v) for v in value]
+
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+
+    # numpy/pandas scalar support (e.g., np.float64, np.int64, pd.NA)
+    if hasattr(value, "item") and callable(getattr(value, "item")):
+        try:
+            return to_json_safe(value.item())
+        except Exception:
+            pass
+
+    # Generic NaN check for remaining scalar-like values
+    try:
+        if value != value:  # NaN is not equal to itself
+            return None
+    except Exception:
+        pass
+
+    return value
 
 
 # ============================================================================
@@ -487,7 +526,7 @@ def get_file_cells(
 # ANÁLISIS HISTÓRICO - SERIE DE TIEMPO (1D)
 # ============================================================================
 
-@router.post("/timeseries", response_class=ORJSONResponse)
+@router.post("/timeseries", response_class=JSONResponse)
 def get_timeseries(
     request: TimeSeriesRequest,
     db: Session = Depends(get_db)
@@ -508,7 +547,7 @@ def get_timeseries(
     
     cached = cache_service.get(endpoint_cache_key)
     if cached and isinstance(cached, dict):
-        return cached  # Respuesta completa desde caché
+        return to_json_safe(cached)  # Evita errores por NaN/Inf en caché heredada
     
     # Cachear el cloud_key para evitar consulta DB en cada request
     cache_key_for_file = f"file_cloud_key:{request.parquet_file_id}"
@@ -563,6 +602,8 @@ def get_timeseries(
             "data": data_points,  # Sin lat/lon repetidos
             "statistics": statistics
         }
+
+        response_data = to_json_safe(response_data)
         
         # Guardar respuesta completa en caché (15 min)
         cache_service.set(endpoint_cache_key, response_data, expire=900)
@@ -585,7 +626,7 @@ def get_timeseries(
 # ANÁLISIS HISTÓRICO - DATOS ESPACIALES (2D)
 # ============================================================================
 
-@router.post("/spatial", response_class=ORJSONResponse)
+@router.post("/spatial", response_class=JSONResponse)
 def get_spatial_data(
     request: SpatialDataRequest,
     db: Session = Depends(get_db)
@@ -605,7 +646,7 @@ def get_spatial_data(
     
     cached = cache_service.get(endpoint_cache_key)
     if cached and isinstance(cached, dict):
-        return cached
+        return to_json_safe(cached)
     
     # Cachear el cloud_key para evitar consulta DB
     cache_key_for_file = f"file_cloud_key:{request.parquet_file_id}"
@@ -646,7 +687,7 @@ def get_spatial_data(
     
     # Consultar datos
     try:
-        grid_cells, statistics = historical_service.query_spatial_data(
+        grid_cells, statistics, used_date = historical_service.query_spatial_data(
             parquet_url=cloud_key,  # Usar cloud_key cacheado
             variable=request.variable,
             target_date=request.target_date,
@@ -674,11 +715,15 @@ def get_spatial_data(
             "variable": request.variable,
             "variable_name": var_info.get("name", request.variable),
             "unit": var_info.get("unit", ""),
-            "date": request.target_date,
+            "date": used_date,
+            "requested_date": request.target_date,
+            "fallback_used": str(used_date) != str(request.target_date),
             "grid_cells": grid_cells,
             "statistics": statistics,
             "bounds": actual_bounds
         }
+
+        response_data = to_json_safe(response_data)
         
         # 🚀 Cachear respuesta completa (15 min)
         cache_service.set(endpoint_cache_key, response_data, expire=900)

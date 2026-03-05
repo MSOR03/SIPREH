@@ -14,9 +14,27 @@ from app.services.cloud_storage import cloud_storage
 from app.services.parquet_processor import parquet_processor
 from app.core.config import settings
 import json
+import ast
 
 
 router = APIRouter()
+
+
+def parse_file_metadata(raw_metadata: str | None) -> dict:
+    """Parse metadata from DB supporting JSON and legacy python-dict strings."""
+    if not raw_metadata:
+        return {}
+
+    try:
+        parsed = json.loads(raw_metadata)
+        return parsed if isinstance(parsed, dict) else {}
+    except (json.JSONDecodeError, TypeError):
+        # Backward compatibility: old sync stored metadata as str(dict)
+        try:
+            parsed = ast.literal_eval(raw_metadata)
+            return parsed if isinstance(parsed, dict) else {}
+        except (ValueError, SyntaxError):
+            return {}
 
 
 @router.post("/upload", response_model=ParquetUploadResponse)
@@ -95,7 +113,7 @@ async def upload_parquet_file(
         cloud_url=cloud_url,
         cloud_key=cloud_key,
         file_hash=file_hash,
-        metadata=json.dumps(metadata) if metadata else None,
+        file_metadata=json.dumps(metadata) if metadata else None,
         status="active",
         uploaded_by=current_admin.id
     )
@@ -164,7 +182,7 @@ async def get_parquet_metadata(
             detail="File not found"
         )
     
-    metadata = json.loads(file.file_metadata) if file.file_metadata else {}
+    metadata = parse_file_metadata(file.file_metadata)
     
     return {
         "success": True,

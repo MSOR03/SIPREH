@@ -50,6 +50,50 @@ python run.py
 - Email: `admin@example.com`
 - Password: `admin123`
 
+## 🔄 Flujo Recomendado Entre Equipos
+
+Para evitar errores al mover el proyecto a otro PC (dependencias, DB y sync de parquet), usa este flujo:
+
+1. **Instalar dependencias**
+```bash
+pip install -r requirements.txt
+```
+
+2. **(Opcional en desarrollo) instalar herramientas dev**
+```bash
+pip install -r requirements-dev.txt
+```
+
+3. **Configurar entorno**
+```bash
+copy .env.example .env
+# Editar .env con credenciales de Cloudflare R2
+```
+
+4. **Inicializar/actualizar DB local**
+```bash
+python init_db.py
+```
+`init_db.py` crea tablas, asegura el admin por defecto y normaliza metadata antigua de parquet para mantener compatibilidad.
+
+5. **Iniciar backend**
+```bash
+python run.py
+```
+
+6. **Sincronizar archivos de Cloudflare hacia DB local**
+- Endpoint: `POST /api/v1/admin/files/cloud/sync`
+- Recomiendo `bidirectional=true` solo cuando estés seguro de que Cloudflare es la fuente de verdad.
+
+7. **Validar archivo antes de consultas**
+- `GET /api/v1/historical/files`
+- `GET /api/v1/historical/files/{file_id}/validate`
+- `GET /api/v1/historical/files/{file_id}/columns`
+
+Notas de estabilidad:
+- `file_metadata` se guarda en JSON (no `str(dict)`) para evitar errores entre entornos.
+- El flujo de `upload` y `sync` ya deja metadata homogénea para que `historical/timeseries` y `historical/spatial` funcionen de forma consistente.
+
 ## 📚 Documentación
 
 > 📑 **Ver índice completo**: [DOCS_INDEX.md](DOCS_INDEX.md) - Toda la documentación disponible organizada por categorías y rutas de aprendizaje

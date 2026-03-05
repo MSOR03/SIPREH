@@ -786,7 +786,7 @@ class HistoricalDataService:
         target_date: date,
         bounds: Optional[Dict[str, float]] = None,
         limit: int = 100000
-    ) -> Tuple[List[Dict[str, Any]], Dict[str, float]]:
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, float], date]:
         """
         Consulta datos espaciales (2D) para una fecha específica usando DuckDB.
         
@@ -802,7 +802,7 @@ class HistoricalDataService:
             limit: Máximo de celdas a retornar (default: 100000)
             
         Returns:
-            Tupla (celdas, estadísticas)
+            Tupla (celdas, estadísticas, fecha_usada)
         """
         # Cache key con protección
         cache_key = None
@@ -820,7 +820,8 @@ class HistoricalDataService:
             if cache_key:
                 cached_result = self.cache.get(cache_key)
                 if cached_result and isinstance(cached_result, dict) and "data" in cached_result:
-                    return cached_result["data"], cached_result["statistics"]
+                    used_date = cached_result.get("used_date", str(target_date))
+                    return cached_result["data"], cached_result["statistics"], used_date
         except Exception:
             cache_key = None
         
@@ -835,49 +836,58 @@ class HistoricalDataService:
             # ⚡ Obtener URL óptima (pública R2 o local)
             source = self._get_parquet_url(parquet_url)
             
-            # Construir filtros
-            where_clauses = []
-            
-            # Filtro de fecha - usar la columna detectada
-            where_clauses.append(f"{date_col} = CAST('{target_date}' AS DATE)")
+            # Construir filtros base (sin fecha)
+            base_clauses = []
             
             # Filtro de bounds
             if bounds:
-                where_clauses.append(f"lat >= {bounds.get('min_lat', -90)}")
-                where_clauses.append(f"lat <= {bounds.get('max_lat', 90)}")
-                where_clauses.append(f"lon >= {bounds.get('min_lon', -180)}")
-                where_clauses.append(f"lon <= {bounds.get('max_lon', 180)}")
+                base_clauses.append(f"lat >= {bounds.get('min_lat', -90)}")
+                base_clauses.append(f"lat <= {bounds.get('max_lat', 90)}")
+                base_clauses.append(f"lon >= {bounds.get('min_lon', -180)}")
+                base_clauses.append(f"lon <= {bounds.get('max_lon', 180)}")
             
             # Construir query según formato
             if file_format == 'long':
-                where_clauses.append(f"var = '{variable}'")
-                where_clause = " AND ".join(where_clauses)
-                
-                # Query desde disco local
-                query = f"""
-                SELECT 
-                    lat,
-                    lon,
-                    value
-                FROM read_parquet('{source}')
-                WHERE {where_clause}
-                LIMIT {limit}
-                """
+                base_clauses.append(f"var = '{variable}'")
+                value_expr = "value"
             else:
-                where_clause = " AND ".join(where_clauses)
-                
+                value_expr = variable
+
+            base_where = " AND ".join(base_clauses) if base_clauses else "1=1"
+
+            def run_spatial_query(for_date: date):
+                where_clause = f"{base_where} AND CAST({date_col} AS DATE) = CAST('{for_date}' AS DATE)"
                 query = f"""
                 SELECT 
                     lat,
                     lon,
-                    {variable} as value
+                    AVG(CAST({value_expr} AS DOUBLE)) as value,
+                    COUNT(*) as records_in_cell
                 FROM read_parquet('{source}')
                 WHERE {where_clause}
+                GROUP BY lat, lon
                 LIMIT {limit}
                 """
-         
-            
-            result_df = conn.execute(query).fetchdf()
+                return conn.execute(query).fetchdf()
+
+            used_date = target_date
+            result_df = run_spatial_query(target_date)
+
+            # Si no hay datos exactos para la fecha solicitada, usar la fecha más cercana con datos.
+            if result_df.empty:
+                nearest_date_query = f"""
+                SELECT CAST({date_col} AS DATE) AS d
+                FROM read_parquet('{source}')
+                WHERE {base_where} AND {value_expr} IS NOT NULL
+                GROUP BY 1
+                ORDER BY ABS(DATEDIFF('day', d, CAST('{target_date}' AS DATE))) ASC
+                LIMIT 1
+                """
+                nearest_row = conn.execute(nearest_date_query).fetchone()
+
+                if nearest_row and nearest_row[0] is not None:
+                    used_date = nearest_row[0]
+                    result_df = run_spatial_query(used_date)
             
             # 🚀 Preparar datos espaciales (operaciones vectorizadas)
             is_drought_index = variable in ["SPI", "SPEI", "RAI", "EDDI", "PDSI"]
@@ -969,21 +979,31 @@ class HistoricalDataService:
             
             # Estadísticas
             values = result_df['value'].dropna()
+            total_cells = len(result_df)
+            valid_cells = len(values)
             statistics = {
                 "mean": float(values.mean()) if len(values) > 0 else None,
                 "min": float(values.min()) if len(values) > 0 else None,
                 "max": float(values.max()) if len(values) > 0 else None,
                 "std": float(values.std()) if len(values) > 0 else None,
-                "count": len(values),
-                "total_cells": len(result_df)
+                "count": valid_cells,
+                "total_cells": total_cells,
+                "unique_cells": total_cells,
+                "valid_cells": valid_cells,
+                "null_cells": total_cells - valid_cells,
+                "raw_records_aggregated": int(result_df['records_in_cell'].sum()) if 'records_in_cell' in result_df else len(result_df)
             }
             
             # Cache (15 minutos) - como dict para serialización JSON
             if cache_key:
-                result_dict = {"data": grid_cells, "statistics": statistics}
+                result_dict = {
+                    "data": grid_cells,
+                    "statistics": statistics,
+                    "used_date": str(used_date)
+                }
                 self.cache.set(cache_key, result_dict, expire=900)
             
-            return grid_cells, statistics
+            return grid_cells, statistics, used_date
             
         except Exception as e:
             raise Exception(f"Error consultando datos espaciales: {str(e)}")

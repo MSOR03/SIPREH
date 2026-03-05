@@ -397,16 +397,26 @@ export default function LeafletMap({
       if (!spatialDataCells || !Array.isArray(spatialDataCells) || spatialDataCells.length === 0) {
         return;
       }
+
+      // Deduplicar por cell_id (o por coordenadas) para evitar sobrepintar la misma celda.
+      const uniqueCellMap = new Map();
+      spatialDataCells.forEach((cell) => {
+        const key = cell.cell_id || `${Number(cell.lon).toFixed(6)}_${Number(cell.lat).toFixed(6)}`;
+        if (!uniqueCellMap.has(key)) {
+          uniqueCellMap.set(key, cell);
+        }
+      });
+      const uniqueSpatialCells = Array.from(uniqueCellMap.values());
       
-      console.log(`Renderizando ${spatialDataCells.length} celdas espaciales 2D`);
+      console.log(`Renderizando ${uniqueSpatialCells.length} celdas espaciales 2D (deduplicadas desde ${spatialDataCells.length})`);
       
       // Debug: Ver muestra de datos
-      if (spatialDataCells.length > 0) {
-        console.log('Muestra de celda espacial:', spatialDataCells[0]);
+      if (uniqueSpatialCells.length > 0) {
+        console.log('Muestra de celda espacial:', uniqueSpatialCells[0]);
       }
       
       // Renderizar cada celda espacial con su color
-      spatialDataCells.forEach(cell => {
+      uniqueSpatialCells.forEach(cell => {
         // Calcular bounds de la celda basándose en resolución
         const halfRes = spatialResolution / 2;
         const bounds = [
@@ -447,9 +457,9 @@ export default function LeafletMap({
       });
       
       // Ajustar vista del mapa para mostrar todas las celdas
-      if (spatialDataCells.length > 0) {
-        const lats = spatialDataCells.map(c => c.lat);
-        const lons = spatialDataCells.map(c => c.lon);
+      if (uniqueSpatialCells.length > 0) {
+        const lats = uniqueSpatialCells.map(c => c.lat);
+        const lons = uniqueSpatialCells.map(c => c.lon);
         const bounds = [
           [Math.min(...lats), Math.min(...lons)],
           [Math.max(...lats), Math.max(...lons)],

@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, HttpUrl
 from typing import Optional, Dict, Any, List as ListType
 from datetime import datetime
 from app.services.cloud_storage import CloudStorageService
+import json
 
 
 router = APIRouter()
@@ -317,6 +318,7 @@ def register_external_parquet_file(
     # Preparar metadata enriquecida
     enriched_metadata = file_data.metadata or {}
     enriched_metadata.update({
+        "resolution": resolution,
         "resolution_level": level_name,
         "resolution_degrees": resolution,
         "auto_detected": True,
@@ -331,7 +333,7 @@ def register_external_parquet_file(
         cloud_url=file_data.cloud_url,
         cloud_key=cloud_key,
         file_hash=None,
-        file_metadata=str(enriched_metadata),
+        file_metadata=json.dumps(enriched_metadata),
         status="active",
         uploaded_by=current_admin.id
     )
@@ -524,6 +526,7 @@ def sync_cloudflare_files(
                     "source": "cloudflare_sync",
                     "last_modified_cloud": cloud_file['last_modified'].isoformat(),
                     "size_bytes": size_bytes,
+                    "resolution": resolution,
                     "resolution_level": level_name,
                     "resolution_degrees": resolution,
                     "auto_detected": True
@@ -536,7 +539,7 @@ def sync_cloudflare_files(
                     cloud_url=cloud_url,
                     cloud_key=key,
                     file_hash=cloud_file.get('etag', '').strip('\"'),
-                    file_metadata=str(metadata),
+                    file_metadata=json.dumps(metadata),
                     status="active" if auto_activate else "pending",
                     uploaded_by=current_admin.id
                 )
