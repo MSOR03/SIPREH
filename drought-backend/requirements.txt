@@ -16,7 +16,7 @@ sqlalchemy==2.0.25
 # Authentication & Security
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
-bcrypt==4.1.2
+bcrypt==4.0.1
 
 # Data Processing
 pandas==2.2.0
