@@ -5,6 +5,7 @@ import { getCellStyle } from '../utils/gridLevels';
 
 const BOGOTA_CENTER = [4.7110, -74.0721];
 
+
 const stations = [
   { id: 1, position: [4.7110, -74.0721], name: 'Estación Centro', area: 'Bogotá D.C.', type: 'principal' },
   { id: 2, position: [4.6097, -74.0817], name: 'Estación Sur', area: 'Zona Sur de Bogotá', type: 'secundaria' },
@@ -227,6 +228,55 @@ export default function LeafletMap({
         spatialGroup.addTo(map);
         spatialLayerRef.current = spatialGroup;
 
+                // Load study area boundary from GeoJSON
+        fetch('/data/study-area.geojson?t=' + Date.now())
+          .then(response => {
+            console.log('📍 Fetch response status:', response.status);
+            if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.text();
+          })
+          .then(text => {
+            console.log('📍 GeoJSON raw data length:', text.length);
+            if (!text || text.trim().length === 0) {
+              throw new Error('GeoJSON file is empty!');
+            }
+            try {
+              const data = JSON.parse(text);
+              console.log('✅ GeoJSON parsed successfully:', data);
+              return data;
+            } catch (e) {
+              console.error('❌ JSON parse error:', e);
+              throw e;
+            }
+          })
+          .then(geojsonData => {
+  console.log('📍 Creating GeoJSON layer...');
+  console.log('📍 Features count:', geojsonData.features?.length || 'No features');
+
+  const geoLayer = L.geoJSON(geojsonData, {
+  style: {
+  color: '#6B7280',  // Gris medio (Tailwind gray-500)
+  weight: 3,          // Aumenté grosor para mejor visibilidad
+  opacity: 1,
+  fill: false,
+  dashArray: null,
+},
+  onEachFeature: function (feature, layer) {
+    layer.bringToBack();
+  }
+}).addTo(map);
+
+  if (geoLayer.getBounds().isValid()) {
+    map.fitBounds(geoLayer.getBounds(), { padding: [20, 20], maxZoom: 13 });
+  }
+
+  console.log('✅ GeoJSON layer added successfully');
+})
+          .catch(err => {
+            console.error('❌ Error loading study area:', err);
+          });
         // Station markers
         stations.forEach(station => {
           const marker = L.marker(station.position, {
