@@ -45,6 +45,7 @@ export default function LeafletMap({
   const onCellMouseOverRef = useRef(onCellMouseOver);
   const onCellMouseOutRef = useRef(onCellMouseOut);
   const initAttemptedRef = useRef(false);
+  const [mapReady, setMapReady] = useState(false);
 
   useEffect(() => {
     onStationSelectRef.current = onStationSelect;
@@ -183,16 +184,20 @@ export default function LeafletMap({
         
         gridCells.forEach(cell => {
           const rect = L.rectangle(cell.bounds, { ...cellStyle, renderer: canvasRendererRef.current }).addTo(gridGroup);
+          let clickTimer = null;
 
-          // Single click
+          // Single click — delayed so dblclick can cancel it
           rect.on('click', () => {
-            console.log('Grid cell clicked', cell);
-            onGridCellClickRef.current?.(cell);
+            clearTimeout(clickTimer);
+            clickTimer = setTimeout(() => {
+              onGridCellClickRef.current?.(cell);
+            }, 220);
           });
 
-          // Double click  
-          rect.on('dblclick', () => {
-            console.log('Grid cell double-clicked', cell);
+          // Double click — cancel pending click, stop Leaflet doubleClickZoom
+          rect.on('dblclick', (e) => {
+            clearTimeout(clickTimer);
+            L.DomEvent.stopPropagation(e);
             onCellDoubleClickRef.current?.(cell);
           });
           
@@ -310,6 +315,7 @@ export default function LeafletMap({
         };
 
         mapRef.current = map;
+        setMapReady(true);
 
         // Pulse animation CSS
         if (!document.getElementById('leaflet-pulse-style')) {
@@ -427,18 +433,23 @@ export default function LeafletMap({
 
       const renderer = canvasRendererRef.current || L.canvas({ padding: 0.5 });
 
-      // Add new cells with canvas renderer
-      gridCells.forEach(cell => {
+        gridCells.forEach(cell => {
         const cellStyle = getCellStyle(currentLevel, false, false);
         const rect = L.rectangle(cell.bounds, { ...cellStyle, renderer }).addTo(gridLayerRef.current);
+        let clickTimer = null;
 
-        // Single click
+        // Single click — delayed so dblclick can cancel it
         rect.on('click', () => {
-          onGridCellClickRef.current?.(cell);
+          clearTimeout(clickTimer);
+          clickTimer = setTimeout(() => {
+            onGridCellClickRef.current?.(cell);
+          }, 220);
         });
 
-        // Double click
-        rect.on('dblclick', () => {
+        // Double click — cancel pending click, stop Leaflet doubleClickZoom
+        rect.on('dblclick', (e) => {
+          clearTimeout(clickTimer);
+          L.DomEvent.stopPropagation(e);
           onCellDoubleClickRef.current?.(cell);
         });
 
@@ -463,7 +474,7 @@ export default function LeafletMap({
         gridCellsRef.current.push({ rect, cell });
       });
     });
-  }, [gridCells, currentLevel, spatialDataCells]);
+  }, [gridCells, currentLevel, spatialDataCells, mapReady]);
 
   // Renderizar celdas espaciales 2D cuando cambien
   useEffect(() => {
