@@ -44,7 +44,14 @@ export default function LeafletMap({
   const onCellDoubleClickRef = useRef(onCellDoubleClick);
   const onCellMouseOverRef = useRef(onCellMouseOver);
   const onCellMouseOutRef = useRef(onCellMouseOut);
+  
+  // ✅ Refs para evitar closures stale en event listeners
+  const selectedCellRef = useRef(selectedCell);
+  const hoveredCellRef = useRef(hoveredCell);
+  const currentLevelRef = useRef(currentLevel);
+  
   const initAttemptedRef = useRef(false);
+  const fitBoundsDoneRef = useRef(false); // ✅ Para evitar múltiples fitBounds que destruyen event listeners
   const [mapReady, setMapReady] = useState(false);
 
   useEffect(() => {
@@ -66,6 +73,19 @@ export default function LeafletMap({
   useEffect(() => {
     onCellMouseOutRef.current = onCellMouseOut;
   }, [onCellMouseOut]);
+
+  // ✅ Mantener refs sincronizados con props
+  useEffect(() => {
+    selectedCellRef.current = selectedCell;
+  }, [selectedCell]);
+
+  useEffect(() => {
+    hoveredCellRef.current = hoveredCell;
+  }, [hoveredCell]);
+
+  useEffect(() => {
+    currentLevelRef.current = currentLevel;
+  }, [currentLevel]);
 
   useEffect(() => {
     // Use ResizeObserver to wait until the container actually has dimensions
@@ -176,55 +196,10 @@ export default function LeafletMap({
           });
         };
 
-        // Grid with selection support — canvas renderer
+        // ✅ Grid layer — inicialmente vacía, las celdas se crearán en useEffect
+        // Esto evita duplicación: INIT puede tener gridCells=[] y useEffect lo poblará
         const gridGroup = L.layerGroup();
         gridCellsRef.current = [];
-
-        const cellStyle = getCellStyle(currentLevel, false, false);
-        
-        gridCells.forEach(cell => {
-          const rect = L.rectangle(cell.bounds, { ...cellStyle, renderer: canvasRendererRef.current }).addTo(gridGroup);
-          let clickTimer = null;
-
-          // Single click — delayed so dblclick can cancel it
-          rect.on('click', () => {
-            clearTimeout(clickTimer);
-            clickTimer = setTimeout(() => {
-              onGridCellClickRef.current?.(cell);
-            }, 220);
-          });
-
-          // Double click — cancel pending click, stop Leaflet doubleClickZoom
-          rect.on('dblclick', (e) => {
-            clearTimeout(clickTimer);
-            L.DomEvent.stopPropagation(e);
-            onCellDoubleClickRef.current?.(cell);
-          });
-          
-          // Mouse over
-          rect.on('mouseover', () => {
-            onCellMouseOverRef.current?.(cell);
-            const isSelected = isCellSelected(cell, selectedCell);
-            if (!isSelected) {
-              const hoverStyle = getCellStyle(currentLevel, false, true);
-              rect.setStyle(hoverStyle);
-            }
-          });
-          
-          // Mouse out
-          rect.on('mouseout', () => {
-            onCellMouseOutRef.current?.();
-            const isSelected = isCellSelected(cell, selectedCell);
-            if (!isSelected) {
-              const normalStyle = getCellStyle(currentLevel, false, false);
-              rect.setStyle(normalStyle);
-            }
-          });
-
-          // Store reference with cell data
-          gridCellsRef.current.push({ rect, cell });
-        });
-        
         gridGroup.addTo(map);
         gridLayerRef.current = gridGroup;
         
@@ -233,55 +208,46 @@ export default function LeafletMap({
         spatialGroup.addTo(map);
         spatialLayerRef.current = spatialGroup;
 
-                // Load study area boundary from GeoJSON
+        // ✅ Load study area boundary from GeoJSON - configurado para estar debajo sin interferir
         fetch('/data/study-area.geojson?t=' + Date.now())
           .then(response => {
-            console.log('📍 Fetch response status:', response.status);
             if (!response.ok) {
               throw new Error(`HTTP error! status: ${response.status}`);
             }
-            return response.text();
-          })
-          .then(text => {
-            console.log('📍 GeoJSON raw data length:', text.length);
-            if (!text || text.trim().length === 0) {
-              throw new Error('GeoJSON file is empty!');
-            }
-            try {
-              const data = JSON.parse(text);
-              console.log('✅ GeoJSON parsed successfully:', data);
-              return data;
-            } catch (e) {
-              console.error('❌ JSON parse error:', e);
-              throw e;
-            }
+            return response.json();
           })
           .then(geojsonData => {
-  console.log('📍 Creating GeoJSON layer...');
-  console.log('📍 Features count:', geojsonData.features?.length || 'No features');
+            const geoLayer = L.geoJSON(geojsonData, {
+              style: {
+                color: '#6B7280',
+                weight: 3,
+                opacity: 1,
+                fill: false,
+                dashArray: null,
+              },
+              interactive: false, // 🔥 CRITICAL: No capturar eventos de mouse - dejar pasar clicks a las celdas
+              pane: 'tilePane', // Colocar en el pane más bajo (debajo de overlays)
+            }).addTo(map);
 
-  const geoLayer = L.geoJSON(geojsonData, {
-  style: {
-  color: '#6B7280',  // Gris medio (Tailwind gray-500)
-  weight: 3,          // Aumenté grosor para mejor visibilidad
-  opacity: 1,
-  fill: false,
-  dashArray: null,
-},
-  onEachFeature: function (feature, layer) {
-    layer.bringToBack();
-  }
-}).addTo(map);
-
-  if (geoLayer.getBounds().isValid()) {
-    map.fitBounds(geoLayer.getBounds(), { padding: [20, 20], maxZoom: 13 });
-  }
-
-  console.log('✅ GeoJSON layer added successfully');
-})
+            // Enviar explícitamente al fondo para que nunca interfiera con celdas
+            geoLayer.bringToBack();
+            
+            // ✅ Zoom inicial para ver toda el área de estudio
+            // Solo se ejecuta UNA VEZ gracias al flag, sin animación para no destruir listeners
+            if (geoLayer.getBounds().isValid() && !fitBoundsDoneRef.current) {
+              map.fitBounds(geoLayer.getBounds(), { 
+                padding: [20, 20], 
+                maxZoom: 13, 
+                animate: false,  // Sin animación - evita destruir event listeners
+                duration: 0 
+              });
+              fitBoundsDoneRef.current = true;
+            }
+          })
           .catch(err => {
             console.error('❌ Error loading study area:', err);
           });
+        
         // Station markers
         stations.forEach(station => {
           const marker = L.marker(station.position, {
@@ -420,6 +386,13 @@ export default function LeafletMap({
       gridLayerRef.current.remove();
       return;
     }
+    
+    // Si no hay celdas, limpiar y salir
+    if (!gridCells || gridCells.length === 0) {
+      gridLayerRef.current.clearLayers();
+      gridCellsRef.current = [];
+      return;
+    }
 
     import('leaflet').then(({ default: L }) => {
       // Asegurar que la capa de grid esté visible
@@ -427,7 +400,7 @@ export default function LeafletMap({
         gridLayerRef.current.addTo(mapRef.current);
       }
       
-      // O(1) batch clear vs O(n) forEach remove
+      // Limpiar celdas previas
       gridLayerRef.current.clearLayers();
       gridCellsRef.current = [];
 
@@ -456,18 +429,18 @@ export default function LeafletMap({
         // Mouse over
         rect.on('mouseover', () => {
           onCellMouseOverRef.current?.(cell);
-          const isSelected = isCellSelected(cell, selectedCell);
+          const isSelected = isCellSelected(cell, selectedCellRef.current);
           if (!isSelected) {
-            rect.setStyle(getCellStyle(currentLevel, false, true));
+            rect.setStyle(getCellStyle(currentLevelRef.current, false, true));
           }
         });
 
         // Mouse out
         rect.on('mouseout', () => {
           onCellMouseOutRef.current?.();
-          const isSelected = isCellSelected(cell, selectedCell);
+          const isSelected = isCellSelected(cell, selectedCellRef.current);
           if (!isSelected) {
-            rect.setStyle(getCellStyle(currentLevel, false, false));
+            rect.setStyle(getCellStyle(currentLevelRef.current, false, false));
           }
         });
 
