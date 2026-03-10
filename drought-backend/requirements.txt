@@ -16,13 +16,14 @@ sqlalchemy==2.0.25
 # Authentication & Security
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
-bcrypt==4.1.2
+bcrypt==4.0.1
 
 # Data Processing
 pandas==2.2.0
 pyarrow==15.0.0
 numpy==1.26.3
 duckdb==0.10.0
+orjson==3.10.7
 
 # Geospatial Processing
 geopandas==0.14.2

@@ -152,21 +152,26 @@ class HistoricalDataService:
                     # Si ya existe, continuar
                     pass
             
-            # ⚡ Optimización para PLAN GRATUITO
-            # Configuración minimalista: 512 MB RAM, 2 threads
-            self.conn.execute("SET threads TO 2")  # Reducido para plan gratuito
-            self.conn.execute("SET memory_limit = '512MB'")  # Optimizado para Render/Railway free
-            self.conn.execute("SET temp_directory = '/tmp'")  # Usar ephemeral storage
+            # Recursos: ajustar según entorno
+            if self.is_production:
+                self.conn.execute("SET threads TO 2")
+                self.conn.execute("SET memory_limit = '512MB'")
+            else:
+                # Desarrollo: aprovechar todos los cores disponibles
+                self.conn.execute("SET threads TO 4")
+                self.conn.execute("SET memory_limit = '2GB'")
+            
+            self.conn.execute("SET temp_directory = '/tmp'")
             
             # HTTP/Network optimizations
             self.conn.execute("SET http_timeout = 120000")  # 2 minutos
-            self.conn.execute("SET http_retries = 2")  # Menos retries = más rápido
+            self.conn.execute("SET http_retries = 2")
             self.conn.execute("SET enable_http_metadata_cache = true")
             self.conn.execute("SET http_keep_alive = true")
             
             # Performance optimizations
             self.conn.execute("SET force_download = false")
-            self.conn.execute("SET enable_object_cache = false")  # No usar cache interno de DuckDB
+            self.conn.execute("SET enable_object_cache = true")  # Cache footers/metadata de parquet en RAM
             self.conn.execute("SET preserve_insertion_order = false")
             self.conn.execute("SET enable_progress_bar = false")
         
@@ -634,14 +639,25 @@ class HistoricalDataService:
             where_clauses.append(f"{date_col} >= CAST('{start_date}' AS DATE)")
             where_clauses.append(f"{date_col} <= CAST('{end_date}' AS DATE)")
             
-            # 🔥 OPTIMIZACIÓN CRÍTICA: Filtro de ubicación más estricto
+            # 🔥 OPTIMIZACIÓN CRÍTICA: BETWEEN en vez de ABS() / cell_id string
+            # DuckDB puede usar las estadísticas min/max de cada row-group del parquet
+            # con predicados BETWEEN/>=/<= pero NO con ABS() ni cell_id string equality.
+            # Esto puede saltar 90%+ de los row-groups en archivos grandes.
             if cell_id:
-                where_clauses.append(f"cell_id = '{cell_id}'")
+                # Parsear cell_id (formato LON_LAT) → filtro numérico exacto por lat/lon
+                try:
+                    _lon_s, _lat_s = cell_id.split('_', 1)
+                    _eps = 0.0001  # sub-mm precision para absorber redondeo float
+                    _clat, _clon = float(_lat_s), float(_lon_s)
+                    where_clauses.append(f"lat BETWEEN {_clat - _eps} AND {_clat + _eps}")
+                    where_clauses.append(f"lon BETWEEN {_clon - _eps} AND {_clon + _eps}")
+                except (ValueError, IndexError):
+                    where_clauses.append(f"cell_id = '{cell_id}'")  # fallback
             elif lat is not None and lon is not None:
-                # Tolerancia reducida para descargar menos datos (0.05 = ~5km)
-                tolerance = 0.01
-                where_clauses.append(f"ABS(lat - {lat}) < {tolerance}")
-                where_clauses.append(f"ABS(lon - {lon}) < {tolerance}")
+                # BETWEEN permite pushdown de row-groups; 0.15° captura celda más cercana en res 0.25°
+                tolerance = 0.15
+                where_clauses.append(f"lat BETWEEN {lat - tolerance} AND {lat + tolerance}")
+                where_clauses.append(f"lon BETWEEN {lon - tolerance} AND {lon + tolerance}")
             
             # 🚀 Construir query SIN ORDER BY (permite early stopping con LIMIT)
             # DuckDB puede usar HTTP Range Requests para leer solo row groups necesarios
@@ -680,9 +696,10 @@ class HistoricalDataService:
             result_df = conn.execute(query).fetchdf()
             t6 = time_module.time()
             
-            # Log solo si demora más de 5s (debug)
-            if (t6 - t5) > 5:
-                print(f"⚠️ Query lenta: {(t6-t5):.2f}s - considera configurar R2_PUBLIC_URL")
+            # Log de timing siempre (útil para detectar regresiones)
+            elapsed = t6 - t5
+            level = "⚠️" if elapsed > 5 else "⚡"
+            print(f"{level} timeseries query: {elapsed:.2f}s | file={parquet_url} var={variable} cell={cell_id} rows={len(result_df)}")
             
             # 🎯 Si buscamos por lat/lon, filtrar por el punto más cercano (en pandas, rápido)
             if lat is not None and lon is not None and len(result_df) > 0:
@@ -749,8 +766,19 @@ class HistoricalDataService:
                 # Eliminar lat/lon del DataFrame (datos repetitivos)
                 result_df = result_df.drop(columns=['lat', 'lon'])
             
-            # Convertir a lista de diccionarios (mucho más rápido que iterrows)
-            # Ahora solo incluye: date, value, quality, [category, color, severity]
+            # ⚡ Convertir fecha a string ISO ANTES de to_dict
+            # Evita pandas.Timestamp en los dicts → FastAPI no necesita llamar
+            # jsonable_encoder sobre toda la lista (10-100x más rápido para datasets grandes)
+            if len(result_df) > 0 and 'date' in result_df.columns:
+                result_df['date'] = result_df['date'].dt.strftime('%Y-%m-%d')
+            
+            # ⚡ Limpiar Inf→NaN (bug de datos). NaN queda como np.nan en el DataFrame;
+            # orjson los serializa a null nativo sin recursión.
+            if 'value' in result_df.columns:
+                result_df['value'] = result_df['value'].replace([np.inf, -np.inf], np.nan)
+            
+            # Convertir a lista de diccionarios
+            # Ahora solo incluye: date (str), value (float|None), [category, color, severity]
             data_points = result_df.to_dict('records')
             
             # Calcular estadísticas
@@ -786,7 +814,7 @@ class HistoricalDataService:
         target_date: date,
         bounds: Optional[Dict[str, float]] = None,
         limit: int = 100000
-    ) -> Tuple[List[Dict[str, Any]], Dict[str, float]]:
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, float], date]:
         """
         Consulta datos espaciales (2D) para una fecha específica usando DuckDB.
         
@@ -802,7 +830,7 @@ class HistoricalDataService:
             limit: Máximo de celdas a retornar (default: 100000)
             
         Returns:
-            Tupla (celdas, estadísticas)
+            Tupla (celdas, estadísticas, fecha_usada)
         """
         # Cache key con protección
         cache_key = None
@@ -820,7 +848,8 @@ class HistoricalDataService:
             if cache_key:
                 cached_result = self.cache.get(cache_key)
                 if cached_result and isinstance(cached_result, dict) and "data" in cached_result:
-                    return cached_result["data"], cached_result["statistics"]
+                    used_date = cached_result.get("used_date", str(target_date))
+                    return cached_result["data"], cached_result["statistics"], used_date
         except Exception:
             cache_key = None
         
@@ -835,49 +864,58 @@ class HistoricalDataService:
             # ⚡ Obtener URL óptima (pública R2 o local)
             source = self._get_parquet_url(parquet_url)
             
-            # Construir filtros
-            where_clauses = []
-            
-            # Filtro de fecha - usar la columna detectada
-            where_clauses.append(f"{date_col} = CAST('{target_date}' AS DATE)")
+            # Construir filtros base (sin fecha)
+            base_clauses = []
             
             # Filtro de bounds
             if bounds:
-                where_clauses.append(f"lat >= {bounds.get('min_lat', -90)}")
-                where_clauses.append(f"lat <= {bounds.get('max_lat', 90)}")
-                where_clauses.append(f"lon >= {bounds.get('min_lon', -180)}")
-                where_clauses.append(f"lon <= {bounds.get('max_lon', 180)}")
+                base_clauses.append(f"lat >= {bounds.get('min_lat', -90)}")
+                base_clauses.append(f"lat <= {bounds.get('max_lat', 90)}")
+                base_clauses.append(f"lon >= {bounds.get('min_lon', -180)}")
+                base_clauses.append(f"lon <= {bounds.get('max_lon', 180)}")
             
             # Construir query según formato
             if file_format == 'long':
-                where_clauses.append(f"var = '{variable}'")
-                where_clause = " AND ".join(where_clauses)
-                
-                # Query desde disco local
-                query = f"""
-                SELECT 
-                    lat,
-                    lon,
-                    value
-                FROM read_parquet('{source}')
-                WHERE {where_clause}
-                LIMIT {limit}
-                """
+                base_clauses.append(f"var = '{variable}'")
+                value_expr = "value"
             else:
-                where_clause = " AND ".join(where_clauses)
-                
+                value_expr = variable
+
+            base_where = " AND ".join(base_clauses) if base_clauses else "1=1"
+
+            def run_spatial_query(for_date: date):
+                where_clause = f"{base_where} AND CAST({date_col} AS DATE) = CAST('{for_date}' AS DATE)"
                 query = f"""
                 SELECT 
                     lat,
                     lon,
-                    {variable} as value
+                    AVG(CAST({value_expr} AS DOUBLE)) as value,
+                    COUNT(*) as records_in_cell
                 FROM read_parquet('{source}')
                 WHERE {where_clause}
+                GROUP BY lat, lon
                 LIMIT {limit}
                 """
-         
-            
-            result_df = conn.execute(query).fetchdf()
+                return conn.execute(query).fetchdf()
+
+            used_date = target_date
+            result_df = run_spatial_query(target_date)
+
+            # Si no hay datos exactos para la fecha solicitada, usar la fecha más cercana con datos.
+            if result_df.empty:
+                nearest_date_query = f"""
+                SELECT CAST({date_col} AS DATE) AS d
+                FROM read_parquet('{source}')
+                WHERE {base_where} AND {value_expr} IS NOT NULL
+                GROUP BY 1
+                ORDER BY ABS(DATEDIFF('day', d, CAST('{target_date}' AS DATE))) ASC
+                LIMIT 1
+                """
+                nearest_row = conn.execute(nearest_date_query).fetchone()
+
+                if nearest_row and nearest_row[0] is not None:
+                    used_date = nearest_row[0]
+                    result_df = run_spatial_query(used_date)
             
             # 🚀 Preparar datos espaciales (operaciones vectorizadas)
             is_drought_index = variable in ["SPI", "SPEI", "RAI", "EDDI", "PDSI"]
@@ -969,21 +1007,31 @@ class HistoricalDataService:
             
             # Estadísticas
             values = result_df['value'].dropna()
+            total_cells = len(result_df)
+            valid_cells = len(values)
             statistics = {
                 "mean": float(values.mean()) if len(values) > 0 else None,
                 "min": float(values.min()) if len(values) > 0 else None,
                 "max": float(values.max()) if len(values) > 0 else None,
                 "std": float(values.std()) if len(values) > 0 else None,
-                "count": len(values),
-                "total_cells": len(result_df)
+                "count": valid_cells,
+                "total_cells": total_cells,
+                "unique_cells": total_cells,
+                "valid_cells": valid_cells,
+                "null_cells": total_cells - valid_cells,
+                "raw_records_aggregated": int(result_df['records_in_cell'].sum()) if 'records_in_cell' in result_df else len(result_df)
             }
             
             # Cache (15 minutos) - como dict para serialización JSON
             if cache_key:
-                result_dict = {"data": grid_cells, "statistics": statistics}
+                result_dict = {
+                    "data": grid_cells,
+                    "statistics": statistics,
+                    "used_date": str(used_date)
+                }
                 self.cache.set(cache_key, result_dict, expire=900)
             
-            return grid_cells, statistics
+            return grid_cells, statistics, used_date
             
         except Exception as e:
             raise Exception(f"Error consultando datos espaciales: {str(e)}")
