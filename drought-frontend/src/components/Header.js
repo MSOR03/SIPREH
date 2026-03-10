@@ -45,27 +45,58 @@ export default function Header() {
             </div>
           </div>
 
-          {/* Theme toggle — only renders icon after client mount to avoid hydration mismatch */}
-          <button
-            onClick={toggleTheme}
-            className="group relative p-2.5 rounded-lg bg-white/10 hover:bg-white/20 dark:bg-white/5 dark:hover:bg-white/15 backdrop-blur-md transition-all duration-300 shadow-lg hover:shadow-xl hover:scale-105 border border-white/20"
-            aria-label="Toggle theme"
-            title={mounted ? (theme === 'light' ? 'Cambiar a modo oscuro' : 'Cambiar a modo claro') : 'Toggle theme'}
-          >
-            <div className="absolute inset-0 rounded-xl bg-linear-to-br from-white/0 to-white/10 opacity-0 group-hover:opacity-100 transition-opacity" />
+          {/* Right side - Logos de entidades + Theme toggle */}
+          <div className="flex items-center gap-4">
+            
+            {/* Logos de entidades asociadas */}
+<div className="flex items-center gap-3 px-8 py-4 bg-white dark:bg-gray-500 rounded-lg border border-gray-300 dark:border-gray-500 shadow-lg">
+  <div className="flex items-center gap-3">
+    <img 
+      src="/logos/entidad1.png" 
+      alt="Entidad 1" 
+      className="h-12 w-auto object-contain hover:scale-110 transition-transform duration-300 cursor-pointer"
+      title="Entidad 1"
+    />
+    <div className="w-px h-8 bg-gray-400 dark:bg-gray-600 hidden sm:block"></div>
+    <img 
+      src="/logos/entidad2.png" 
+      alt="Entidad 2" 
+      className="h-12 w-auto object-contain hover:scale-110 transition-transform duration-300 cursor-pointer"
+      title="Entidad 2"
+    />
+    <div className="w-px h-8 bg-gray-400 dark:bg-gray-600 hidden sm:block"></div>
+    <img 
+      src="/logos/entidad3.png" 
+      alt="Entidad 3" 
+      className="h-12 w-auto object-contain hover:scale-110 transition-transform duration-300 cursor-pointer"
+      title="Entidad 3"
+    />
+  </div>
+            </div>
 
-            {/* Placeholder shown during SSR and before mount — same size, no content */}
-            {!mounted ? (
-              <span className="block w-6 h-6" />
-            ) : theme === 'dark' ? (
-              <Sun
-                className="w-6 h-6 text-yellow-300 relative z-10 animate-spin"
-                style={{ animationDuration: '20s' }}
-              />
-            ) : (
-              <Moon className="w-6 h-6 text-white relative z-10" />
-            )}
-          </button>
+            {/* Theme toggle — only renders icon after client mount to avoid hydration mismatch */}
+            <button
+              onClick={toggleTheme}
+              className="group relative p-2.5 rounded-lg bg-white/10 hover:bg-white/20 dark:bg-white/5 dark:hover:bg-white/15 backdrop-blur-md transition-all duration-300 shadow-lg hover:shadow-xl hover:scale-105 border border-white/20"
+              aria-label="Toggle theme"
+              title={mounted ? (theme === 'light' ? 'Cambiar a modo oscuro' : 'Cambiar a modo claro') : 'Toggle theme'}
+            >
+              <div className="absolute inset-0 rounded-xl bg-linear-to-br from-white/0 to-white/10 opacity-0 group-hover:opacity-100 transition-opacity" />
+
+              {/* Placeholder shown during SSR and before mount — same size, no content */}
+              {!mounted ? (
+                <span className="block w-6 h-6" />
+              ) : theme === 'dark' ? (
+                <Sun
+                  className="w-6 h-6 text-yellow-300 relative z-10 animate-spin"
+                  style={{ animationDuration: '20s' }}
+                />
+              ) : (
+                <Moon className="w-6 h-6 text-white relative z-10" />
+              )}
+            </button>
+
+          </div>
 
         </div>
       </div>
