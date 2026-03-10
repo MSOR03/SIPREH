@@ -19,7 +19,7 @@ export default function Header() {
         <div className="absolute bottom-0 -right-1/4 w-1/2 h-full bg-blue-300/10 blur-3xl rounded-full" />
       </div>
 
-      <div className="container mx-auto px-6 py-3 relative">
+<div className="container mx-auto px-6 py-5 relative">
         <div className="flex items-center justify-between">
 
           {/* Brand */}
@@ -49,30 +49,50 @@ export default function Header() {
           <div className="flex items-center gap-4">
             
             {/* Logos de entidades asociadas */}
-<div className="flex items-center gap-3 px-8 py-4 bg-white dark:bg-gray-500 rounded-lg border border-gray-300 dark:border-gray-500 shadow-lg">
+<div className="flex items-center gap-3 px-8 py-6 bg-white dark:bg-gray-500 rounded-lg border border-gray-300 dark:border-gray-500 shadow-lg">
   <div className="flex items-center gap-3">
-    <img 
-      src="/logos/entidad1.png" 
-      alt="Entidad 1" 
-      className="h-12 w-auto object-contain hover:scale-110 transition-transform duration-300 cursor-pointer"
-      title="Entidad 1"
-    />
+    <a 
+      href="https://www.agenciaatenea.gov.co/" 
+      target="_blank" 
+      rel="noopener noreferrer"
+    >
+      <img 
+        src="/logos/entidad1.png" 
+        alt="Entidad 1" 
+        className="h-12 w-auto object-contain hover:scale-110 transition-transform duration-300 cursor-pointer"
+        title="Entidad 1"
+      />
+    </a>
     <div className="w-px h-8 bg-gray-400 dark:bg-gray-600 hidden sm:block"></div>
-    <img 
-      src="/logos/entidad2.png" 
-      alt="Entidad 2" 
-      className="h-12 w-auto object-contain hover:scale-110 transition-transform duration-300 cursor-pointer"
-      title="Entidad 2"
-    />
+    
+    <a 
+      href="https://bogota.unal.edu.co/" 
+      target="_blank" 
+      rel="noopener noreferrer"
+    >
+      <img 
+        src="/logos/entidad2.png" 
+        alt="Entidad 2" 
+        className="h-12 w-auto object-contain hover:scale-110 transition-transform duration-300 cursor-pointer"
+        title="Entidad 2"
+      />
+    </a>
     <div className="w-px h-8 bg-gray-400 dark:bg-gray-600 hidden sm:block"></div>
-    <img 
-      src="/logos/entidad3.png" 
-      alt="Entidad 3" 
-      className="h-12 w-auto object-contain hover:scale-110 transition-transform duration-300 cursor-pointer"
-      title="Entidad 3"
-    />
+    
+    <a 
+      href="http://www.hermes.unal.edu.co/pages/Consultas/Grupo.xhtml?idGrupo=236&opcion=1" 
+      target="_blank" 
+      rel="noopener noreferrer"
+    >
+      <img 
+        src="/logos/entidad3.png" 
+        alt="Entidad 3" 
+        className="h-12 w-auto object-contain hover:scale-110 transition-transform duration-300 cursor-pointer"
+        title="Entidad 3"
+      />
+    </a>
   </div>
-            </div>
+</div>
 
             {/* Theme toggle — only renders icon after client mount to avoid hydration mismatch */}
             <button
