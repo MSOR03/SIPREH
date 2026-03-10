@@ -3,11 +3,11 @@
 import { useState } from 'react';
 import { RotateCcw, Download, MapPin, ChevronLeft, ChevronRight, Home } from 'lucide-react';
 import Button from './ui/Button';
+import { useTheme } from '@/contexts/ThemeContext';
 import dynamic from 'next/dynamic';
 import TimeSeriesChart from './TimeSeriesChart';
 import { useGridNavigation } from '../hooks/useGridNavigation';
 import { formatLevelLabel } from '../utils/gridLevels';
-import { useTheme } from '../contexts/ThemeContext';
 
 // Dynamic import for Leaflet to avoid SSR issues
 const LeafletMap = dynamic(
@@ -33,8 +33,8 @@ export default function MapArea({
   onStationSelect,
   onCellSelect 
 }) {
-  const [mapKey, setMapKey] = useState(() => Date.now());
   const { theme } = useTheme();
+  const [mapKey, setMapKey] = useState(() => Date.now());
 
   // Usar el hook de navegación jerárquica
   const gridNav = useGridNavigation('LOW');
@@ -243,6 +243,7 @@ export default function MapArea({
       <div className="flex-1 relative bg-gradient-to-br from-blue-50/20 via-blue-50/10 to-blue-50/10 dark:from-gray-950 dark:via-[#0f1419] dark:to-gray-950 p-6">
         <div className="h-full bg-white/60 dark:bg-gray-900/60 backdrop-blur-sm rounded-2xl shadow-2xl ring-4 ring-blue-500/20 dark:ring-blue-400/20 border border-gray-200 dark:border-gray-700">
           <LeafletMap 
+            theme={theme}
             onStationSelect={handleStationSelect}
             selectedStation={selectedStation}
             selectedCell={selectedCell}
@@ -255,7 +256,6 @@ export default function MapArea({
             hoveredCell={gridNav.hoveredCell}
             spatialDataCells={plotData?.type === '2D' ? plotData.gridCells : null}
             spatialResolution={plotData?.type === '2D' ? (plotData.resolution || 0.05) : 0.05}
-            theme={theme}
           />
         </div>
       </div>
