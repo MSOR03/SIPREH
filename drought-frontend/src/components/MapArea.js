@@ -8,7 +8,6 @@ import dynamic from 'next/dynamic';
 import TimeSeriesChart from './TimeSeriesChart';
 import { useGridNavigation } from '../hooks/useGridNavigation';
 import { formatLevelLabel } from '../utils/gridLevels';
-import { useTheme } from '../contexts/ThemeContext';
 
 // Dynamic import for Leaflet to avoid SSR issues
 const LeafletMap = dynamic(
@@ -36,7 +35,6 @@ export default function MapArea({
 }) {
   const { theme } = useTheme();
   const [mapKey, setMapKey] = useState(() => Date.now());
-  const { theme } = useTheme();
 
   // Usar el hook de navegación jerárquica
   const gridNav = useGridNavigation('LOW');
@@ -258,7 +256,6 @@ export default function MapArea({
             hoveredCell={gridNav.hoveredCell}
             spatialDataCells={plotData?.type === '2D' ? plotData.gridCells : null}
             spatialResolution={plotData?.type === '2D' ? (plotData.resolution || 0.05) : 0.05}
-            theme={theme}
           />
         </div>
       </div>
