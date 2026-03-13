@@ -25,6 +25,7 @@ export default function Home() {
     droughtIndex: '',
     startDate: '',
     endDate: '',
+    useSpatialInterval: false,
   });
 
   // Prediction State
@@ -65,6 +66,7 @@ export default function Home() {
   // Handle Analysis Plot
   const handleAnalysisPlot = async () => {
     const is2DMode = analysisState.visualizationType === '2D';
+    const useSpatialInterval = is2DMode && Boolean(analysisState.useSpatialInterval);
     
     // Validaciones: para 1D requiere celda/estación, para 2D no
     if (!is2DMode && !selectedStation && !selectedCell) {
@@ -87,6 +89,16 @@ export default function Home() {
     
     if (!is2DMode && !analysisState.endDate) {
       showWarning('Por favor selecciona el rango de fechas completo', 'Fechas requeridas');
+      return;
+    }
+
+    if (useSpatialInterval && !analysisState.endDate) {
+      showWarning('Por favor selecciona la fecha final del intervalo', 'Fechas requeridas');
+      return;
+    }
+
+    if (useSpatialInterval && analysisState.startDate > analysisState.endDate) {
+      showWarning('La fecha inicial no puede ser mayor que la fecha final', 'Rango inválido');
       return;
     }
 
@@ -119,17 +131,26 @@ export default function Home() {
         const response = await historicalApi.getSpatialData({
           fileId: file.file_id,
           variable: variable,
-          targetDate: analysisState.startDate, // Usar startDate como fecha única
+          targetDate: useSpatialInterval ? null : analysisState.startDate,
+          startDate: useSpatialInterval ? analysisState.startDate : null,
+          endDate: useSpatialInterval ? analysisState.endDate : null,
+          useInterval: useSpatialInterval,
         });
+
+        const periodSubtitle = response.is_interval
+          ? `Periodo: ${response.period?.start_date} a ${response.period?.end_date} (promedio)`
+          : `Fecha: ${response.date}`;
 
         // Procesar respuesta y actualizar plotData para modo 2D
         setPlotData({
           type: '2D',
           title: `${response.variable_name} - Mapa Espacial`,
-          subtitle: `Fecha: ${response.date} | Resolución: ${targetResolution}°`,
+          subtitle: `${periodSubtitle} | Resolución: ${targetResolution}°`,
           variable: response.variable,
           unit: response.unit,
           date: response.date,
+          period: response.period,
+          isInterval: Boolean(response.is_interval),
           gridCells: response.grid_cells,  // Array de celdas con lat, lon, value, color, etc.
           statistics: response.statistics,
           bounds: response.bounds,
@@ -142,9 +163,12 @@ export default function Home() {
         const dateNote = usedFallbackDate
           ? ` | fecha solicitada ${response.requested_date}, usada ${response.date}`
           : '';
+        const intervalNote = response.is_interval
+          ? ` | promedio ${response.period?.start_date} a ${response.period?.end_date}`
+          : '';
 
         showSuccess(
-          `Mapa 2D generado: ${uniqueCells} celdas únicas, ${validCells} con dato válido (${targetResolution}°)${dateNote}`,
+          `Mapa 2D generado: ${uniqueCells} celdas únicas, ${validCells} con dato válido (${targetResolution}°)${intervalNote}${dateNote}`,
           '¡Listo!'
         );
         

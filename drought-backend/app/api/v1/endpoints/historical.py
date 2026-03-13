@@ -85,7 +85,10 @@ class SpatialDataRequest(BaseModel):
     """Request para datos espaciales (mapa 2D)."""
     parquet_file_id: int = Field(..., description="ID del archivo parquet")
     variable: str = Field(..., description="Variable o índice")
-    target_date: date = Field(..., description="Fecha objetivo")
+    target_date: Optional[date] = Field(None, description="Fecha objetivo (modo fecha única)")
+    start_date: Optional[date] = Field(None, description="Fecha inicial (modo intervalo)")
+    end_date: Optional[date] = Field(None, description="Fecha final (modo intervalo)")
+    use_interval: bool = Field(False, description="Si true, usa rango [start_date, end_date] y promedia por celda")
     min_lat: Optional[float] = None
     max_lat: Optional[float] = None
     min_lon: Optional[float] = None
@@ -653,7 +656,33 @@ def get_spatial_data(
     Respuesta rápida gracias a DuckDB + cache.
     """
     # 🚀 Caché a nivel de endpoint
-    endpoint_cache_key = f"endpoint:spatial:{request.parquet_file_id}:{request.variable}:{request.target_date}:{request.min_lat}:{request.max_lat}:{request.min_lon}:{request.max_lon}"
+    interval_mode = request.use_interval or (
+        request.start_date is not None and request.end_date is not None and request.start_date != request.end_date
+    )
+
+    if interval_mode:
+        if not request.start_date or not request.end_date:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Para modo intervalo debes enviar start_date y end_date"
+            )
+        if request.start_date > request.end_date:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="start_date no puede ser mayor que end_date"
+            )
+    elif not request.target_date:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="En modo fecha única debes enviar target_date"
+        )
+
+    endpoint_cache_key = (
+        f"endpoint:spatial:{request.parquet_file_id}:{request.variable}:"
+        f"mode:{'interval' if interval_mode else 'single'}:"
+        f"target:{request.target_date}:start:{request.start_date}:end:{request.end_date}:"
+        f"{request.min_lat}:{request.max_lat}:{request.min_lon}:{request.max_lon}:limit:{request.limit}"
+    )
     
     cached = cache_service.get(endpoint_cache_key)
     if cached and isinstance(cached, dict):
@@ -688,7 +717,7 @@ def get_spatial_data(
     
     # Construir bounds si se proporcionaron
     bounds = None
-    if any([request.min_lat, request.max_lat, request.min_lon, request.max_lon]):
+    if any(v is not None for v in [request.min_lat, request.max_lat, request.min_lon, request.max_lon]):
         bounds = {
             "min_lat": request.min_lat or -90,
             "max_lat": request.max_lat or 90,
@@ -702,6 +731,9 @@ def get_spatial_data(
             parquet_url=cloud_key,  # Usar cloud_key cacheado
             variable=request.variable,
             target_date=request.target_date,
+            start_date=request.start_date,
+            end_date=request.end_date,
+            use_interval=interval_mode,
             bounds=bounds,
             limit=request.limit
         )
@@ -726,9 +758,15 @@ def get_spatial_data(
             "variable": request.variable,
             "variable_name": var_info.get("name", request.variable),
             "unit": var_info.get("unit", ""),
-            "date": used_date,
+            "date": used_date if not interval_mode else request.end_date,
             "requested_date": request.target_date,
-            "fallback_used": str(used_date) != str(request.target_date),
+            "fallback_used": (not interval_mode) and str(used_date) != str(request.target_date),
+            "is_interval": interval_mode,
+            "period": {
+                "start_date": request.start_date,
+                "end_date": request.end_date,
+                "aggregation": "mean"
+            } if interval_mode else None,
             "grid_cells": grid_cells,
             "statistics": statistics,
             "bounds": actual_bounds

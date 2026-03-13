@@ -811,10 +811,13 @@ class HistoricalDataService:
         self,
         parquet_url: str,
         variable: str,
-        target_date: date,
+        target_date: Optional[date] = None,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+        use_interval: bool = False,
         bounds: Optional[Dict[str, float]] = None,
         limit: int = 100000
-    ) -> Tuple[List[Dict[str, Any]], Dict[str, float], date]:
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, float], Optional[date]]:
         """
         Consulta datos espaciales (2D) para una fecha específica usando DuckDB.
         
@@ -825,13 +828,20 @@ class HistoricalDataService:
         Args:
             parquet_url: Cloud key o URL del archivo parquet
             variable: Nombre de la variable
-            target_date: Fecha objetivo
+            target_date: Fecha objetivo (modo fecha única)
+            start_date: Fecha inicial (modo intervalo)
+            end_date: Fecha final (modo intervalo)
+            use_interval: Si True usa intervalo [start_date, end_date]
             bounds: Límites espaciales (min_lat, max_lat, min_lon, max_lon)
             limit: Máximo de celdas a retornar (default: 100000)
             
         Returns:
             Tupla (celdas, estadísticas, fecha_usada)
         """
+        interval_mode = use_interval or (
+            start_date is not None and end_date is not None and start_date != end_date
+        )
+
         # Cache key con protección
         cache_key = None
         try:
@@ -839,7 +849,10 @@ class HistoricalDataService:
                 "spatial",
                 url=parquet_url,
                 var=variable,
+                mode="interval" if interval_mode else "single",
                 date=str(target_date),
+                start_date=str(start_date),
+                end_date=str(end_date),
                 bounds=str(bounds) if bounds else None,
                 limit=limit
             )
@@ -855,6 +868,14 @@ class HistoricalDataService:
         
         try:
             conn = self._get_connection()
+
+            if interval_mode:
+                if not start_date or not end_date:
+                    raise ValueError("Para modo intervalo debes enviar start_date y end_date")
+                if start_date > end_date:
+                    raise ValueError("start_date no puede ser mayor que end_date")
+            elif not target_date:
+                raise ValueError("En modo fecha única debes enviar target_date")
             
             # Detectar formato y columna de fecha (lee solo metadatos, cacheado 24h)
             format_info = self._detect_parquet_format(parquet_url)
@@ -898,24 +919,47 @@ class HistoricalDataService:
                 """
                 return conn.execute(query).fetchdf()
 
-            used_date = target_date
-            result_df = run_spatial_query(target_date)
-
-            # Si no hay datos exactos para la fecha solicitada, usar la fecha más cercana con datos.
-            if result_df.empty:
-                nearest_date_query = f"""
-                SELECT CAST({date_col} AS DATE) AS d
+            def run_spatial_query_interval(range_start: date, range_end: date):
+                where_clause = (
+                    f"{base_where} AND CAST({date_col} AS DATE) BETWEEN "
+                    f"CAST('{range_start}' AS DATE) AND CAST('{range_end}' AS DATE)"
+                )
+                query = f"""
+                SELECT
+                    lat,
+                    lon,
+                    AVG(CAST({value_expr} AS DOUBLE)) as value,
+                    COUNT(*) as records_in_cell,
+                    COUNT(DISTINCT CAST({date_col} AS DATE)) as days_in_cell
                 FROM read_parquet('{source}')
-                WHERE {base_where} AND {value_expr} IS NOT NULL
-                GROUP BY 1
-                ORDER BY ABS(DATEDIFF('day', d, CAST('{target_date}' AS DATE))) ASC
-                LIMIT 1
+                WHERE {where_clause}
+                GROUP BY lat, lon
+                LIMIT {limit}
                 """
-                nearest_row = conn.execute(nearest_date_query).fetchone()
+                return conn.execute(query).fetchdf()
 
-                if nearest_row and nearest_row[0] is not None:
-                    used_date = nearest_row[0]
-                    result_df = run_spatial_query(used_date)
+            used_date = None if interval_mode else target_date
+
+            if interval_mode:
+                result_df = run_spatial_query_interval(start_date, end_date)
+            else:
+                result_df = run_spatial_query(target_date)
+
+                # Si no hay datos exactos para la fecha solicitada, usar la fecha más cercana con datos.
+                if result_df.empty:
+                    nearest_date_query = f"""
+                    SELECT CAST({date_col} AS DATE) AS d
+                    FROM read_parquet('{source}')
+                    WHERE {base_where} AND {value_expr} IS NOT NULL
+                    GROUP BY 1
+                    ORDER BY ABS(DATEDIFF('day', d, CAST('{target_date}' AS DATE))) ASC
+                    LIMIT 1
+                    """
+                    nearest_row = conn.execute(nearest_date_query).fetchone()
+
+                    if nearest_row and nearest_row[0] is not None:
+                        used_date = nearest_row[0]
+                        result_df = run_spatial_query(used_date)
             
             # 🚀 Preparar datos espaciales (operaciones vectorizadas)
             is_drought_index = variable in ["SPI", "SPEI", "RAI", "EDDI", "PDSI"]
@@ -1119,89 +1163,6 @@ class HistoricalDataService:
         except Exception as e:
             raise Exception(f"Error obteniendo límites espaciales: {str(e)}")
     
-    def get_date_range(self, parquet_url: str) -> Tuple[date, date]:
-        """
-        Obtiene el rango de fechas disponible en un archivo parquet.
-        
-        Args:
-            parquet_url: URL del archivo
-            
-        Returns:
-            Tupla (fecha_inicio, fecha_fin)
-        """
-        cache_key = f"date_range:{hashlib.md5(parquet_url.encode()).hexdigest()}"
-        
-        cached = self.cache.get(cache_key)
-        if cached:
-            return cached
-        
-        try:
-            conn = self._get_connection()
-            url = self._get_parquet_url(parquet_url)
-            
-            query = f"""
-            SELECT 
-                MIN(date) as min_date,
-                MAX(date) as max_date
-            FROM read_parquet('{url}')
-            """
-            
-            result = conn.execute(query).fetchone()
-            date_range = (result[0], result[1])
-            
-            # Cache por 24 horas
-            self.cache.set(cache_key, date_range, expire=86400)
-            
-            return date_range
-            
-        except Exception as e:
-            raise Exception(f"Error obteniendo rango de fechas: {str(e)}")
-    
-    def get_spatial_bounds(self, parquet_url: str) -> Dict[str, float]:
-        """
-        Obtiene los límites espaciales del archivo parquet.
-        
-        Args:
-            parquet_url: URL del archivo
-            
-        Returns:
-            Diccionario con min_lat, max_lat, min_lon, max_lon
-        """
-        cache_key = f"spatial_bounds:{hashlib.md5(parquet_url.encode()).hexdigest()}"
-        
-        cached = self.cache.get(cache_key)
-        if cached:
-            return cached
-        
-        try:
-            conn = self._get_connection()
-            url = self._get_parquet_url(parquet_url)
-            
-            query = f"""
-            SELECT 
-                MIN(lat) as min_lat,
-                MAX(lat) as max_lat,
-                MIN(lon) as min_lon,
-                MAX(lon) as max_lon
-            FROM read_parquet('{url}')
-            """
-            
-            result = conn.execute(query).fetchone()
-            bounds = {
-                "min_lat": float(result[0]),
-                "max_lat": float(result[1]),
-                "min_lon": float(result[2]),
-                "max_lon": float(result[3])
-            }
-            
-            # Cache por 24 horas
-            self.cache.set(cache_key, bounds, expire=86400)
-            
-            return bounds
-            
-        except Exception as e:
-            raise Exception(f"Error obteniendo límites espaciales: {str(e)}")
-
     def get_unique_cells(self, parquet_url: str) -> List[str]:
         """
         Obtiene los cell_ids únicos de un archivo parquet.
