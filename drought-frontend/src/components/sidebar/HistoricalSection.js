@@ -22,16 +22,34 @@ export default function HistoricalSection({
   showSpatialUnit,
   spatialUnitOptions,
   showDataSource,
-  nextStep,
   analysisDisabled,
   onAnalysisPlot,
   onAnalysisSave,
 }) {
+  const stepNumbers = (() => {
+    let current = 1;
+    const numbers = {
+      variables: current++,
+      visualizationType: current++,
+    };
+
+    if (showSpatialUnit) {
+      numbers.spatialUnit = current++;
+    }
+
+    if (showDataSource) {
+      numbers.dataSource = current++;
+    }
+
+    numbers.timePeriod = current;
+    return numbers;
+  })();
+
   return (
     <CollapsiblePanel
       icon={BarChart3}
       title="Análisis Histórico"
-      subtitle="Últimos 30 años"
+      subtitle="Datos desde 1941"
       color="blue"
       open={historicalOpen}
       onToggle={() => setHistoricalOpen(!historicalOpen)}
@@ -126,7 +144,7 @@ export default function HistoricalSection({
               </div>
             </div>
 
-            <StepSection step={nextStep()} title="Variables" collapsible defaultOpen>
+            <StepSection step={stepNumbers.variables} title="Variables" collapsible defaultOpen>
               <div className="grid grid-cols-2 gap-3">
                 <Select
                   label="Variable climática"
@@ -145,7 +163,7 @@ export default function HistoricalSection({
               </div>
             </StepSection>
 
-            <StepSection step={nextStep()} title="Tipo de visualización" collapsible defaultOpen>
+            <StepSection step={stepNumbers.visualizationType} title="Tipo de visualización" collapsible defaultOpen>
               <div className="grid grid-cols-2 gap-2">
                 <RadioOption
                   name="vizType"
@@ -169,7 +187,7 @@ export default function HistoricalSection({
             </StepSection>
 
             {showSpatialUnit && (
-              <StepSection step={nextStep()} title="Unidad espacial" collapsible defaultOpen={false}>
+              <StepSection step={stepNumbers.spatialUnit} title="Unidad espacial" collapsible defaultOpen={false}>
                 <div className="space-y-2">
                   {spatialUnitOptions.map((opt) => (
                     <RadioOption
@@ -187,7 +205,7 @@ export default function HistoricalSection({
             )}
 
             {showDataSource && (
-              <StepSection step={nextStep()} title="Fuente de datos" collapsible defaultOpen={false}>
+              <StepSection step={stepNumbers.dataSource} title="Fuente de datos" collapsible defaultOpen={false}>
                 <div className="grid grid-cols-3 gap-2">
                   {[
                     { key: 'ERA5', res: 0.25 },
@@ -207,7 +225,7 @@ export default function HistoricalSection({
               </StepSection>
             )}
 
-            <StepSection step={nextStep()} title="Período de tiempo" collapsible defaultOpen>
+            <StepSection step={stepNumbers.timePeriod} title="Período de tiempo" collapsible defaultOpen>
               {analysisState.visualizationType === '2D' ? (
                 <div className="space-y-4">
                   <div className="p-3 rounded-xl border border-blue-200/70 dark:border-blue-900/40 bg-white/70 dark:bg-[#151b27]/70">
