@@ -551,7 +551,8 @@ class HistoricalDataService:
             
             result = {
                 'format': 'wide',
-                'date_column': 'date'  # default
+                'date_column': 'date',
+                'var_column': 'var'
             }
             
             # Detectar columna de fecha
@@ -561,13 +562,18 @@ class HistoricalDataService:
                 result['date_column'] = 'datetime'
             elif 'fecha' in column_names:
                 result['date_column'] = 'fecha'
+            elif 'ds' in column_names:
+                result['date_column'] = 'ds'
             elif 'time' in column_names:
                 result['date_column'] = 'time'
             
-            # Long format: tiene columnas 'var' y 'value'
+            # Long format: columnas de variable ('var' o 'kind') + 'value'
             if 'var' in column_names and 'value' in column_names:
                 result['format'] = 'long'
-            # Wide format: las variables son columnas
+                result['var_column'] = 'var'
+            elif 'kind' in column_names and 'value' in column_names:
+                result['format'] = 'long'
+                result['var_column'] = 'kind'
             else:
                 known_vars = set(self.COLUMN_MAPPING.keys())
                 if any(col in known_vars for col in column_names):
@@ -686,9 +692,10 @@ class HistoricalDataService:
             # 🚀 Construir query SIN ORDER BY (permite early stopping con LIMIT)
             # DuckDB puede usar HTTP Range Requests para leer solo row groups necesarios
             if file_format == 'long':
-                where_clauses.append(f"var = '{variable}'")
+                var_col = format_info.get('var_column', 'var')
+                where_clauses.append(f"{var_col} = '{variable}'")
                 where_clause = " AND ".join(where_clauses)
-                
+
                 # ⚡ Sin ORDER BY - DuckDB optimiza con HTTP Range
                 query = f"""
                 SELECT 
@@ -702,7 +709,7 @@ class HistoricalDataService:
                 """
             else:
                 where_clause = " AND ".join(where_clauses)
-                
+
                 # ⚡ Sin ORDER BY - permite HTTP Range eficiente
                 query = f"""
                 SELECT 
@@ -874,10 +881,11 @@ class HistoricalDataService:
             
             # Construir query según formato
             if file_format == 'long':
-                base_clauses.append(f"var = '{variable}'")
+                var_col = format_info.get('var_column', 'var')
+                base_clauses.append(f"{var_col} = '{variable}'")
                 value_expr = "value"
             else:
-                value_expr = variable
+                value_expr = variable  # wide: la columna se llama igual que la variable
 
             base_where = " AND ".join(base_clauses) if base_clauses else "1=1"
 
