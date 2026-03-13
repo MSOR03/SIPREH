@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { RotateCcw, Download, MapPin, ChevronLeft, ChevronRight, Home } from 'lucide-react';
+import { RotateCcw, Download, MapPin, ChevronLeft, ChevronRight, Home, Layers, Grid3x3, Navigation, Droplets, Database, Map as MapIcon } from 'lucide-react';
 import Button from './ui/Button';
 import { useTheme } from '@/contexts/ThemeContext';
 import dynamic from 'next/dynamic';
@@ -31,7 +31,9 @@ export default function MapArea({
   selectedStation, 
   selectedCell,
   onStationSelect,
-  onCellSelect 
+  onCellSelect,
+  mapLayers,
+  setMapLayers,
 }) {
   const { theme } = useTheme();
   const [mapKey, setMapKey] = useState(() => Date.now());
@@ -45,6 +47,11 @@ export default function MapArea({
 
   // Usar el hook de navegación jerárquica
   const gridNav = useGridNavigation('LOW');
+  const [layerMenuOpen, setLayerMenuOpen] = useState(false);
+
+  const toggleLayer = (key) => {
+    setMapLayers(prev => ({ ...prev, [key]: !prev[key] }));
+  };
 
   const handleReset = () => {
     // Force complete remount with new timestamp
@@ -248,7 +255,7 @@ export default function MapArea({
 
       {/* Map Container */}
       <div className="flex-1 relative bg-gradient-to-br from-blue-50/20 via-blue-50/10 to-blue-50/10 dark:from-gray-950 dark:via-[#0f1419] dark:to-gray-950 p-6">
-        <div className="h-full bg-white/60 dark:bg-gray-900/60 backdrop-blur-sm rounded-2xl shadow-2xl ring-4 ring-blue-500/20 dark:ring-blue-400/20 border border-gray-200 dark:border-gray-700">
+        <div className="h-full relative bg-white/60 dark:bg-gray-900/60 backdrop-blur-sm rounded-2xl shadow-2xl ring-4 ring-blue-500/20 dark:ring-blue-400/20 border border-gray-200 dark:border-gray-700">
           <LeafletMap 
             theme={theme}
             onStationSelect={handleStationSelect}
@@ -263,7 +270,68 @@ export default function MapArea({
             hoveredCell={gridNav.hoveredCell}
             spatialDataCells={plotData?.type === '2D' ? plotData.gridCells : null}
             spatialResolution={plotData?.type === '2D' ? (plotData.resolution || 0.05) : 0.05}
+            showGrid={mapLayers?.grid ?? true}
+            showStations={mapLayers?.stations ?? true}
+            showBoundary={mapLayers?.boundary ?? true}
           />
+
+          {/* ── Layer Control Overlay ── */}
+          <div className="absolute top-1 left-1 z-[1000]">
+            <button
+              onClick={() => setLayerMenuOpen(!layerMenuOpen)}
+              className="flex items-center gap-2 px-3 py-2 bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm rounded-lg shadow-lg border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm font-medium text-gray-700 dark:text-gray-200"
+              title="Capas del mapa"
+            >
+              <Layers className="w-4 h-4" />
+              Capas
+            </button>
+
+            {layerMenuOpen && (
+              <div className="absolute top-full left-0 mb-2 w-56 bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm rounded-xl shadow-xl border border-gray-200 dark:border-gray-600 p-2 space-y-1 animate-fade-in">
+                <p className="text-[10px] uppercase tracking-wider font-bold text-gray-400 dark:text-gray-500 px-2 pt-1 pb-1">Capas visibles</p>
+                {[
+                  { key: 'grid', label: 'Celdas (Grid)', icon: Grid3x3, color: 'text-blue-500' },
+                  { key: 'stations', label: 'Estaciones', icon: Navigation, color: 'text-green-500' },
+                  { key: 'cuencas', label: 'Cuencas', icon: Droplets, color: 'text-teal-500' },
+                  { key: 'embalses', label: 'Embalses', icon: Database, color: 'text-purple-500' },
+                  { key: 'boundary', label: 'Límite área de estudio', icon: MapIcon, color: 'text-gray-500' },
+                ].map(({ key, label, icon: Icon, color }) => (
+                  <label
+                    key={key}
+                    className={`flex items-center gap-2.5 px-2 py-2 rounded-lg cursor-pointer transition-colors ${
+                      mapLayers?.[key]
+                        ? 'bg-blue-50 dark:bg-blue-900/20'
+                        : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={mapLayers?.[key] ?? false}
+                      onChange={() => toggleLayer(key)}
+                      className="sr-only"
+                    />
+                    <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
+                      mapLayers?.[key]
+                        ? 'bg-blue-500 border-blue-500'
+                        : 'border-gray-300 dark:border-gray-500'
+                    }`}>
+                      {mapLayers?.[key] && (
+                        <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      )}
+                    </div>
+                    <Icon className={`w-4 h-4 ${mapLayers?.[key] ? color : 'text-gray-400 dark:text-gray-500'}`} />
+                    <span className={`text-xs font-medium ${
+                      mapLayers?.[key]
+                        ? 'text-gray-800 dark:text-gray-200'
+                        : 'text-gray-500 dark:text-gray-400'
+                    }`}>{label}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

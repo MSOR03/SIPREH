@@ -28,11 +28,15 @@ export default function LeafletMap({
   spatialDataCells = null, // Datos espaciales 2D para visualización
   spatialResolution = 0.05, // Resolución de las celdas espaciales
   theme = 'light', // Tema para tiles del mapa
+  showGrid = true,       // Visibilidad de celdas del grid
+  showStations = true,   // Visibilidad de estaciones
+  showBoundary = true,   // Visibilidad del límite del área de estudio
 }) {
   const mapRef = useRef(null);
   const containerRef = useRef(null);
   const markersRef = useRef([]);
   const gridLayerRef = useRef(null);
+  const boundaryLayerRef = useRef(null); // Referencia al boundary GeoJSON
   const gridCellsRef = useRef([]);
   const spatialLayerRef = useRef(null); // Capa para datos 2D
   const spatialCellsRef = useRef([]);
@@ -231,6 +235,7 @@ export default function LeafletMap({
 
             // Enviar explícitamente al fondo para que nunca interfiera con celdas
             geoLayer.bringToBack();
+            boundaryLayerRef.current = geoLayer;
             
             // ✅ Zoom inicial para ver toda el área de estudio
             // Solo se ejecuta UNA VEZ gracias al flag, sin animación para no destruir listeners
@@ -340,6 +345,33 @@ export default function LeafletMap({
     tileLayerRef.current.setUrl(url);
   }, [theme]);
 
+  // Toggle station marker visibility
+  useEffect(() => {
+    if (!mapRef.current) return;
+    markersRef.current.forEach(({ marker }) => {
+      if (showStations) {
+        if (!mapRef.current.hasLayer(marker)) marker.addTo(mapRef.current);
+      } else {
+        if (mapRef.current.hasLayer(marker)) marker.remove();
+      }
+    });
+  }, [showStations, mapReady]);
+
+  // Toggle boundary layer visibility
+  useEffect(() => {
+    if (!mapRef.current || !boundaryLayerRef.current) return;
+    if (showBoundary) {
+      if (!mapRef.current.hasLayer(boundaryLayerRef.current)) {
+        boundaryLayerRef.current.addTo(mapRef.current);
+        boundaryLayerRef.current.bringToBack();
+      }
+    } else {
+      if (mapRef.current.hasLayer(boundaryLayerRef.current)) {
+        boundaryLayerRef.current.remove();
+      }
+    }
+  }, [showBoundary, mapReady]);
+
   // Update marker icons when selection changes
   useEffect(() => {
     if (!mapRef.current || markersRef.current.length === 0) return;
@@ -381,8 +413,8 @@ export default function LeafletMap({
   useEffect(() => {
     if (!mapRef.current || !gridLayerRef.current) return;
     
-    // Ocultar celdas de navegación si hay datos espaciales 2D mostrados
-    if (spatialDataCells && spatialDataCells.length > 0) {
+    // Ocultar celdas de navegación si hay datos espaciales 2D mostrados o si showGrid es false
+    if ((spatialDataCells && spatialDataCells.length > 0) || !showGrid) {
       gridLayerRef.current.remove();
       return;
     }
@@ -447,7 +479,7 @@ export default function LeafletMap({
         gridCellsRef.current.push({ rect, cell });
       });
     });
-  }, [gridCells, currentLevel, spatialDataCells, mapReady]);
+  }, [gridCells, currentLevel, spatialDataCells, showGrid, mapReady]);
 
   // Renderizar celdas espaciales 2D cuando cambien
   useEffect(() => {
