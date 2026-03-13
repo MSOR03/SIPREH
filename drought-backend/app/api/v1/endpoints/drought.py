@@ -550,7 +550,7 @@ def get_dashboard_config():
             "start": "1990-01-01",
             "end": datetime.now().strftime("%Y-%m-%d")
         },
-        "color_scales": drought_service.DROUGHT_CATEGORIES,
+        "color_scales": drought_service.INDEX_DROUGHT_SCALES,
         "thresholds": {
             "spi": [-2.0, -1.5, -1.0, 1.0, 1.5, 2.0],
             "spei": [-2.0, -1.5, -1.0, 1.0, 1.5, 2.0]

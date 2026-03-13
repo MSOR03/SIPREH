@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { RotateCcw, Download, MapPin, ChevronLeft, ChevronRight, Home, Layers, Grid3x3, Navigation, Droplets, Database, Map } from 'lucide-react';
+import { RotateCcw, Download, MapPin, ChevronLeft, ChevronRight, Home, Layers, Grid3x3, Navigation, Droplets, Database, Map as MapIcon } from 'lucide-react';
 import Button from './ui/Button';
 import { useTheme } from '@/contexts/ThemeContext';
 import dynamic from 'next/dynamic';
@@ -37,6 +37,13 @@ export default function MapArea({
 }) {
   const { theme } = useTheme();
   const [mapKey, setMapKey] = useState(() => Date.now());
+
+ // Normalizar variable para evitar fallos por mayúsculas/minúsculas o espacios
+  const normalizedVariable = String(plotData?.variable ?? '').trim().toUpperCase();
+  const isDroughtIndex = ['SPI', 'SPEI', 'RAI', 'EDDI', 'PDSI'].includes(normalizedVariable);
+  const hasCategorizedCells = Boolean(
+    plotData?.gridCells?.some((c) => c?.color && c?.category)
+  );
 
   // Usar el hook de navegación jerárquica
   const gridNav = useGridNavigation('LOW');
@@ -287,7 +294,7 @@ export default function MapArea({
                   { key: 'stations', label: 'Estaciones', icon: Navigation, color: 'text-green-500' },
                   { key: 'cuencas', label: 'Cuencas', icon: Droplets, color: 'text-teal-500' },
                   { key: 'embalses', label: 'Embalses', icon: Database, color: 'text-purple-500' },
-                  { key: 'boundary', label: 'Límite área de estudio', icon: Map, color: 'text-gray-500' },
+                  { key: 'boundary', label: 'Límite área de estudio', icon: MapIcon, color: 'text-gray-500' },
                 ].map(({ key, label, icon: Icon, color }) => (
                   <label
                     key={key}
@@ -386,52 +393,42 @@ export default function MapArea({
                     </div>
                   </div>
                 )}
-                
                 <div className="bg-white dark:bg-gray-900/50 rounded-xl p-6 shadow-inner">
                   <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
                     Visualización Espacial 2D
                   </h4>
                   <p className="text-xs text-gray-600 dark:text-gray-400 mb-4">
                     Las celdas en el mapa muestran los valores de <strong>{plotData.variable}</strong> para la fecha seleccionada.
-                    Los colores representan {plotData.variable.includes('SPI') || plotData.variable.includes('SPEI') || plotData.variable.includes('PDSI') ? 'las categorías de sequía' : 'los valores de la variable'}.
+Los colores representan {isDroughtIndex ? 'las categorías de sequía' : 'los valores de la variable'}.
                   </p>
                   
-                  {/* Leyenda de colores para índices de sequía */}
-                  {(plotData.variable === 'SPI' || plotData.variable === 'SPEI' || plotData.variable === 'PDSI') && (
-                    <div className="mt-4">
-                      <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">Leyenda:</p>
-                      <div className="grid grid-cols-2 gap-2 text-xs">
-                        <div className="flex items-center gap-2">
-                          <div className="w-4 h-4 rounded" style={{backgroundColor: '#000080'}}></div>
-                          <span className="text-gray-700 dark:text-gray-300">Extremadamente Húmedo</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="w-4 h-4 rounded" style={{backgroundColor: '#0000FF'}}></div>
-                          <span className="text-gray-700 dark:text-gray-300">Muy Húmedo</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="w-4 h-4 rounded" style={{backgroundColor: '#00FFFF'}}></div>
-                          <span className="text-gray-700 dark:text-gray-300">Moderadamente Húmedo</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="w-4 h-4 rounded" style={{backgroundColor: '#00FF00'}}></div>
-                          <span className="text-gray-700 dark:text-gray-300">Normal</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="w-4 h-4 rounded" style={{backgroundColor: '#FFFF00'}}></div>
-                          <span className="text-gray-700 dark:text-gray-300">Moderadamente Seco</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="w-4 h-4 rounded" style={{backgroundColor: '#FFA500'}}></div>
-                          <span className="text-gray-700 dark:text-gray-300">Severamente Seco</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="w-4 h-4 rounded" style={{backgroundColor: '#FF0000'}}></div>
-                          <span className="text-gray-700 dark:text-gray-300">Extremadamente Seco</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
+{/* Leyenda de colores para índices de sequía — dinámica desde datos del backend */}
+{isDroughtIndex && hasCategorizedCells && (() => {
+  const seen = new Map();
+  plotData.gridCells.forEach(c => {
+    if (c.color && c.category && !seen.has(c.category)) {
+      seen.set(c.category, { color: c.color, severity: c.severity ?? 99 });
+    }
+  });
+
+  const legend = [...seen.entries()]
+    .map(([label, { color, severity }]) => ({ label, color, severity }))
+    .sort((a, b) => a.severity - b.severity);
+
+  return (
+    <div className="mt-4">
+      <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">Leyenda:</p>
+      <div className="grid grid-cols-2 gap-2 text-xs">
+        {legend.map(({ label, color }) => (
+          <div key={label} className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded" style={{ backgroundColor: color }}></div>
+            <span className="text-gray-700 dark:text-gray-300">{label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+})()}
                 </div>
               </div>
             ) : (plotData.type === 'Serie de Tiempo' || plotData.type === '1D') && plotData.data ? (

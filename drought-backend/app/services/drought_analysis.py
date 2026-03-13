@@ -61,7 +61,6 @@ class DroughtAnalysisService:
     
     # Catálogo de índices de sequía (columnas reales del parquet)
     DROUGHT_INDICES = {
-        # Índices meteorológicos
         "SPI": {
             "name": "SPI",
             "description": "Standardized Precipitation Index",
@@ -94,7 +93,6 @@ class DroughtAnalysisService:
             "supports_prediction": True,
             "column_names": ["EDDI", "eddi"]
         },
-        # Índice hidrológico
         "PDSI": {
             "name": "PDSI",
             "description": "Palmer Drought Severity Index",
@@ -104,29 +102,52 @@ class DroughtAnalysisService:
             "column_names": ["PDSI", "pdsi"]
         }
     }
-    
-    # Categorización estándar de sequía
-    DROUGHT_CATEGORIES = {
-        "extreme_wet": {"min": 2.0, "max": float('inf'), "label": "Extremadamente Húmedo", "color": "#000080"},
-        "very_wet": {"min": 1.5, "max": 2.0, "label": "Muy Húmedo", "color": "#0000FF"},
-        "moderately_wet": {"min": 1.0, "max": 1.5, "label": "Moderadamente Húmedo", "color": "#00FFFF"},
-        "normal": {"min": -1.0, "max": 1.0, "label": "Normal", "color": "#00FF00"},
-        "moderately_dry": {"min": -1.5, "max": -1.0, "label": "Moderadamente Seco", "color": "#FFFF00"},
-        "severely_dry": {"min": -2.0, "max": -1.5, "label": "Severamente Seco", "color": "#FFA500"},
-        "extremely_dry": {"min": float('-inf'), "max": -2.0, "label": "Extremadamente Seco", "color": "#FF0000"}
+
+    # Escalas de severidad por índice
+    INDEX_DROUGHT_SCALES = {
+        # SPI, SPEI, RAI — escala estándar ±1/1.5/2
+        "DEFAULT": [
+            {"min": float('-inf'), "max": -2.0, "label": "Extremadamente Seco",  "color": "#FF0000"},
+            {"min": -2.0,          "max": -1.5, "label": "Severamente Seco",     "color": "#FFA500"},
+            {"min": -1.5,          "max": -1.0, "label": "Moderadamente Seco",   "color": "#FFFF00"},
+            {"min": -1.0,          "max":  1.0, "label": "Normal",               "color": "#00FF00"},
+            {"min":  1.0,          "max":  1.5, "label": "Moderadamente Húmedo", "color": "#00FFFF"},
+            {"min":  1.5,          "max":  2.0, "label": "Muy Húmedo",           "color": "#0000FF"},
+            {"min":  2.0,          "max": float('inf'), "label": "Extremadamente Húmedo", "color": "#000080"},
+        ],
+        # PDSI — escala Palmer estándar ±2/3/4
+        "PDSI": [
+            {"min": float('-inf'), "max": -4.0, "label": "Extremadamente Seco",  "color": "#FF0000"},
+            {"min": -4.0,          "max": -3.0, "label": "Severamente Seco",     "color": "#FFA500"},
+            {"min": -3.0,          "max": -2.0, "label": "Moderadamente Seco",   "color": "#FFFF00"},
+            {"min": -2.0,          "max":  2.0, "label": "Normal",               "color": "#00FF00"},
+            {"min":  2.0,          "max":  3.0, "label": "Moderadamente Húmedo", "color": "#00FFFF"},
+            {"min":  3.0,          "max":  4.0, "label": "Muy Húmedo",           "color": "#0000FF"},
+            {"min":  4.0,          "max": float('inf'), "label": "Extremadamente Húmedo", "color": "#000080"},
+        ],
+        # EDDI — polaridad invertida: positivo = seco, negativo = húmedo
+        "EDDI": [
+            {"min":  2.0,          "max": float('inf'), "label": "Extremadamente Seco",  "color": "#FF0000"},
+            {"min":  1.5,          "max":  2.0, "label": "Severamente Seco",     "color": "#FFA500"},
+            {"min":  1.0,          "max":  1.5, "label": "Moderadamente Seco",   "color": "#FFFF00"},
+            {"min": -1.0,          "max":  1.0, "label": "Normal",               "color": "#00FF00"},
+            {"min": -1.5,          "max": -1.0, "label": "Moderadamente Húmedo", "color": "#00FFFF"},
+            {"min": -2.0,          "max": -1.5, "label": "Muy Húmedo",           "color": "#0000FF"},
+            {"min": float('-inf'), "max": -2.0, "label": "Extremadamente Húmedo", "color": "#000080"},
+        ],
     }
-    
+
     def __init__(self):
         """Inicializa el servicio de análisis de sequía."""
         pass
-    
+
+    def _get_scale_for_index(self, variable_id: str) -> List[Dict[str, Any]]:
+        """Retorna la escala de severidad correspondiente al índice dado."""
+        if variable_id in self.INDEX_DROUGHT_SCALES:
+            return self.INDEX_DROUGHT_SCALES[variable_id]
+        return self.INDEX_DROUGHT_SCALES["DEFAULT"]
+
     def get_available_variables(self) -> List[Dict[str, Any]]:
-        """
-        Obtiene lista de variables hidrometeorológicas disponibles.
-        
-        Returns:
-            Lista de diccionarios con información de variables
-        """
         variables = []
         for var_id, var_info in self.HYDROMETEOROLOGICAL_VARIABLES.items():
             variables.append({
@@ -140,12 +161,6 @@ class DroughtAnalysisService:
         return variables
     
     def get_available_indices(self) -> List[Dict[str, Any]]:
-        """
-        Obtiene lista de índices de sequía disponibles.
-        
-        Returns:
-            Lista de diccionarios con información de índices
-        """
         indices = []
         for idx_id, idx_info in self.DROUGHT_INDICES.items():
             indices.append({
@@ -160,48 +175,35 @@ class DroughtAnalysisService:
         return indices
     
     def find_column_in_dataframe(self, df: pd.DataFrame, variable_id: str) -> Optional[str]:
-        """
-        Encuentra la columna correspondiente a una variable en el DataFrame.
-        
-        Args:
-            df: DataFrame de pandas
-            variable_id: ID de la variable o índice a buscar
-            
-        Returns:
-            Nombre de la columna encontrada o None
-        """
-        # Buscar en variables
         if variable_id in self.HYDROMETEOROLOGICAL_VARIABLES:
             possible_names = self.HYDROMETEOROLOGICAL_VARIABLES[variable_id]["column_names"]
-        # Buscar en índices
         elif variable_id in self.DROUGHT_INDICES:
             possible_names = self.DROUGHT_INDICES[variable_id]["column_names"]
         else:
             return None
         
-        # Buscar en columnas del DataFrame (case-insensitive)
         df_columns_lower = {col.lower(): col for col in df.columns}
-        
         for name in possible_names:
             if name.lower() in df_columns_lower:
                 return df_columns_lower[name.lower()]
-        
         return None
     
-    def categorize_drought_value(self, value: float) -> str:
+    def categorize_drought_value(self, value: float, variable_id: str = "SPI") -> str:
         """
-        Categoriza un valor de índice de sequía.
-        
+        Categoriza un valor de índice de sequía usando la escala correcta para el índice.
+
         Args:
             value: Valor del índice
-            
+            variable_id: ID del índice (PDSI y EDDI tienen escalas propias)
+
         Returns:
-            Categoría de sequía
+            Etiqueta de la categoría
         """
-        for category, thresholds in self.DROUGHT_CATEGORIES.items():
-            if thresholds["min"] <= value < thresholds["max"]:
-                return category
-        return "normal"
+        scale = self._get_scale_for_index(variable_id)
+        for cat in scale:
+            if cat["min"] <= value < cat["max"]:
+                return cat["label"]
+        return "Normal"
     
     def get_timeseries_from_parquet(
         self,
@@ -211,28 +213,12 @@ class DroughtAnalysisService:
         end_date: date,
         location_filter: Optional[Dict[str, Any]] = None
     ) -> Tuple[List[Dict[str, Any]], Dict[str, float]]:
-        """
-        Extrae serie de tiempo de un archivo parquet.
-        
-        Args:
-            parquet_data: Datos del archivo parquet en bytes
-            variable_id: ID de variable o índice
-            start_date: Fecha inicial
-            end_date: Fecha final
-            location_filter: Filtro de ubicación (station_id, cell_id, lat/lon)
-            
-        Returns:
-            Tupla (datos, estadísticas)
-        """
-        # Leer parquet
         df = pd.read_parquet(BytesIO(parquet_data))
         
-        # Encontrar columna de la variable
         value_column = self.find_column_in_dataframe(df, variable_id)
         if not value_column:
             raise ValueError(f"Variable/índice '{variable_id}' no encontrada en los datos")
         
-        # Asegurar columna de fecha
         date_columns = ['date', 'time', 'fecha', 'datetime']
         date_col = None
         for col in date_columns:
@@ -243,21 +229,17 @@ class DroughtAnalysisService:
         if not date_col:
             raise ValueError("No se encontró columna de fecha en los datos")
         
-        # Convertir a datetime
         df[date_col] = pd.to_datetime(df[date_col])
         
-        # Filtrar por rango de fechas
         mask = (df[date_col] >= pd.Timestamp(start_date)) & (df[date_col] <= pd.Timestamp(end_date))
         df_filtered = df[mask].copy()
         
-        # Aplicar filtro de ubicación si existe
         if location_filter:
             if 'station_id' in location_filter and 'station_id' in df_filtered.columns:
                 df_filtered = df_filtered[df_filtered['station_id'] == location_filter['station_id']]
             elif 'cell_id' in location_filter and 'cell_id' in df_filtered.columns:
                 df_filtered = df_filtered[df_filtered['cell_id'] == location_filter['cell_id']]
             elif 'lat' in location_filter and 'lon' in location_filter:
-                # Buscar punto más cercano
                 if 'lat' in df_filtered.columns and 'lon' in df_filtered.columns:
                     distances = np.sqrt(
                         (df_filtered['lat'] - location_filter['lat'])**2 +
@@ -265,18 +247,14 @@ class DroughtAnalysisService:
                     )
                     df_filtered = df_filtered[distances == distances.min()]
         
-        # Ordenar por fecha
         df_filtered = df_filtered.sort_values(date_col)
         
-        # Preparar datos de salida
         data_points = []
         for _, row in df_filtered.iterrows():
             value = float(row[value_column])
             category = None
-            
-            # Categorizar si es un índice de sequía
             if variable_id in self.DROUGHT_INDICES:
-                category = self.categorize_drought_value(value)
+                category = self.categorize_drought_value(value, variable_id)  # <-- pasa variable_id
             
             data_points.append({
                 "date": row[date_col].date(),
@@ -285,7 +263,6 @@ class DroughtAnalysisService:
                 "quality": "good"
             })
         
-        # Calcular estadísticas
         values = df_filtered[value_column].dropna()
         statistics = {
             "mean": float(values.mean()) if len(values) > 0 else 0.0,
@@ -303,26 +280,12 @@ class DroughtAnalysisService:
         variable_id: str,
         target_date: date
     ) -> Tuple[List[Dict[str, Any]], Dict[str, float]]:
-        """
-        Extrae datos espaciales (2D) de un archivo parquet para una fecha específica.
-        
-        Args:
-            parquet_data: Datos del archivo parquet en bytes
-            variable_id: ID de variable o índice
-            target_date: Fecha objetivo
-            
-        Returns:
-            Tupla (celdas con datos, estadísticas)
-        """
-        # Leer parquet
         df = pd.read_parquet(BytesIO(parquet_data))
         
-        # Encontrar columna de la variable
         value_column = self.find_column_in_dataframe(df, variable_id)
         if not value_column:
             raise ValueError(f"Variable/índice '{variable_id}' no encontrada en los datos")
         
-        # Encontrar columna de fecha
         date_columns = ['date', 'time', 'fecha', 'datetime']
         date_col = None
         for col in date_columns:
@@ -333,33 +296,24 @@ class DroughtAnalysisService:
         if not date_col:
             raise ValueError("No se encontró columna de fecha en los datos")
         
-        # Convertir a datetime
         df[date_col] = pd.to_datetime(df[date_col])
-        
-        # Filtrar por fecha objetivo
         df_date = df[df[date_col].dt.date == target_date].copy()
         
-        # Verificar columnas espaciales
         required_cols = ['lat', 'lon']
         if not all(col in df_date.columns for col in required_cols):
-            # Intentar con latitude/longitude
             if 'latitude' in df_date.columns:
                 df_date['lat'] = df_date['latitude']
             if 'longitude' in df_date.columns:
                 df_date['lon'] = df_date['longitude']
         
-        # Preparar datos de celdas
         grid_cells = []
         for idx, row in df_date.iterrows():
             value = float(row[value_column])
             category = None
-            
-            # Categorizar si es un índice de sequía
             if variable_id in self.DROUGHT_INDICES:
-                category = self.categorize_drought_value(value)
+                category = self.categorize_drought_value(value, variable_id)  # <-- pasa variable_id
             
             cell_id = row.get('cell_id', f"cell_{idx}")
-            
             grid_cells.append({
                 "cell_id": str(cell_id),
                 "lat": float(row['lat']),
@@ -368,7 +322,6 @@ class DroughtAnalysisService:
                 "category": category
             })
         
-        # Calcular estadísticas
         values = df_date[value_column].dropna()
         statistics = {
             "mean": float(values.mean()) if len(values) > 0 else 0.0,
@@ -381,23 +334,12 @@ class DroughtAnalysisService:
         return grid_cells, statistics
     
     def get_color_scale(self, variable_id: str) -> Dict[str, Any]:
-        """
-        Obtiene la escala de colores apropiada para una variable/índice.
-        
-        Args:
-            variable_id: ID de variable o índice
-            
-        Returns:
-            Configuración de escala de colores
-        """
         if variable_id in self.DROUGHT_INDICES:
-            # Escala de colores para índices de sequía
             return {
                 "type": "categorical",
-                "categories": self.DROUGHT_CATEGORIES
+                "categories": self._get_scale_for_index(variable_id)
             }
         else:
-            # Escala continua para variables
             return {
                 "type": "continuous",
                 "colormap": "viridis",

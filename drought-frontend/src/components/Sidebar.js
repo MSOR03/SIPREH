@@ -198,9 +198,6 @@ export default function Sidebar({
     ]
   );
 
-  let stepCounter = 0;
-  const nextStep = () => ++stepCounter;
-
   const showDataSource = is2DMode && isHydromet && (analysisState.spatialUnit || 'grid') === 'grid';
   const showSpatialUnit = is2DMode;
 
@@ -257,7 +254,6 @@ export default function Sidebar({
           showSpatialUnit={showSpatialUnit}
           spatialUnitOptions={spatialUnitOptions}
           showDataSource={showDataSource}
-          nextStep={nextStep}
           analysisDisabled={analysisDisabled}
           onAnalysisPlot={onAnalysisPlot}
           onAnalysisSave={onAnalysisSave}

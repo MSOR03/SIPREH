@@ -70,15 +70,45 @@ class HistoricalDataService:
         }
     }
     
-    # Categorías de sequía según valores de índices
-    DROUGHT_CATEGORIES = {
-        2.0: {"label": "Extremadamente Húmedo", "color": "#000080", "severity": 0},
-        1.5: {"label": "Muy Húmedo", "color": "#0000FF", "severity": 1},
-        1.0: {"label": "Moderadamente Húmedo", "color": "#00FFFF", "severity": 2},
-        -1.0: {"label": "Normal", "color": "#00FF00", "severity": 3},
-        -1.5: {"label": "Moderadamente Seco", "color": "#FFFF00", "severity": 4},
-        -2.0: {"label": "Severamente Seco", "color": "#FFA500", "severity": 5},
-        float('-inf'): {"label": "Extremadamente Seco", "color": "#FF0000", "severity": 6},
+      # Escalas de severidad por índice
+    # Nota: bins en orden ascendente para pd.cut (intervalos [a,b) con right=False)
+    INDEX_DROUGHT_SCALES = {
+        "DEFAULT": {  # SPI, SPEI, RAI
+            "bins": [-np.inf, -2.0, -1.5, -1.0, 1.0, 1.5, 2.0, np.inf],
+            "categories": [
+                {"label": "Extremadamente Seco",  "color": "#FF0000", "severity": 6},
+                {"label": "Severamente Seco",     "color": "#FFA500", "severity": 5},
+                {"label": "Moderadamente Seco",   "color": "#FFFF00", "severity": 4},
+                {"label": "Normal",               "color": "#00FF00", "severity": 3},
+                {"label": "Moderadamente Húmedo", "color": "#00FFFF", "severity": 2},
+                {"label": "Muy Húmedo",           "color": "#0000FF", "severity": 1},
+                {"label": "Extremadamente Húmedo","color": "#000080", "severity": 0},
+            ],
+        },
+        "PDSI": {
+            "bins": [-np.inf, -4.0, -3.0, -2.0, 2.0, 3.0, 4.0, np.inf],
+            "categories": [
+                {"label": "Extremadamente Seco",  "color": "#FF0000", "severity": 6},
+                {"label": "Severamente Seco",     "color": "#FFA500", "severity": 5},
+                {"label": "Moderadamente Seco",   "color": "#FFFF00", "severity": 4},
+                {"label": "Normal",               "color": "#00FF00", "severity": 3},
+                {"label": "Moderadamente Húmedo", "color": "#00FFFF", "severity": 2},
+                {"label": "Muy Húmedo",           "color": "#0000FF", "severity": 1},
+                {"label": "Extremadamente Húmedo","color": "#000080", "severity": 0},
+            ],
+        },
+        "EDDI": {  # seco positivo, húmedo negativo
+            "bins": [-np.inf, -2.0, -1.5, -1.0, 1.0, 1.5, 2.0, np.inf],
+            "categories": [
+                {"label": "Extremadamente Húmedo","color": "#000080", "severity": 0},
+                {"label": "Muy Húmedo",           "color": "#0000FF", "severity": 1},
+                {"label": "Moderadamente Húmedo", "color": "#00FFFF", "severity": 2},
+                {"label": "Normal",               "color": "#00FF00", "severity": 3},
+                {"label": "Moderadamente Seco",   "color": "#FFFF00", "severity": 4},
+                {"label": "Severamente Seco",     "color": "#FFA500", "severity": 5},
+                {"label": "Extremadamente Seco",  "color": "#FF0000", "severity": 6},
+            ],
+        },
     }
     
     def __init__(self, cache_service: Optional[CacheService] = None, cloud_storage_service: Optional[CloudStorageService] = None):
@@ -93,11 +123,6 @@ class HistoricalDataService:
         self.cloud_service = cloud_storage_service or CloudStorageService()
         self.conn = None  # Conexión DuckDB se creará bajo demanda
         
-        # 🚀 Precalcular thresholds ordenados (evita sort en cada fila)
-        self._sorted_thresholds = sorted(
-            [k for k in self.DROUGHT_CATEGORIES.keys() if k != float('-inf')],
-            reverse=True
-        )
         
         # Detectar entorno (producción vs desarrollo)
         import os
@@ -106,7 +131,30 @@ class HistoricalDataService:
             os.getenv('RENDER') or 
             os.getenv('FLY_APP_NAME')
         )
-    
+  
+    def _get_scale_for_index(self, variable: str) -> Dict[str, Any]:
+        if variable in self.INDEX_DROUGHT_SCALES:
+            return self.INDEX_DROUGHT_SCALES[variable]
+        return self.INDEX_DROUGHT_SCALES["DEFAULT"]
+
+    def _apply_drought_scale(self, df: pd.DataFrame, variable: str) -> pd.DataFrame:
+        scale = self._get_scale_for_index(variable)
+        bins = scale["bins"]
+        cats = scale["categories"]
+        labels     = [c["label"]    for c in cats]
+        colors     = [c["color"]    for c in cats]
+        severities = [c["severity"] for c in cats]
+        df["category"] = pd.cut(df["value"], bins=bins, labels=labels,
+                                right=False, include_lowest=True).astype("string")
+        df["color"]    = pd.cut(df["value"], bins=bins, labels=colors,
+                                right=False, include_lowest=True).astype("string")
+        df["severity"] = pd.cut(df["value"], bins=bins, labels=severities,
+                                right=False, include_lowest=True).astype("Int64")
+        null_mask = df["value"].isna()
+        if null_mask.any():
+            df.loc[null_mask, ["category", "color", "severity"]] = pd.NA
+        return df
+
     def _get_connection(self) -> duckdb.DuckDBPyConnection:
         """
         Obtiene o crea una conexión DuckDB con soporte para Cloudflare R2.
@@ -462,43 +510,19 @@ class HistoricalDataService:
                 })
         return variables
     
-    def categorize_drought_value(self, value: float) -> Dict[str, Any]:
-        """
-        Categoriza un valor de índice de sequía.
-        
-        Args:
-            value: Valor del índice
-            
-        Returns:
-            Diccionario con categoría y metadata
-        """
+    def categorize_drought_value(self, value: float, variable: str = "SPI") -> Dict[str, Any]:
         if pd.isna(value):
             return {"category": "no_data", "label": "Sin Datos", "color": "#CCCCCC", "severity": -1}
+        scale = self._get_scale_for_index(variable)
+        bins = scale["bins"]
+        cats = scale["categories"]
+        result = pd.cut([value], bins=bins, labels=[c["label"] for c in cats],
+                        right=False, include_lowest=True)
+        label = str(result[0]) if result[0] is not None else cats[3]["label"]
+        cat_info = next((c for c in cats if c["label"] == label), cats[3])
+        return {"category": label, "label": label, "color": cat_info["color"],
+                "severity": cat_info["severity"], "value": value}
         
-        # Buscar categoría correspondiente
-        sorted_thresholds = sorted([k for k in self.DROUGHT_CATEGORIES.keys() if k != float('-inf')], reverse=True)
-        
-        for threshold in sorted_thresholds:
-            if value >= threshold:
-                category_info = self.DROUGHT_CATEGORIES[threshold]
-                return {
-                    "category": threshold,
-                    "label": category_info["label"],
-                    "color": category_info["color"],
-                    "severity": category_info["severity"],
-                    "value": value
-                }
-        
-        # Si es menor que -2.0
-        category_info = self.DROUGHT_CATEGORIES[float('-inf')]
-        return {
-            "category": "extreme_dry",
-            "label": category_info["label"],
-            "color": category_info["color"],
-            "severity": category_info["severity"],
-            "value": value
-        }
-    
     def _detect_parquet_format(self, parquet_url: str) -> dict:
         """
         Detecta el formato del parquet leyendo SOLO metadatos (no descarga archivo completo).
@@ -527,7 +551,8 @@ class HistoricalDataService:
             
             result = {
                 'format': 'wide',
-                'date_column': 'date'  # default
+                'date_column': 'date',
+                'var_column': 'var'
             }
             
             # Detectar columna de fecha
@@ -537,13 +562,18 @@ class HistoricalDataService:
                 result['date_column'] = 'datetime'
             elif 'fecha' in column_names:
                 result['date_column'] = 'fecha'
+            elif 'ds' in column_names:
+                result['date_column'] = 'ds'
             elif 'time' in column_names:
                 result['date_column'] = 'time'
             
-            # Long format: tiene columnas 'var' y 'value'
+            # Long format: columnas de variable ('var' o 'kind') + 'value'
             if 'var' in column_names and 'value' in column_names:
                 result['format'] = 'long'
-            # Wide format: las variables son columnas
+                result['var_column'] = 'var'
+            elif 'kind' in column_names and 'value' in column_names:
+                result['format'] = 'long'
+                result['var_column'] = 'kind'
             else:
                 known_vars = set(self.COLUMN_MAPPING.keys())
                 if any(col in known_vars for col in column_names):
@@ -662,9 +692,10 @@ class HistoricalDataService:
             # 🚀 Construir query SIN ORDER BY (permite early stopping con LIMIT)
             # DuckDB puede usar HTTP Range Requests para leer solo row groups necesarios
             if file_format == 'long':
-                where_clauses.append(f"var = '{variable}'")
+                var_col = format_info.get('var_column', 'var')
+                where_clauses.append(f"{var_col} = '{variable}'")
                 where_clause = " AND ".join(where_clauses)
-                
+
                 # ⚡ Sin ORDER BY - DuckDB optimiza con HTTP Range
                 query = f"""
                 SELECT 
@@ -678,7 +709,7 @@ class HistoricalDataService:
                 """
             else:
                 where_clause = " AND ".join(where_clauses)
-                
+
                 # ⚡ Sin ORDER BY - permite HTTP Range eficiente
                 query = f"""
                 SELECT 
@@ -725,35 +756,9 @@ class HistoricalDataService:
             # Convertir valores a numérico y añadir quality
             result_df['value'] = pd.to_numeric(result_df['value'], errors='coerce')
             
-            
             # Si es índice de sequía, categorizar vectorizadamente
             if is_drought_index:
-                bins = [-np.inf, -2.0, -1.5, -1.0, 1.0, 1.5, 2.0, np.inf]
-                categories_list = [
-                    ("Extremadamente Seco", "#FF0000", 6),
-                    ("Severamente Seco", "#FFA500", 5),
-                    ("Moderadamente Seco", "#FFFF00", 4),
-                    ("Normal", "#00FF00", 3),
-                    ("Moderadamente Húmedo", "#00FFFF", 2),
-                    ("Muy Húmedo", "#0000FF", 1),
-                    ("Extremadamente Húmedo", "#000080", 0),
-                ]
-                result_df['category'] = pd.cut(
-                    result_df['value'],
-                    bins=bins,
-                    labels=[c[0] for c in categories_list]
-                ).astype(str)
-                result_df['color'] = pd.cut(
-                    result_df['value'],
-                    bins=bins,
-                    labels=[c[1] for c in categories_list]
-                ).astype(str)
-                # Usar Int64 nullable para manejar NaN sin errores
-                result_df['severity'] = pd.cut(
-                    result_df['value'],
-                    bins=bins,
-                    labels=[c[2] for c in categories_list]
-                ).astype('Int64')
+                result_df = self._apply_drought_scale(result_df, variable)
             
             # 🎯 OPTIMIZACIÓN: Extraer coordenadas ANTES de convertir a dict
             # Para timeseries, lat/lon son constantes - no repetir en cada punto
@@ -897,10 +902,11 @@ class HistoricalDataService:
             
             # Construir query según formato
             if file_format == 'long':
-                base_clauses.append(f"var = '{variable}'")
+                var_col = format_info.get('var_column', 'var')
+                base_clauses.append(f"{var_col} = '{variable}'")
                 value_expr = "value"
             else:
-                value_expr = variable
+                value_expr = variable  # wide: la columna se llama igual que la variable
 
             base_where = " AND ".join(base_clauses) if base_clauses else "1=1"
 
@@ -972,32 +978,7 @@ class HistoricalDataService:
             
             # Si es índice de sequía, categorizar vectorizadamente
             if is_drought_index:
-                bins = [-np.inf, -2.0, -1.5, -1.0, 1.0, 1.5, 2.0, np.inf]
-                categories_list = [
-                    ("Extremadamente Seco", "#FF0000", 6),
-                    ("Severamente Seco", "#FFA500", 5),
-                    ("Moderadamente Seco", "#FFFF00", 4),
-                    ("Normal", "#00FF00", 3),
-                    ("Moderadamente Húmedo", "#00FFFF", 2),
-                    ("Muy Húmedo", "#0000FF", 1),
-                    ("Extremadamente Húmedo", "#000080", 0),
-                ]
-                result_df['category'] = pd.cut(
-                    result_df['value'],
-                    bins=bins,
-                    labels=[c[0] for c in categories_list]
-                ).astype(str)
-                result_df['color'] = pd.cut(
-                    result_df['value'],
-                    bins=bins,
-                    labels=[c[1] for c in categories_list]
-                ).astype(str)
-                # Usar Int64 nullable para manejar NaN sin errores
-                result_df['severity'] = pd.cut(
-                    result_df['value'],
-                    bins=bins,
-                    labels=[c[2] for c in categories_list]
-                ).astype('Int64')
+                result_df = self._apply_drought_scale(result_df, variable)
             else:
                 # Para variables meteorológicas, crear escala de colores basada en percentiles
                 def get_color_for_value(value, vmin, vmax):
@@ -1162,7 +1143,6 @@ class HistoricalDataService:
             
         except Exception as e:
             raise Exception(f"Error obteniendo límites espaciales: {str(e)}")
-    
     def get_unique_cells(self, parquet_url: str) -> List[str]:
         """
         Obtiene los cell_ids únicos de un archivo parquet.
