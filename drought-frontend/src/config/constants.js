@@ -31,15 +31,6 @@ export const MAP_CONFIG = {
   ],
 };
 
-// Drought severity color scale
-export const DROUGHT_COLORS = {
-  extreme: '#991b1b',
-  severe: '#dc2626',
-  moderate: '#f59e0b',
-  mild: '#fbbf24',
-  normal: '#10b981',
-  wet: '#3b82f6',
-};
 
 // Date format
 export const DATE_FORMAT = 'yyyy-MM-dd';

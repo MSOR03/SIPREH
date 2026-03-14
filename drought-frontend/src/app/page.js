@@ -99,7 +99,7 @@ export default function Home() {
           type: '2D',
           title: `${response.variable_name} - Mapa Espacial`,
           subtitle: `Fecha: ${response.date} | Resolución: ${targetResolution}°`,
-          variable: response.variable,
+          variable: String(response.variable || variable || '').trim().toUpperCase(),
           unit: response.unit,
           date: response.date,
           gridCells: response.grid_cells,  // Array de celdas con lat, lon, value, color, etc.
@@ -151,7 +151,7 @@ export default function Home() {
             type: '1D',
             title: `${response.variable_name} - Serie de Tiempo`,
             subtitle: `Celda: ${selectedCell.cell_id}`,
-            variable: response.variable,
+            variable: String(response.variable || variable || '').trim().toUpperCase(),
             unit: response.unit,
             data: response.data,
             statistics: response.statistics,
