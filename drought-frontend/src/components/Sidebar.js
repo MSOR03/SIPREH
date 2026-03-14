@@ -55,9 +55,6 @@ export default function Sidebar({
   onAnalysisPlot,
   onPredictionPlot,
   onPredictionHistoryPlot,
-  onAnalysisSave,
-  onPredictionSave,
-  onPredictionHistorySave,
   selectedStation,
   selectedCell,
 }) {
@@ -256,7 +253,6 @@ export default function Sidebar({
           showDataSource={showDataSource}
           analysisDisabled={analysisDisabled}
           onAnalysisPlot={onAnalysisPlot}
-          onAnalysisSave={onAnalysisSave}
         />
 
         <PredictionSection
@@ -269,7 +265,6 @@ export default function Sidebar({
           timeHorizons={timeHorizons}
           hasSelection={hasSelection}
           onPredictionPlot={onPredictionPlot}
-          onPredictionSave={onPredictionSave}
         />
 
         <PredictionHistorySection
@@ -282,7 +277,6 @@ export default function Sidebar({
           timeHorizons={timeHorizons}
           hasSelection={hasSelection}
           onPredictionHistoryPlot={onPredictionHistoryPlot}
-          onPredictionHistorySave={onPredictionHistorySave}
         />
 
         <div className="text-xs text-gray-600 dark:text-gray-400 p-3 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 rounded-xl border border-blue-200 dark:border-blue-800 shadow-sm">
