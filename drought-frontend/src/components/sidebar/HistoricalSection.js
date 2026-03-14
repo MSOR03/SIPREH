@@ -1,6 +1,6 @@
 'use client';
 
-import { BarChart3, Calendar, ChevronLeft, CloudRain, Download, Grid3x3, Waves } from 'lucide-react';
+import { BarChart3, Calendar, ChevronLeft, CloudRain, Grid3x3, Waves } from 'lucide-react';
 import Select from '../ui/Select';
 import Button from '../ui/Button';
 import DateRangePicker from '../ui/DateRangePicker';
@@ -24,7 +24,6 @@ export default function HistoricalSection({
   showDataSource,
   analysisDisabled,
   onAnalysisPlot,
-  onAnalysisSave,
 }) {
   const stepNumbers = (() => {
     let current = 1;
@@ -292,23 +291,15 @@ export default function HistoricalSection({
               )}
             </StepSection>
 
-            <div className="flex gap-3 pt-4 mt-2 border-t border-gray-200/60 dark:border-gray-700/40">
+            <div className="pt-4 mt-2 border-t border-gray-200/60 dark:border-gray-700/40">
               <Button
                 onClick={onAnalysisPlot}
                 variant="primary"
-                className={`flex-1 py-3 rounded-2xl text-sm tracking-wide shadow-md hover:shadow-lg transition-all ${analysisDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                className={`w-full py-3.5 rounded-2xl text-sm tracking-wide font-bold border border-blue-300/40 shadow-[0_14px_34px_-12px_rgba(37,99,235,0.75)] hover:shadow-[0_20px_42px_-14px_rgba(37,99,235,0.85)] transition-all duration-300 ${analysisDisabled ? 'opacity-50 cursor-not-allowed' : 'hover:-translate-y-0.5 active:translate-y-0'}`}
                 disabled={analysisDisabled}
               >
                 <BarChart3 className="w-4 h-4" />
-                Generar
-              </Button>
-              <Button
-                onClick={onAnalysisSave}
-                variant="secondary"
-                className="flex-1 py-3 rounded-2xl text-sm tracking-wide"
-              >
-                <Download className="w-4 h-4" />
-                Guardar
+                Generar Analisis
               </Button>
             </div>
           </div>

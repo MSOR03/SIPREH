@@ -1,6 +1,6 @@
 'use client';
 
-import { Calendar, Download, History } from 'lucide-react';
+import { Calendar, History } from 'lucide-react';
 import Select from '../ui/Select';
 import Button from '../ui/Button';
 import { CollapsiblePanel, RadioCard, StepSection } from './primitives';
@@ -15,7 +15,6 @@ export default function PredictionHistorySection({
   timeHorizons,
   hasSelection,
   onPredictionHistoryPlot,
-  onPredictionHistorySave,
 }) {
   return (
     <CollapsiblePanel
@@ -74,23 +73,15 @@ export default function PredictionHistorySection({
             </div>
           </StepSection>
 
-          <div className="flex gap-3 pt-4 mt-2 border-t border-gray-200/60 dark:border-gray-700/40">
+          <div className="pt-4 mt-2 border-t border-gray-200/60 dark:border-gray-700/40">
             <Button
               onClick={onPredictionHistoryPlot}
               variant="primary"
-              className={`flex-1 py-3 rounded-2xl text-sm tracking-wide shadow-md hover:shadow-lg transition-all ${!hasSelection ? 'opacity-50 cursor-not-allowed' : ''}`}
+              className={`w-full py-3 rounded-2xl text-sm tracking-wide shadow-md hover:shadow-lg transition-all ${!hasSelection ? 'opacity-50 cursor-not-allowed' : 'hover:-translate-y-0.5'}`}
               disabled={!hasSelection}
             >
               <History className="w-4 h-4" />
-              Consultar
-            </Button>
-            <Button
-              onClick={onPredictionHistorySave}
-              variant="secondary"
-              className="flex-1 py-3 rounded-2xl text-sm tracking-wide"
-            >
-              <Download className="w-4 h-4" />
-              Guardar
+              Generar Historico
             </Button>
           </div>
         </div>
