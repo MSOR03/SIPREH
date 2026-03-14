@@ -6,6 +6,7 @@ import Sidebar from '@/components/Sidebar';
 import MapArea from '@/components/MapArea';
 import Footer from '@/components/Footer';
 import { useToast } from '@/contexts/ToastContext';
+import { downloadAnalysisImage, downloadAnalysisJson } from '@/utils/exporters';
 
 export default function Home() {
   const { showError, showSuccess, showInfo, showWarning } = useToast();
@@ -277,16 +278,47 @@ export default function Home() {
 
   // Handle Save functions
   const handleAnalysisSave = () => {
-    // TODO: Implement save functionality (CSV/PNG/JPEG export)
-    console.log('Saving historical analysis data');
-    showInfo('La funcionalidad de guardado estará disponible próximamente', 'En desarrollo');
+    if (!plotData) {
+      showWarning('Primero genera un analisis para poder guardar datos', 'Sin datos');
+      return;
+    }
+
+    try {
+      const result = downloadAnalysisJson({
+        plotData,
+        analysisState,
+        selectedCell,
+      });
+
+      showSuccess(
+        `JSON guardado: ${result.fileName} (${result.rows} filas, ${result.type})`,
+        'Datos exportados'
+      );
+    } catch (error) {
+      console.error('Error saving analysis JSON:', error);
+      showError(error.message || 'No se pudo guardar el JSON', 'Error de exportacion');
+    }
   };
 
-  const handlePredictionSave = () => {
-    // TODO: Implement save functionality
-    console.log('Saving prediction data');
-    showInfo('La funcionalidad de guardado estará disponible próximamente', 'En desarrollo');
+  const handleAnalysisImageExport = async () => {
+    if (!plotData) {
+      showWarning('Primero genera un analisis para exportar imagen', 'Sin datos');
+      return;
+    }
+
+    try {
+      const result = await downloadAnalysisImage({
+        plotData,
+        analysisState,
+      });
+
+      showSuccess(`Imagen exportada: ${result.fileName}`, 'Exportacion completada');
+    } catch (error) {
+      console.error('Error exporting analysis image:', error);
+      showError(error.message || 'No se pudo exportar la imagen', 'Error de exportacion');
+    }
   };
+
 
   // Handle Prediction History Plot
   const handlePredictionHistoryPlot = async () => {
@@ -321,11 +353,6 @@ export default function Home() {
     });
   };
 
-  const handlePredictionHistorySave = () => {
-    console.log('Saving prediction history data');
-    showInfo('La funcionalidad de guardado estará disponible próximamente', 'En desarrollo');
-  };
-
   // Handle Reset
   const handleReset = () => {
     setPlotData(null);
@@ -349,9 +376,6 @@ export default function Home() {
           onAnalysisPlot={handleAnalysisPlot}
           onPredictionPlot={handlePredictionPlot}
           onPredictionHistoryPlot={handlePredictionHistoryPlot}
-          onAnalysisSave={handleAnalysisSave}
-          onPredictionSave={handlePredictionSave}
-          onPredictionHistorySave={handlePredictionHistorySave}
           selectedStation={selectedStation}
           selectedCell={selectedCell}
         />
@@ -359,6 +383,8 @@ export default function Home() {
         <MapArea
           plotData={plotData}
           onReset={handleReset}
+          onSaveData={handleAnalysisSave}
+          onExportImage={handleAnalysisImageExport}
           selectedStation={selectedStation}
           selectedCell={selectedCell}
           onStationSelect={setSelectedStation}
