@@ -161,4 +161,26 @@ export const filesApi = {
       { method: 'POST' }
     );
   },
+
+  async getDatasetCatalog() {
+    return fetchAdmin('/admin/datasets/catalog');
+  },
+
+  async attachToDataset(payload) {
+    return fetchAdmin('/admin/datasets/attach-file', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async getDatasetStatus(datasetKey) {
+    return fetchAdmin(`/admin/datasets/${encodeURIComponent(datasetKey)}/status`);
+  },
+
+  async mergeAndRollover(payload) {
+    return fetchAdmin('/admin/datasets/merge-and-rollover', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
 };
