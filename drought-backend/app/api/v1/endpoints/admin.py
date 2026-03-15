@@ -16,10 +16,182 @@ from typing import Optional, Dict, Any, List as ListType
 from datetime import datetime
 from app.services.cloud_storage import CloudStorageService
 import json
+import ast
+import os
+import tempfile
+
+import duckdb
 
 
 router = APIRouter()
 cloud_service = CloudStorageService()
+
+
+DATASET_CONFIG: Dict[str, Dict[str, Any]] = {
+    "historical_era5": {
+        "dataset_type": "historical",
+        "source": "ERA5",
+        "allowed_roles": ["snapshot", "delta"],
+    },
+    "historical_imerg": {
+        "dataset_type": "historical",
+        "source": "IMERG",
+        "allowed_roles": ["snapshot", "delta"],
+    },
+    "historical_chirps": {
+        "dataset_type": "historical",
+        "source": "CHIRPS",
+        "allowed_roles": ["snapshot", "delta"],
+    },
+    "hydro_main": {
+        "dataset_type": "hydrological",
+        "source": "HYDRO",
+        "allowed_roles": ["snapshot", "delta"],
+    },
+    "prediction_main": {
+        "dataset_type": "prediction",
+        "source": "MULTI_SOURCE",
+        "allowed_roles": ["prediction_monthly"],
+    },
+}
+
+
+def _parse_file_metadata(raw_metadata: Optional[str]) -> Dict[str, Any]:
+    """Parse file metadata supporting JSON and legacy python-dict strings."""
+    if not raw_metadata:
+        return {}
+
+    try:
+        parsed = json.loads(raw_metadata)
+        return parsed if isinstance(parsed, dict) else {}
+    except (json.JSONDecodeError, TypeError):
+        try:
+            parsed = ast.literal_eval(raw_metadata)
+            return parsed if isinstance(parsed, dict) else {}
+        except (ValueError, SyntaxError):
+            return {}
+
+
+def _save_file_metadata(file: ParquetFile, metadata: Dict[str, Any]) -> None:
+    file.file_metadata = json.dumps(metadata, ensure_ascii=False)
+
+
+def _file_dataset_key(file: ParquetFile) -> Optional[str]:
+    meta = _parse_file_metadata(file.file_metadata)
+    return meta.get("dataset_key")
+
+
+def _archive_dataset_active_files(
+    db: Session,
+    dataset_key: str,
+    exclude_file_id: Optional[int] = None,
+) -> int:
+    """Archive active files from the same logical dataset, excluding one file id if provided."""
+    files = db.query(ParquetFile).filter(ParquetFile.status == "active").all()
+    archived = 0
+
+    for file in files:
+        if exclude_file_id and file.id == exclude_file_id:
+            continue
+
+        meta = _parse_file_metadata(file.file_metadata)
+        if meta.get("dataset_key") != dataset_key:
+            continue
+
+        file.status = "archived"
+        meta["active_for_queries"] = False
+        meta["archived_at"] = datetime.utcnow().isoformat()
+        _save_file_metadata(file, meta)
+        archived += 1
+
+    return archived
+
+
+def _next_snapshot_version(db: Session, dataset_key: str) -> int:
+    """Compute next snapshot version for a dataset from existing metadata."""
+    max_version = 0
+    for file in db.query(ParquetFile).all():
+        meta = _parse_file_metadata(file.file_metadata)
+        if meta.get("dataset_key") != dataset_key:
+            continue
+        version = meta.get("snapshot_version")
+        if isinstance(version, int) and version > max_version:
+            max_version = version
+    return max_version + 1
+
+
+def _dataset_files(db: Session, dataset_key: str) -> ListType[ParquetFile]:
+    """Get all files that belong to a logical dataset key."""
+    files = db.query(ParquetFile).all()
+    result = []
+    for file in files:
+        meta = _parse_file_metadata(file.file_metadata)
+        if meta.get("dataset_key") == dataset_key:
+            result.append(file)
+    return result
+
+
+def _sql_ident(name: str) -> str:
+    """Quote SQL identifier safely for DuckDB."""
+    escaped = name.replace('"', '""')
+    return f'"{escaped}"'
+
+
+def _duckdb_columns(conn: duckdb.DuckDBPyConnection, parquet_path: str) -> ListType[str]:
+    """Return parquet column names from a local parquet file path."""
+    rows = conn.execute(
+        f"DESCRIBE SELECT * FROM read_parquet('{parquet_path}')"
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def _choose_dedup_keys(columns: ListType[str], dataset_key: str) -> ListType[str]:
+    """Pick best available dedup keys based on known schemas and dataset."""
+    cols = set(columns)
+
+    if dataset_key == "prediction_main":
+        candidates = [
+            ["issue_date", "source_model", "horizon_months", "drought_index", "cell_id"],
+            ["issue_date", "source_model", "horizon_months", "drought_index", "station_id"],
+            ["issue_date", "source", "horizon", "index", "cell_id"],
+        ]
+    else:
+        candidates = [
+            # Long format (one metric per row): keep variable/index dimension.
+            ["date", "cell_id", "var"],
+            ["date", "cell_id", "variable"],
+            ["date", "cell_id", "drought_index"],
+            ["date", "cell_id", "index"],
+            ["date", "station_id", "var"],
+            ["date", "station_id", "variable"],
+            ["date", "station_id", "drought_index"],
+            ["date", "lat", "lon", "var"],
+            ["date", "lat", "lon", "variable"],
+            ["date", "lat", "lon", "drought_index"],
+            ["datetime", "cell_id", "var"],
+            ["datetime", "cell_id", "variable"],
+            ["datetime", "cell_id", "drought_index"],
+            ["fecha", "cell_id", "var"],
+            ["fecha", "cell_id", "variable"],
+            ["fecha", "cell_id", "drought_index"],
+            ["fecha", "lat", "lon", "var"],
+            ["fecha", "lat", "lon", "variable"],
+            ["fecha", "lat", "lon", "drought_index"],
+
+            # Wide format (one row with many metric columns).
+            ["date", "cell_id"],
+            ["date", "station_id"],
+            ["date", "lat", "lon"],
+            ["datetime", "cell_id"],
+            ["fecha", "cell_id"],
+            ["fecha", "lat", "lon"],
+        ]
+
+    for keyset in candidates:
+        if all(k in cols for k in keyset):
+            return keyset
+
+    return []
 
 
 # Helper Functions
@@ -235,13 +407,586 @@ def activate_parquet_file(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="File not found"
         )
+
+    dataset_key = _file_dataset_key(file)
+    archived_count = 0
+    if dataset_key:
+        archived_count = _archive_dataset_active_files(db, dataset_key, exclude_file_id=file.id)
+
+        meta = _parse_file_metadata(file.file_metadata)
+        meta["active_for_queries"] = True
+        meta["activated_at"] = datetime.utcnow().isoformat()
+        _save_file_metadata(file, meta)
     
     file.status = "active"
     db.commit()
     
     return {
         "success": True,
-        "message": f"File {file.filename} is now active"
+        "message": f"File {file.filename} is now active",
+        "dataset_key": dataset_key,
+        "archived_previous_active": archived_count,
+    }
+
+
+class DatasetDefinition(BaseModel):
+    """Logical dataset configuration."""
+    dataset_key: str
+    dataset_type: str
+    source: str
+    allowed_roles: ListType[str]
+
+
+class DatasetCatalogResponse(BaseModel):
+    """Catalog of supported logical datasets."""
+    total: int
+    datasets: ListType[DatasetDefinition]
+
+
+class DatasetAttachRequest(BaseModel):
+    """Attach file to a logical dataset with role and lifecycle metadata."""
+    file_id: int
+    dataset_key: str
+    role: str
+    year_month: Optional[str] = None
+    period_start: Optional[str] = None
+    period_end: Optional[str] = None
+    activate_now: bool = False
+    extra_metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class DatasetAttachResponse(BaseModel):
+    """Result of attaching a file to a dataset."""
+    success: bool
+    file_id: int
+    dataset_key: str
+    role: str
+    status: str
+    archived_previous_active: int = 0
+
+
+class DatasetRolloverRequest(BaseModel):
+    """Promote a new snapshot and archive merged monthly deltas."""
+    dataset_key: str
+    new_snapshot_file_id: int
+    merged_delta_file_ids: ListType[int] = Field(default_factory=list)
+    archive_previous_snapshot: bool = True
+
+
+class DatasetRolloverResponse(BaseModel):
+    """Result of monthly rollover."""
+    success: bool
+    dataset_key: str
+    active_file_id: int
+    snapshot_version: int
+    archived_previous_snapshot: int
+    archived_deltas: int
+
+
+class DatasetStatusFile(BaseModel):
+    """File snapshot for dataset status endpoint."""
+    file_id: int
+    filename: str
+    status: str
+    role: Optional[str] = None
+    year_month: Optional[str] = None
+    snapshot_version: Optional[int] = None
+    created_at: datetime
+
+
+class DatasetStatusResponse(BaseModel):
+    """Current status and history for a logical dataset."""
+    dataset_key: str
+    dataset_type: str
+    source: str
+    active_file: Optional[DatasetStatusFile] = None
+    pending_deltas: ListType[DatasetStatusFile]
+    archived_recent: ListType[DatasetStatusFile]
+
+
+class DatasetMergeAndRolloverRequest(BaseModel):
+    """Automatic monthly merge request."""
+    dataset_key: str
+    monthly_file_id: int
+    year_month: Optional[str] = None
+    period_start: Optional[str] = None
+    period_end: Optional[str] = None
+    archive_previous_snapshot: bool = True
+
+
+class DatasetMergeAndRolloverResponse(BaseModel):
+    """Automatic monthly merge response."""
+    success: bool
+    dataset_key: str
+    new_snapshot_file_id: int
+    previous_snapshot_file_id: Optional[int] = None
+    merged_monthly_file_id: int
+    dedup_keys: ListType[str]
+    snapshot_version: int
+    output_rows: int
+    output_size_mb: float
+
+
+@router.get("/datasets/catalog", response_model=DatasetCatalogResponse)
+def get_dataset_catalog(
+    current_admin: User = Depends(get_current_admin_user)
+):
+    """Return supported dataset keys for monthly update workflows."""
+    datasets = [
+        {
+            "dataset_key": key,
+            "dataset_type": cfg["dataset_type"],
+            "source": cfg["source"],
+            "allowed_roles": cfg["allowed_roles"],
+        }
+        for key, cfg in DATASET_CONFIG.items()
+    ]
+    return {"total": len(datasets), "datasets": datasets}
+
+
+@router.post("/datasets/attach-file", response_model=DatasetAttachResponse)
+def attach_file_to_dataset(
+    payload: DatasetAttachRequest,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin_user)
+):
+    """
+    Assign a previously uploaded file to a logical dataset as snapshot/delta/prediction_monthly.
+    This enables monthly operations without DB migrations.
+    """
+    dataset_cfg = DATASET_CONFIG.get(payload.dataset_key)
+    if not dataset_cfg:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"dataset_key inválido: {payload.dataset_key}",
+        )
+
+    if payload.role not in dataset_cfg["allowed_roles"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Rol '{payload.role}' no permitido para {payload.dataset_key}. "
+                f"Permitidos: {', '.join(dataset_cfg['allowed_roles'])}"
+            ),
+        )
+
+    file = db.query(ParquetFile).filter(ParquetFile.id == payload.file_id).first()
+    if not file:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    metadata = _parse_file_metadata(file.file_metadata)
+    metadata.update(payload.extra_metadata or {})
+    metadata.update({
+        "dataset_key": payload.dataset_key,
+        "dataset_type": dataset_cfg["dataset_type"],
+        "source": dataset_cfg["source"],
+        "role": payload.role,
+        "year_month": payload.year_month,
+        "period_start": payload.period_start,
+        "period_end": payload.period_end,
+        "active_for_queries": False,
+        "attached_at": datetime.utcnow().isoformat(),
+    })
+
+    archived_count = 0
+    if payload.activate_now:
+        archived_count = _archive_dataset_active_files(db, payload.dataset_key, exclude_file_id=file.id)
+        file.status = "active"
+        metadata["active_for_queries"] = True
+        metadata["activated_at"] = datetime.utcnow().isoformat()
+    else:
+        if file.status != "active":
+            file.status = "pending"
+
+    _save_file_metadata(file, metadata)
+    db.commit()
+
+    return {
+        "success": True,
+        "file_id": file.id,
+        "dataset_key": payload.dataset_key,
+        "role": payload.role,
+        "status": file.status,
+        "archived_previous_active": archived_count,
+    }
+
+
+@router.post("/datasets/rollover", response_model=DatasetRolloverResponse)
+def rollover_dataset_monthly(
+    payload: DatasetRolloverRequest,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin_user)
+):
+    """
+    Monthly rollover workflow:
+    1) Promote new snapshot file as active.
+    2) Archive previous active snapshot for same dataset.
+    3) Mark merged delta files as archived + merged=true.
+    """
+    dataset_cfg = DATASET_CONFIG.get(payload.dataset_key)
+    if not dataset_cfg:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"dataset_key inválido: {payload.dataset_key}",
+        )
+
+    if dataset_cfg["dataset_type"] == "prediction":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="prediction_main no usa rollover snapshot; usa attach-file con role=prediction_monthly y activate_now=true",
+        )
+
+    new_file = db.query(ParquetFile).filter(ParquetFile.id == payload.new_snapshot_file_id).first()
+    if not new_file:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="New snapshot file not found")
+
+    archived_previous = 0
+    if payload.archive_previous_snapshot:
+        archived_previous = _archive_dataset_active_files(db, payload.dataset_key, exclude_file_id=new_file.id)
+
+    metadata = _parse_file_metadata(new_file.file_metadata)
+    snapshot_version = _next_snapshot_version(db, payload.dataset_key)
+    metadata.update({
+        "dataset_key": payload.dataset_key,
+        "dataset_type": dataset_cfg["dataset_type"],
+        "source": dataset_cfg["source"],
+        "role": "snapshot",
+        "snapshot_version": snapshot_version,
+        "merged_from_file_ids": payload.merged_delta_file_ids,
+        "rolled_over_at": datetime.utcnow().isoformat(),
+        "active_for_queries": True,
+    })
+    _save_file_metadata(new_file, metadata)
+    new_file.status = "active"
+
+    archived_deltas = 0
+    if payload.merged_delta_file_ids:
+        deltas = db.query(ParquetFile).filter(ParquetFile.id.in_(payload.merged_delta_file_ids)).all()
+        for delta_file in deltas:
+            delta_meta = _parse_file_metadata(delta_file.file_metadata)
+            if delta_meta.get("dataset_key") and delta_meta.get("dataset_key") != payload.dataset_key:
+                continue
+
+            delta_meta.update({
+                "dataset_key": payload.dataset_key,
+                "dataset_type": dataset_cfg["dataset_type"],
+                "source": dataset_cfg["source"],
+                "role": "delta",
+                "merged": True,
+                "merged_into_file_id": new_file.id,
+                "merged_at": datetime.utcnow().isoformat(),
+                "active_for_queries": False,
+            })
+            _save_file_metadata(delta_file, delta_meta)
+            delta_file.status = "archived"
+            archived_deltas += 1
+
+    db.commit()
+
+    return {
+        "success": True,
+        "dataset_key": payload.dataset_key,
+        "active_file_id": new_file.id,
+        "snapshot_version": snapshot_version,
+        "archived_previous_snapshot": archived_previous,
+        "archived_deltas": archived_deltas,
+    }
+
+
+@router.get("/datasets/{dataset_key}/status", response_model=DatasetStatusResponse)
+def get_dataset_status(
+    dataset_key: str,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin_user)
+):
+    """Return active file + pending deltas + recent archived files for a dataset key."""
+    dataset_cfg = DATASET_CONFIG.get(dataset_key)
+    if not dataset_cfg:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"dataset_key no encontrado: {dataset_key}",
+        )
+
+    files = _dataset_files(db, dataset_key)
+    files_sorted = sorted(files, key=lambda f: f.created_at or datetime.min, reverse=True)
+
+    def to_status_file(file: ParquetFile) -> Dict[str, Any]:
+        meta = _parse_file_metadata(file.file_metadata)
+        return {
+            "file_id": file.id,
+            "filename": file.filename,
+            "status": file.status,
+            "role": meta.get("role"),
+            "year_month": meta.get("year_month"),
+            "snapshot_version": meta.get("snapshot_version"),
+            "created_at": file.created_at,
+        }
+
+    active_candidates = [f for f in files_sorted if f.status == "active"]
+    active_file = to_status_file(active_candidates[0]) if active_candidates else None
+
+    pending_deltas = []
+    archived_recent = []
+    for file in files_sorted:
+        info = to_status_file(file)
+        role = info.get("role")
+        if file.status == "pending" and role in {"delta", "prediction_monthly"}:
+            pending_deltas.append(info)
+        elif file.status == "archived":
+            archived_recent.append(info)
+
+    return {
+        "dataset_key": dataset_key,
+        "dataset_type": dataset_cfg["dataset_type"],
+        "source": dataset_cfg["source"],
+        "active_file": active_file,
+        "pending_deltas": pending_deltas[:24],
+        "archived_recent": archived_recent[:24],
+    }
+
+
+@router.post("/datasets/merge-and-rollover", response_model=DatasetMergeAndRolloverResponse)
+def merge_and_rollover_dataset(
+    payload: DatasetMergeAndRolloverRequest,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin_user)
+):
+    """
+    Fully automatic monthly update:
+    - Takes active snapshot + monthly delta.
+    - Merges and de-duplicates server-side using DuckDB.
+    - Uploads new consolidated snapshot to R2.
+    - Activates new snapshot and archives previous active + merged monthly delta.
+    """
+    dataset_cfg = DATASET_CONFIG.get(payload.dataset_key)
+    if not dataset_cfg:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"dataset_key inválido: {payload.dataset_key}",
+        )
+
+    if dataset_cfg["dataset_type"] == "prediction":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "prediction_main no requiere merge con snapshot gigante. "
+                "Usa /admin/datasets/attach-file con role=prediction_monthly y activate_now=true."
+            ),
+        )
+
+    monthly_file = db.query(ParquetFile).filter(ParquetFile.id == payload.monthly_file_id).first()
+    if not monthly_file:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="monthly_file_id no encontrado")
+
+    monthly_meta = _parse_file_metadata(monthly_file.file_metadata)
+    monthly_meta.update({
+        "dataset_key": payload.dataset_key,
+        "dataset_type": dataset_cfg["dataset_type"],
+        "source": dataset_cfg["source"],
+        "role": "delta",
+        "year_month": payload.year_month,
+        "period_start": payload.period_start,
+        "period_end": payload.period_end,
+        "merged": False,
+        "active_for_queries": False,
+    })
+
+    files = _dataset_files(db, payload.dataset_key)
+    active_candidates = [f for f in files if f.status == "active"]
+    active_snapshot = active_candidates[0] if active_candidates else None
+
+    # Bootstrap case: no previous snapshot yet -> promote monthly as first snapshot.
+    if not active_snapshot:
+        snapshot_version = _next_snapshot_version(db, payload.dataset_key)
+        monthly_meta.update({
+            "role": "snapshot",
+            "snapshot_version": snapshot_version,
+            "merged_from_file_ids": [monthly_file.id],
+            "active_for_queries": True,
+            "activated_at": datetime.utcnow().isoformat(),
+        })
+        _save_file_metadata(monthly_file, monthly_meta)
+        monthly_file.status = "active"
+        db.commit()
+
+        return {
+            "success": True,
+            "dataset_key": payload.dataset_key,
+            "new_snapshot_file_id": monthly_file.id,
+            "previous_snapshot_file_id": None,
+            "merged_monthly_file_id": monthly_file.id,
+            "dedup_keys": [],
+            "snapshot_version": snapshot_version,
+            "output_rows": monthly_meta.get("num_rows", 0) or 0,
+            "output_size_mb": round((monthly_file.file_size or 0) / (1024 * 1024), 3),
+        }
+
+    if not active_snapshot.cloud_key or not monthly_file.cloud_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Los archivos para merge deben tener cloud_key.",
+        )
+
+    snapshot_bytes = cloud_service.download_file(active_snapshot.cloud_key)
+    monthly_bytes = cloud_service.download_file(monthly_file.cloud_key)
+    if snapshot_bytes is None or monthly_bytes is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="No se pudo descargar snapshot activo o delta mensual desde cloud.",
+        )
+
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    merged_filename = f"{payload.dataset_key}_snapshot_{timestamp}.parquet"
+    merged_key = f"parquet/merged/{payload.dataset_key}/{merged_filename}"
+
+    output_rows = 0
+    dedup_keys: ListType[str] = []
+
+    with tempfile.TemporaryDirectory(prefix="drought_merge_") as tmpdir:
+        snapshot_path = os.path.join(tmpdir, "active_snapshot.parquet")
+        monthly_path = os.path.join(tmpdir, "monthly_delta.parquet")
+        merged_path = os.path.join(tmpdir, "merged_snapshot.parquet")
+
+        with open(snapshot_path, "wb") as f:
+            f.write(snapshot_bytes)
+        with open(monthly_path, "wb") as f:
+            f.write(monthly_bytes)
+
+        conn = duckdb.connect(database=':memory:')
+        try:
+            # Inspect schema and choose best dedup keys.
+            snapshot_cols = _duckdb_columns(conn, snapshot_path)
+            monthly_cols = _duckdb_columns(conn, monthly_path)
+            common_cols = sorted(set(snapshot_cols).intersection(set(monthly_cols)))
+            dedup_keys = _choose_dedup_keys(common_cols, payload.dataset_key)
+
+            if dedup_keys:
+                partition_expr = ", ".join(_sql_ident(col) for col in dedup_keys)
+                merge_sql = f"""
+                COPY (
+                    WITH unioned AS (
+                        SELECT *, 0 AS __source_priority FROM read_parquet('{snapshot_path}')
+                        UNION ALL BY NAME
+                        SELECT *, 1 AS __source_priority FROM read_parquet('{monthly_path}')
+                    ), ranked AS (
+                        SELECT *,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY {partition_expr}
+                                   ORDER BY __source_priority DESC
+                               ) AS __rn
+                        FROM unioned
+                    )
+                    SELECT * EXCLUDE (__source_priority, __rn)
+                    FROM ranked
+                    WHERE __rn = 1
+                ) TO '{merged_path}' (FORMAT PARQUET, COMPRESSION ZSTD)
+                """
+            else:
+                merge_sql = f"""
+                COPY (
+                    SELECT * FROM read_parquet('{snapshot_path}')
+                    UNION ALL BY NAME
+                    SELECT * FROM read_parquet('{monthly_path}')
+                ) TO '{merged_path}' (FORMAT PARQUET, COMPRESSION ZSTD)
+                """
+
+            conn.execute(merge_sql)
+            output_rows = int(conn.execute(f"SELECT COUNT(*) FROM read_parquet('{merged_path}')").fetchone()[0])
+        finally:
+            conn.close()
+
+        merged_size = os.path.getsize(merged_path)
+        with open(merged_path, "rb") as merged_file:
+            merged_hash = cloud_service.calculate_file_hash(merged_file)
+            success, upload_result = cloud_service.upload_file(
+                merged_file,
+                merged_key,
+                metadata={
+                    "dataset_key": payload.dataset_key,
+                    "source": dataset_cfg["source"],
+                    "merged_at": datetime.utcnow().isoformat(),
+                },
+            )
+
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error subiendo snapshot consolidado: {upload_result}",
+            )
+
+    snapshot_version = _next_snapshot_version(db, payload.dataset_key)
+
+    new_snapshot_meta = {
+        "dataset_key": payload.dataset_key,
+        "dataset_type": dataset_cfg["dataset_type"],
+        "source": dataset_cfg["source"],
+        "role": "snapshot",
+        "snapshot_version": snapshot_version,
+        "year_month": payload.year_month,
+        "period_start": payload.period_start or monthly_meta.get("period_start"),
+        "period_end": payload.period_end or monthly_meta.get("period_end"),
+        "merged_from_file_ids": [active_snapshot.id, monthly_file.id],
+        "dedup_keys": dedup_keys,
+        "num_rows": output_rows,
+        "active_for_queries": True,
+        "created_by": "merge-and-rollover",
+        "merged_at": datetime.utcnow().isoformat(),
+    }
+
+    new_snapshot_file = ParquetFile(
+        filename=merged_filename,
+        original_filename=merged_filename,
+        file_size=int(merged_size),
+        cloud_url=upload_result,
+        cloud_key=merged_key,
+        file_hash=merged_hash,
+        file_metadata=json.dumps(new_snapshot_meta),
+        status="active",
+        uploaded_by=current_admin.id,
+    )
+
+    # Try to refresh exact size from cloud listing when immediately available.
+    cloud_list = cloud_service.list_files(prefix=f"parquet/merged/{payload.dataset_key}/")
+    for item in cloud_list:
+        if item.get("key") == merged_key:
+            new_snapshot_file.file_size = int(item.get("size", new_snapshot_file.file_size))
+            break
+
+    db.add(new_snapshot_file)
+    db.flush()
+
+    if payload.archive_previous_snapshot:
+        old_meta = _parse_file_metadata(active_snapshot.file_metadata)
+        old_meta.update({
+            "active_for_queries": False,
+            "superseded_by_file_id": new_snapshot_file.id,
+            "superseded_at": datetime.utcnow().isoformat(),
+        })
+        _save_file_metadata(active_snapshot, old_meta)
+        active_snapshot.status = "archived"
+
+    monthly_meta.update({
+        "merged": True,
+        "merged_into_file_id": new_snapshot_file.id,
+        "merged_at": datetime.utcnow().isoformat(),
+        "active_for_queries": False,
+    })
+    _save_file_metadata(monthly_file, monthly_meta)
+    monthly_file.status = "archived"
+
+    db.commit()
+    db.refresh(new_snapshot_file)
+
+    return {
+        "success": True,
+        "dataset_key": payload.dataset_key,
+        "new_snapshot_file_id": new_snapshot_file.id,
+        "previous_snapshot_file_id": active_snapshot.id,
+        "merged_monthly_file_id": monthly_file.id,
+        "dedup_keys": dedup_keys,
+        "snapshot_version": snapshot_version,
+        "output_rows": output_rows,
+        "output_size_mb": round((new_snapshot_file.file_size or 0) / (1024 * 1024), 3),
     }
 
 

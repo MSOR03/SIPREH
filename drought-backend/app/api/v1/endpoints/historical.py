@@ -167,6 +167,18 @@ def get_file_metadata(file: ParquetFile) -> dict:
     return {}
 
 
+def infer_resolution_from_filename(filename: Optional[str]) -> Optional[float]:
+    """Infer historical dataset resolution from filename when metadata is missing."""
+    name = (filename or "").lower()
+    if "chirps" in name:
+        return 0.05
+    if "imerg" in name:
+        return 0.10
+    if "era5" in name:
+        return 0.25
+    return None
+
+
 def to_json_safe(value):
     """Recursively convert values to JSON-safe types (replace NaN/Inf with None)."""
     if isinstance(value, dict):
@@ -418,10 +430,14 @@ def list_available_files(
     result = []
     for file in files:
         metadata = get_file_metadata(file)
+        resolution = metadata.get("resolution")
+        if resolution is None:
+            resolution = infer_resolution_from_filename(file.original_filename) or infer_resolution_from_filename(file.filename)
+
         file_info = {
             "file_id": file.id,
             "filename": file.filename,
-            "resolution": metadata.get("resolution"),
+            "resolution": resolution,
             "date_range": {"start": None, "end": None},
             "spatial_bounds": {},
             "size_mb": file.file_size / (1024 * 1024) if file.file_size else None,
