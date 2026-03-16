@@ -17,99 +17,35 @@ import duckdb
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Any, Optional, Tuple
-from datetime import date, datetime, timedelta
-from io import BytesIO
+from datetime import date
 import hashlib
 import requests
 from app.services.cache import CacheService
 from app.services.cloud_storage import CloudStorageService
+from app.services.historical_constants import (
+    COLUMN_MAPPING,
+    PARQUET_FILES,
+    INDEX_DROUGHT_SCALES,
+    DROUGHT_INDEX_KEYS,
+    HYDROMETEOROLOGICAL_KEYS,
+)
+from app.services.historical_timeseries_mixin import TimeseriesMixin
+from app.services.historical_spatial_mixin import SpatialMixin
 
 
-class HistoricalDataService:
+class HistoricalDataService(TimeseriesMixin, SpatialMixin):
     """
     Servicio para consulta rápida de datos históricos usando DuckDB.
-    DuckDB puede leer parquet directamente desde URLs y hacer consultas SQL muy rápidas.
+
+    La lógica de consulta está dividida en mixins especializados:
+    - TimeseriesMixin  → query_timeseries  (historical_timeseries_mixin.py)
+    - SpatialMixin     → query_spatial_data (historical_spatial_mixin.py)
     """
     
-    # Mapeo de columnas reales en tus archivos .parquet
-    COLUMN_MAPPING = {
-        # Variables hidrometeorológicas
-        "precip": {"name": "Precipitación", "unit": "mm", "category": "meteorological"},
-        "tmean": {"name": "Temperatura Media", "unit": "°C", "category": "meteorological"},
-        "tmin": {"name": "Temperatura Mínima", "unit": "°C", "category": "meteorological"},
-        "tmax": {"name": "Temperatura Máxima", "unit": "°C", "category": "meteorological"},
-        "pet": {"name": "Evapotranspiración Potencial", "unit": "mm", "category": "meteorological"},
-        "balance": {"name": "Balance Hídrico", "unit": "mm", "category": "hydrological"},
-        # Índices de sequía
-        "SPI": {"name": "SPI", "unit": "adimensional", "category": "meteorological", "supports_prediction": True},
-        "SPEI": {"name": "SPEI", "unit": "adimensional", "category": "meteorological", "supports_prediction": True},
-        "RAI": {"name": "RAI", "unit": "adimensional", "category": "meteorological", "supports_prediction": False},
-        "EDDI": {"name": "EDDI", "unit": "adimensional", "category": "meteorological", "supports_prediction": True},
-        "PDSI": {"name": "PDSI", "unit": "adimensional", "category": "hydrological", "supports_prediction": False},
-    }
-    
-    # Archivos parquet disponibles con diferentes resoluciones
-    PARQUET_FILES = {
-        "low_res": {
-            "name": "Baja Resolución (0.25°)",
-            "resolution": 0.25,
-            "records": "1M",
-            "url_key": "low_res_url"  # Se configurará desde base de datos
-        },
-        "medium_res": {
-            "name": "Media Resolución (0.1°)",
-            "resolution": 0.1,
-            "records": "10M",
-            "url_key": "medium_res_url"
-        },
-        "high_res": {
-            "name": "Alta Resolución",
-            "resolution": 0.05,
-            "records": "50M",
-            "url_key": "high_res_url"
-        }
-    }
-    
-      # Escalas de severidad por índice
-    # Nota: bins en orden ascendente para pd.cut (intervalos [a,b) con right=False)
-    INDEX_DROUGHT_SCALES = {
-        "DEFAULT": {  # SPI, SPEI, RAI
-            "bins": [-np.inf, -2.0, -1.5, -1.0, 1.0, 1.5, 2.0, np.inf],
-            "categories": [
-                {"label": "Extremadamente Seco",  "color": "#FF0000", "severity": 6},
-                {"label": "Severamente Seco",     "color": "#FFA500", "severity": 5},
-                {"label": "Moderadamente Seco",   "color": "#FFFF00", "severity": 4},
-                {"label": "Normal",               "color": "#00FF00", "severity": 3},
-                {"label": "Moderadamente Húmedo", "color": "#00FFFF", "severity": 2},
-                {"label": "Muy Húmedo",           "color": "#0000FF", "severity": 1},
-                {"label": "Extremadamente Húmedo","color": "#000080", "severity": 0},
-            ],
-        },
-        "PDSI": {
-            "bins": [-np.inf, -4.0, -3.0, -2.0, 2.0, 3.0, 4.0, np.inf],
-            "categories": [
-                {"label": "Extremadamente Seco",  "color": "#FF0000", "severity": 6},
-                {"label": "Severamente Seco",     "color": "#FFA500", "severity": 5},
-                {"label": "Moderadamente Seco",   "color": "#FFFF00", "severity": 4},
-                {"label": "Normal",               "color": "#00FF00", "severity": 3},
-                {"label": "Moderadamente Húmedo", "color": "#00FFFF", "severity": 2},
-                {"label": "Muy Húmedo",           "color": "#0000FF", "severity": 1},
-                {"label": "Extremadamente Húmedo","color": "#000080", "severity": 0},
-            ],
-        },
-        "EDDI": {  # seco positivo, húmedo negativo
-            "bins": [-np.inf, -2.0, -1.5, -1.0, 1.0, 1.5, 2.0, np.inf],
-            "categories": [
-                {"label": "Extremadamente Húmedo","color": "#000080", "severity": 0},
-                {"label": "Muy Húmedo",           "color": "#0000FF", "severity": 1},
-                {"label": "Moderadamente Húmedo", "color": "#00FFFF", "severity": 2},
-                {"label": "Normal",               "color": "#00FF00", "severity": 3},
-                {"label": "Moderadamente Seco",   "color": "#FFFF00", "severity": 4},
-                {"label": "Severamente Seco",     "color": "#FFA500", "severity": 5},
-                {"label": "Extremadamente Seco",  "color": "#FF0000", "severity": 6},
-            ],
-        },
-    }
+    # Constantes importadas desde historical_constants  (ver ese módulo para editarlas)
+    COLUMN_MAPPING = COLUMN_MAPPING
+    PARQUET_FILES = PARQUET_FILES
+    INDEX_DROUGHT_SCALES = INDEX_DROUGHT_SCALES
     
     def __init__(self, cache_service: Optional[CacheService] = None, cloud_storage_service: Optional[CloudStorageService] = None):
         """
@@ -144,14 +80,29 @@ class HistoricalDataService:
         labels     = [c["label"]    for c in cats]
         colors     = [c["color"]    for c in cats]
         severities = [c["severity"] for c in cats]
-        df["category"] = pd.cut(df["value"], bins=bins, labels=labels,
-                                right=False, include_lowest=True).astype("string")
-        df["color"]    = pd.cut(df["value"], bins=bins, labels=colors,
-                                right=False, include_lowest=True).astype("string")
-        df["severity"] = pd.cut(df["value"], bins=bins, labels=severities,
-                                right=False, include_lowest=True).astype("Int64")
-        null_mask = df["value"].isna()
-        if null_mask.any():
+
+        # ⚡ Un solo np.searchsorted en vez de 3x pd.cut (3x scan → 1x scan)
+        vals = df["value"].values
+        # searchsorted con side='right' + right=False equivale a pd.cut(right=False)
+        finite_bins = np.array(bins[1:-1], dtype=np.float64)  # sin -inf/+inf
+        indices = np.searchsorted(finite_bins, vals, side="right")  # 0..len(cats)-1
+
+        cat_arr = np.empty(len(vals), dtype=object)
+        col_arr = np.empty(len(vals), dtype=object)
+        sev_arr = np.empty(len(vals), dtype=np.float64)
+
+        for i, cat in enumerate(cats):
+            mask = indices == i
+            cat_arr[mask] = cat["label"]
+            col_arr[mask] = cat["color"]
+            sev_arr[mask] = cat["severity"]
+
+        df["category"] = pd.array(cat_arr, dtype="string")
+        df["color"]    = pd.array(col_arr, dtype="string")
+        df["severity"] = pd.array(sev_arr, dtype="Int64")
+
+        null_mask = np.isnan(vals) if vals.dtype.kind == 'f' else df["value"].isna()
+        if np.any(null_mask):
             df.loc[null_mask, ["category", "color", "severity"]] = pd.NA
         return df
 
@@ -167,11 +118,17 @@ class HistoricalDataService:
             self.conn = duckdb.connect(database=':memory:')
             
             # ✅ Habilitar lectura HTTP/S3/R2
+            # Nota: INSTALL httpfs descarga la extensión de internet y puede bloquear
+            # en Windows. Usar autoinstall/autoload en su lugar.
             try:
-                self.conn.execute("INSTALL httpfs;")
+                self.conn.execute("SET autoinstall_known_extensions = true;")
+                self.conn.execute("SET autoload_known_extensions = true;")
+            except Exception:
+                pass
+            try:
                 self.conn.execute("LOAD httpfs;")
             except Exception:
-                pass  # Ya instalado
+                print("Warning: httpfs not pre-installed, will autoload on demand")
             
             # 🚀 CONFIGURACIÓN NATIVA R2 (soporte oficial DuckDB)
             from app.core.config import settings
@@ -209,7 +166,9 @@ class HistoricalDataService:
                 self.conn.execute("SET threads TO 4")
                 self.conn.execute("SET memory_limit = '2GB'")
             
-            self.conn.execute("SET temp_directory = '/tmp'")
+            import tempfile
+            self.conn.execute(f"SET temp_directory = '{tempfile.gettempdir().replace(chr(92), '/')}'")
+
             
             # HTTP/Network optimizations
             self.conn.execute("SET http_timeout = 120000")  # 2 minutos
@@ -224,6 +183,29 @@ class HistoricalDataService:
             self.conn.execute("SET enable_progress_bar = false")
         
         return self.conn
+
+    def _get_available_freqs(self, local_path: str, parquet_url: str, variable: str, file_format: str, var_column: str = 'var') -> list:
+        """
+        Detecta frecuencias disponibles para una variable en un parquet.
+        Resultado cacheado 24h (las frecuencias no cambian).
+        """
+        cache_key = f"freqs:{hashlib.md5((parquet_url + ':' + variable).encode()).hexdigest()}"
+        cached = self.cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        try:
+            conn = self._get_connection()
+            if file_format == 'long':
+                freq_query = f"SELECT DISTINCT freq FROM read_parquet('{local_path}') WHERE {var_column} = '{variable}'"
+            else:
+                freq_query = f"SELECT DISTINCT freq FROM read_parquet('{local_path}') WHERE {variable} IS NOT NULL"
+            available_freqs = [r[0] for r in conn.execute(freq_query).fetchall() if r[0]]
+        except Exception:
+            available_freqs = []
+
+        self.cache.set(cache_key, available_freqs, expire=86400)
+        return available_freqs
     
     def _get_parquet_url(self, cloud_key_or_url: str, use_cache: bool = True) -> str:
         """
@@ -263,8 +245,12 @@ class HistoricalDataService:
         else:
             cloud_key = cloud_key_or_url
         
-        # 🚀 CACHÉ EFÍMERO: /tmp en producción, local en desarrollo
-        cache_dir = '/tmp/parquet_cache' if self.is_production else '.cache_parquet'
+        # 🚀 CACHÉ EFÍMERO: /tmp en producción, .cache_parquet local en desarrollo
+        if self.is_production:
+            cache_dir = '/tmp/parquet_cache'
+        else:
+            # Desarrollo: siempre usar directorio local visible
+            cache_dir = '.cache_parquet'
         os.makedirs(cache_dir, exist_ok=True)
         
         key_hash = hashlib.md5(cloud_key.encode()).hexdigest()
@@ -403,7 +389,6 @@ class HistoricalDataService:
             
         except Exception as e:
             raise Exception(f"Error detectando columnas del archivo: {str(e)}")
-            raise Exception(f"Error detectando columnas del archivo: {str(e)}")
     
     def validate_file_structure(self, parquet_url: str) -> Dict[str, Any]:
         """
@@ -465,50 +450,28 @@ class HistoricalDataService:
                 "info": []
             }
     
+    def _filter_catalog_by_keys(self, keys: List[str]) -> List[Dict[str, Any]]:
+        """Filtra COLUMN_MAPPING por una lista de claves y retorna items del catálogo."""
+        return [
+            {
+                "id": key,
+                "name": self.COLUMN_MAPPING[key]["name"],
+                "unit": self.COLUMN_MAPPING[key]["unit"],
+                "category": self.COLUMN_MAPPING[key]["category"],
+                "available": True,
+                "supports_prediction": self.COLUMN_MAPPING[key].get("supports_prediction", False),
+            }
+            for key in keys
+            if key in self.COLUMN_MAPPING
+        ]
+
     def get_drought_indices(self) -> List[Dict[str, Any]]:
-        """
-        Obtiene solo los índices de sequía.
-        
-        Returns:
-            Lista de índices
-        """
-        indices = []
-        drought_index_cols = ["SPI", "SPEI", "RAI", "EDDI", "PDSI"]
-        
-        for col_name in drought_index_cols:
-            if col_name in self.COLUMN_MAPPING:
-                info = self.COLUMN_MAPPING[col_name]
-                indices.append({
-                    "id": col_name,
-                    "name": info["name"],
-                    "unit": info["unit"],
-                    "category": info["category"],
-                    "available": True,
-                    "supports_prediction": info.get("supports_prediction", False)
-                })
-        return indices
-    
+        """Obtiene solo los índices de sequía."""
+        return self._filter_catalog_by_keys(DROUGHT_INDEX_KEYS)
+
     def get_hydrometeorological_variables(self) -> List[Dict[str, Any]]:
-        """
-        Obtiene solo las variables hidrometeorológicas.
-        
-        Returns:
-            Lista de variables
-        """
-        variables = []
-        var_cols = ["precip", "tmean", "tmin", "tmax", "pet", "balance"]
-        
-        for col_name in var_cols:
-            if col_name in self.COLUMN_MAPPING:
-                info = self.COLUMN_MAPPING[col_name]
-                variables.append({
-                    "id": col_name,
-                    "name": info["name"],
-                    "unit": info["unit"],
-                    "category": info["category"],
-                    "available": True
-                })
-        return variables
+        """Obtiene solo las variables hidrometeorológicas."""
+        return self._filter_catalog_by_keys(HYDROMETEOROLOGICAL_KEYS)
     
     def categorize_drought_value(self, value: float, variable: str = "SPI") -> Dict[str, Any]:
         if pd.isna(value):
@@ -523,25 +486,27 @@ class HistoricalDataService:
         return {"category": label, "label": label, "color": cat_info["color"],
                 "severity": cat_info["severity"], "value": value}
         
-    def _detect_parquet_format(self, parquet_url: str) -> dict:
+    def _detect_parquet_format(self, parquet_url: str, resolved_path: str = None) -> dict:
         """
         Detecta el formato del parquet leyendo SOLO metadatos (no descarga archivo completo).
-        
+
         Args:
-            parquet_url: URL del parquet o cloud_key
-            
+            parquet_url: URL del parquet o cloud_key (usado como cache key)
+            resolved_path: Path local ya resuelto (evita llamar _get_parquet_url de nuevo)
+
         Returns:
             Dict con 'format' ('wide' o 'long') y 'date_column' (nombre de la columna de fecha)
         """
         # Cache para evitar lecturas repetidas de metadatos
-        cache_key = f"format:{hashlib.md5(parquet_url.encode()).hexdigest()}"
+        # v2: incluye 'columns' — invalida cache anterior que no lo tenía
+        cache_key = f"format_v2:{hashlib.md5(parquet_url.encode()).hexdigest()}"
         cached = self.cache.get(cache_key)
-        if cached:
+        if cached and 'columns' in cached:
             return cached
-        
+
         try:
             conn = self._get_connection()
-            url = self._get_parquet_url(parquet_url)
+            url = resolved_path or self._get_parquet_url(parquet_url)
             
             # ✅ DuckDB lee solo metadatos (~10 KB en vez de todo el archivo)
             schema_query = f"DESCRIBE SELECT * FROM read_parquet('{url}') LIMIT 0"
@@ -552,7 +517,8 @@ class HistoricalDataService:
             result = {
                 'format': 'wide',
                 'date_column': 'date',
-                'var_column': 'var'
+                'var_column': 'var',
+                'columns': column_names
             }
             
             # Detectar columna de fecha
@@ -584,482 +550,8 @@ class HistoricalDataService:
             return result
             
         except Exception:
-            return {'format': 'wide', 'date_column': 'date'}
+            return {'format': 'wide', 'date_column': 'date', 'columns': []}
     
-    def query_timeseries(
-        self,
-        parquet_url: str,
-        variable: str,
-        start_date: date,
-        end_date: date,
-        lat: Optional[float] = None,
-        lon: Optional[float] = None,
-        cell_id: Optional[str] = None,
-        limit: int = 70000
-    ) -> Tuple[List[Dict[str, Any]], Dict[str, float], Dict[str, Optional[float]]]:
-        """
-        Consulta serie de tiempo de una variable/índice usando DuckDB.
-        
-        Soporta dos formatos:
-        - Wide: cada variable es una columna (SPI, SPEI, precip, etc.)
-        - Long: columna 'var' con el nombre y columna 'value' con el valor
-        
-        Args:
-            parquet_url: Cloud key (e.g., 'parquet/file.parquet') o URL completa del archivo
-            variable: Nombre de la variable (precip, SPI, etc.)
-            start_date: Fecha inicial
-            end_date: Fecha final
-            lat: Latitud (opcional)
-            lon: Longitud (opcional)
-            cell_id: ID de celda (opcional)
-            limit: Máximo de registros a retornar (default: 70000)
-            
-        Returns:
-            Tupla (data_points, estadísticas, coordenadas)
-            - data_points: Lista de puntos SIN lat/lon (optimizado)
-            - estadísticas: Dict con mean, min, max, std, count, missing
-            - coordenadas: Dict con lat, lon del punto consultado
-        """
-        # Generar key de cache con protección contra errores
-        cache_key = None
-        try:
-            cache_key = self.cache._generate_key(
-                "timeseries",
-                url=parquet_url,
-                var=variable,
-                start=str(start_date),
-                end=str(end_date),
-                lat=lat,
-                lon=lon,
-                cell=cell_id,
-                limit=limit
-            )
-            
-            # Verificar cache (deserializar dict → tupla)
-            if cache_key:
-                cached_result = self.cache.get(cache_key)
-                if cached_result and isinstance(cached_result, dict) and "data" in cached_result:
-                    coords = cached_result.get("coordinates", {"lat": None, "lon": None})
-                    return cached_result["data"], cached_result["statistics"], coords
-        except Exception:
-            cache_key = None  # Si falla, continuar sin caché
-        
-        try:
-            import time as time_module
-            t0 = time_module.time()
-            
-            conn = self._get_connection()
-            
-            # Detectar formato y columna de fecha (lee solo metadatos, cacheado 24h)
-            format_info = self._detect_parquet_format(parquet_url)
-            file_format = format_info['format']
-            date_col = format_info['date_column']
-            
-            # ⚡ Obtener URL óptima (pública R2 o local)
-            source = self._get_parquet_url(parquet_url)
-            
-            # 🚀 OPTIMIZACIÓN: Seleccionar SOLO columnas necesarias
-            # En vez de SELECT *, seleccionar solo date, lat, lon, value
-            # Esto reduce transferencia de datos significativamente
-            
-            # Construir filtros
-            where_clauses = []
-            
-            # Filtro de fechas - usar la columna detectada
-            where_clauses.append(f"{date_col} >= CAST('{start_date}' AS DATE)")
-            where_clauses.append(f"{date_col} <= CAST('{end_date}' AS DATE)")
-            
-            # 🔥 OPTIMIZACIÓN CRÍTICA: BETWEEN en vez de ABS() / cell_id string
-            # DuckDB puede usar las estadísticas min/max de cada row-group del parquet
-            # con predicados BETWEEN/>=/<= pero NO con ABS() ni cell_id string equality.
-            # Esto puede saltar 90%+ de los row-groups en archivos grandes.
-            if cell_id:
-                # Parsear cell_id (formato LON_LAT) → filtro numérico exacto por lat/lon
-                try:
-                    _lon_s, _lat_s = cell_id.split('_', 1)
-                    _eps = 0.0001  # sub-mm precision para absorber redondeo float
-                    _clat, _clon = float(_lat_s), float(_lon_s)
-                    where_clauses.append(f"lat BETWEEN {_clat - _eps} AND {_clat + _eps}")
-                    where_clauses.append(f"lon BETWEEN {_clon - _eps} AND {_clon + _eps}")
-                except (ValueError, IndexError):
-                    where_clauses.append(f"cell_id = '{cell_id}'")  # fallback
-            elif lat is not None and lon is not None:
-                # BETWEEN permite pushdown de row-groups; 0.15° captura celda más cercana en res 0.25°
-                tolerance = 0.15
-                where_clauses.append(f"lat BETWEEN {lat - tolerance} AND {lat + tolerance}")
-                where_clauses.append(f"lon BETWEEN {lon - tolerance} AND {lon + tolerance}")
-            
-            # 🚀 Construir query SIN ORDER BY (permite early stopping con LIMIT)
-            # DuckDB puede usar HTTP Range Requests para leer solo row groups necesarios
-            if file_format == 'long':
-                var_col = format_info.get('var_column', 'var')
-                where_clauses.append(f"{var_col} = '{variable}'")
-                where_clause = " AND ".join(where_clauses)
-
-                # ⚡ Sin ORDER BY - DuckDB optimiza con HTTP Range
-                query = f"""
-                SELECT 
-                    {date_col} as date,
-                    lat,
-                    lon,
-                    value
-                FROM read_parquet('{source}')
-                WHERE {where_clause}
-                LIMIT {limit}
-                """
-            else:
-                where_clause = " AND ".join(where_clauses)
-
-                # ⚡ Sin ORDER BY - permite HTTP Range eficiente
-                query = f"""
-                SELECT 
-                    {date_col} as date,
-                    lat,
-                    lon,
-                    {variable} as value
-                FROM read_parquet('{source}')
-                WHERE {where_clause}
-                LIMIT {limit}
-                """
-            
-            # Ejecutar query
-            t5 = time_module.time()
-            result_df = conn.execute(query).fetchdf()
-            t6 = time_module.time()
-            
-            # Log de timing siempre (útil para detectar regresiones)
-            elapsed = t6 - t5
-            level = "⚠️" if elapsed > 5 else "⚡"
-            print(f"{level} timeseries query: {elapsed:.2f}s | file={parquet_url} var={variable} cell={cell_id} rows={len(result_df)}")
-            
-            # 🎯 Si buscamos por lat/lon, filtrar por el punto más cercano (en pandas, rápido)
-            if lat is not None and lon is not None and len(result_df) > 0:
-                result_df['distance'] = np.sqrt(
-                    (result_df['lat'] - lat)**2 + (result_df['lon'] - lon)**2
-                )
-                closest_point = result_df.loc[result_df['distance'].idxmin()]
-                actual_lat, actual_lon = closest_point['lat'], closest_point['lon']
-                
-                # Filtrar solo ese punto y eliminar columna auxiliar
-                result_df = result_df[
-                    (result_df['lat'] == actual_lat) & 
-                    (result_df['lon'] == actual_lon)
-                ].drop(columns=['distance'])
-            
-            # 🔄 Ordenar en pandas (mucho más rápido que ORDER BY en HTTP Range)
-            if len(result_df) > 0:
-                result_df = result_df.sort_values('date')
-            
-            # 🚀 Preparar datos de salida (operaciones vectorizadas, 10-100x más rápido)
-            is_drought_index = variable in ["SPI", "SPEI", "RAI", "EDDI", "PDSI"]
-            
-            # Convertir valores a numérico y añadir quality
-            result_df['value'] = pd.to_numeric(result_df['value'], errors='coerce')
-            
-            # Si es índice de sequía, categorizar vectorizadamente
-            if is_drought_index:
-                result_df = self._apply_drought_scale(result_df, variable)
-            
-            # 🎯 OPTIMIZACIÓN: Extraer coordenadas ANTES de convertir a dict
-            # Para timeseries, lat/lon son constantes - no repetir en cada punto
-            actual_lat = None
-            actual_lon = None
-            if len(result_df) > 0:
-                actual_lat = float(result_df['lat'].iloc[0])
-                actual_lon = float(result_df['lon'].iloc[0])
-                
-                # Eliminar lat/lon del DataFrame (datos repetitivos)
-                result_df = result_df.drop(columns=['lat', 'lon'])
-            
-            # ⚡ Convertir fecha a string ISO ANTES de to_dict
-            # Evita pandas.Timestamp en los dicts → FastAPI no necesita llamar
-            # jsonable_encoder sobre toda la lista (10-100x más rápido para datasets grandes)
-            if len(result_df) > 0 and 'date' in result_df.columns:
-                result_df['date'] = result_df['date'].dt.strftime('%Y-%m-%d')
-            
-            # ⚡ Limpiar Inf→NaN (bug de datos). NaN queda como np.nan en el DataFrame;
-            # orjson los serializa a null nativo sin recursión.
-            if 'value' in result_df.columns:
-                result_df['value'] = result_df['value'].replace([np.inf, -np.inf], np.nan)
-            
-            # Convertir a lista de diccionarios
-            # Ahora solo incluye: date (str), value (float|None), [category, color, severity]
-            data_points = result_df.to_dict('records')
-            
-            # Calcular estadísticas
-            values = result_df['value'].dropna()
-            statistics = {
-                "mean": float(values.mean()) if len(values) > 0 else None,
-                "min": float(values.min()) if len(values) > 0 else None,
-                "max": float(values.max()) if len(values) > 0 else None,
-                "std": float(values.std()) if len(values) > 0 else None,
-                "count": len(values),
-                "missing": len(result_df) - len(values)
-            }
-            
-            # Guardar en cache (15 minutos) - como dict para serialización JSON
-            if cache_key:
-                result_dict = {
-                    "data": data_points, 
-                    "statistics": statistics,
-                    "coordinates": {"lat": actual_lat, "lon": actual_lon}
-                }
-                self.cache.set(cache_key, result_dict, expire=900)
-            
-            # Retornar coordenadas junto con datos
-            return data_points, statistics, {"lat": actual_lat, "lon": actual_lon}
-            
-        except Exception as e:
-            raise Exception(f"Error consultando serie de tiempo: {str(e)}")
-    
-    def query_spatial_data(
-        self,
-        parquet_url: str,
-        variable: str,
-        target_date: Optional[date] = None,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
-        use_interval: bool = False,
-        bounds: Optional[Dict[str, float]] = None,
-        limit: int = 100000
-    ) -> Tuple[List[Dict[str, Any]], Dict[str, float], Optional[date]]:
-        """
-        Consulta datos espaciales (2D) para una fecha específica usando DuckDB.
-        
-        Soporta dos formatos:
-        - Wide: cada variable es una columna
-        - Long: columna 'var' con el nombre y columna 'value' con el valor
-        
-        Args:
-            parquet_url: Cloud key o URL del archivo parquet
-            variable: Nombre de la variable
-            target_date: Fecha objetivo (modo fecha única)
-            start_date: Fecha inicial (modo intervalo)
-            end_date: Fecha final (modo intervalo)
-            use_interval: Si True usa intervalo [start_date, end_date]
-            bounds: Límites espaciales (min_lat, max_lat, min_lon, max_lon)
-            limit: Máximo de celdas a retornar (default: 100000)
-            
-        Returns:
-            Tupla (celdas, estadísticas, fecha_usada)
-        """
-        interval_mode = use_interval or (
-            start_date is not None and end_date is not None and start_date != end_date
-        )
-
-        # Cache key con protección
-        cache_key = None
-        try:
-            cache_key = self.cache._generate_key(
-                "spatial",
-                url=parquet_url,
-                var=variable,
-                mode="interval" if interval_mode else "single",
-                date=str(target_date),
-                start_date=str(start_date),
-                end_date=str(end_date),
-                bounds=str(bounds) if bounds else None,
-                limit=limit
-            )
-            
-            # Verificar cache (deserializar dict → tupla)
-            if cache_key:
-                cached_result = self.cache.get(cache_key)
-                if cached_result and isinstance(cached_result, dict) and "data" in cached_result:
-                    used_date = cached_result.get("used_date", str(target_date))
-                    return cached_result["data"], cached_result["statistics"], used_date
-        except Exception:
-            cache_key = None
-        
-        try:
-            conn = self._get_connection()
-
-            if interval_mode:
-                if not start_date or not end_date:
-                    raise ValueError("Para modo intervalo debes enviar start_date y end_date")
-                if start_date > end_date:
-                    raise ValueError("start_date no puede ser mayor que end_date")
-            elif not target_date:
-                raise ValueError("En modo fecha única debes enviar target_date")
-            
-            # Detectar formato y columna de fecha (lee solo metadatos, cacheado 24h)
-            format_info = self._detect_parquet_format(parquet_url)
-            file_format = format_info['format']
-            date_col = format_info['date_column']
-            
-            # ⚡ Obtener URL óptima (pública R2 o local)
-            source = self._get_parquet_url(parquet_url)
-            
-            # Construir filtros base (sin fecha)
-            base_clauses = []
-            
-            # Filtro de bounds
-            if bounds:
-                base_clauses.append(f"lat >= {bounds.get('min_lat', -90)}")
-                base_clauses.append(f"lat <= {bounds.get('max_lat', 90)}")
-                base_clauses.append(f"lon >= {bounds.get('min_lon', -180)}")
-                base_clauses.append(f"lon <= {bounds.get('max_lon', 180)}")
-            
-            # Construir query según formato
-            if file_format == 'long':
-                var_col = format_info.get('var_column', 'var')
-                base_clauses.append(f"{var_col} = '{variable}'")
-                value_expr = "value"
-            else:
-                value_expr = variable  # wide: la columna se llama igual que la variable
-
-            base_where = " AND ".join(base_clauses) if base_clauses else "1=1"
-
-            def run_spatial_query(for_date: date):
-                where_clause = f"{base_where} AND CAST({date_col} AS DATE) = CAST('{for_date}' AS DATE)"
-                query = f"""
-                SELECT 
-                    lat,
-                    lon,
-                    AVG(CAST({value_expr} AS DOUBLE)) as value,
-                    COUNT(*) as records_in_cell
-                FROM read_parquet('{source}')
-                WHERE {where_clause}
-                GROUP BY lat, lon
-                LIMIT {limit}
-                """
-                return conn.execute(query).fetchdf()
-
-            def run_spatial_query_interval(range_start: date, range_end: date):
-                where_clause = (
-                    f"{base_where} AND CAST({date_col} AS DATE) BETWEEN "
-                    f"CAST('{range_start}' AS DATE) AND CAST('{range_end}' AS DATE)"
-                )
-                query = f"""
-                SELECT
-                    lat,
-                    lon,
-                    AVG(CAST({value_expr} AS DOUBLE)) as value,
-                    COUNT(*) as records_in_cell,
-                    COUNT(DISTINCT CAST({date_col} AS DATE)) as days_in_cell
-                FROM read_parquet('{source}')
-                WHERE {where_clause}
-                GROUP BY lat, lon
-                LIMIT {limit}
-                """
-                return conn.execute(query).fetchdf()
-
-            used_date = None if interval_mode else target_date
-
-            if interval_mode:
-                result_df = run_spatial_query_interval(start_date, end_date)
-            else:
-                result_df = run_spatial_query(target_date)
-
-                # Si no hay datos exactos para la fecha solicitada, usar la fecha más cercana con datos.
-                if result_df.empty:
-                    nearest_date_query = f"""
-                    SELECT CAST({date_col} AS DATE) AS d
-                    FROM read_parquet('{source}')
-                    WHERE {base_where} AND {value_expr} IS NOT NULL
-                    GROUP BY 1
-                    ORDER BY ABS(DATEDIFF('day', d, CAST('{target_date}' AS DATE))) ASC
-                    LIMIT 1
-                    """
-                    nearest_row = conn.execute(nearest_date_query).fetchone()
-
-                    if nearest_row and nearest_row[0] is not None:
-                        used_date = nearest_row[0]
-                        result_df = run_spatial_query(used_date)
-            
-            # 🚀 Preparar datos espaciales (operaciones vectorizadas)
-            is_drought_index = variable in ["SPI", "SPEI", "RAI", "EDDI", "PDSI"]
-            
-            # Convertir valores y crear cell_id vectorizadamente
-            result_df['value'] = pd.to_numeric(result_df['value'], errors='coerce')
-            result_df['cell_id'] = result_df.apply(
-                lambda row: f"{row['lon']:.6f}_{row['lat']:.6f}", axis=1  # LON_LAT format
-            )
-            
-            # Si es índice de sequía, categorizar vectorizadamente
-            if is_drought_index:
-                result_df = self._apply_drought_scale(result_df, variable)
-            else:
-                # Para variables meteorológicas, crear escala de colores basada en percentiles
-                def get_color_for_value(value, vmin, vmax):
-                    """Genera color de azul (bajo) a rojo (alto) basado en valor normalizado."""
-                    if pd.isna(value) or vmin == vmax:
-                        return "#CCCCCC"  # Gris para NaN o sin variación
-                    
-                    # Normalizar valor entre 0 y 1
-                    normalized = (value - vmin) / (vmax - vmin)
-                    normalized = max(0, min(1, normalized))  # Clamp entre 0-1
-                    
-                    # Escala de colores: azul (0) -> cyan (0.25) -> verde (0.5) -> amarillo (0.75) -> rojo (1)
-                    if normalized < 0.25:
-                        # Azul a Cyan
-                        r = 0
-                        g = int(255 * (normalized / 0.25))
-                        b = 255
-                    elif normalized < 0.5:
-                        # Cyan a Verde
-                        r = 0
-                        g = 255
-                        b = int(255 * (1 - (normalized - 0.25) / 0.25))
-                    elif normalized < 0.75:
-                        # Verde a Amarillo
-                        r = int(255 * ((normalized - 0.5) / 0.25))
-                        g = 255
-                        b = 0
-                    else:
-                        # Amarillo a Rojo
-                        r = 255
-                        g = int(255 * (1 - (normalized - 0.75) / 0.25))
-                        b = 0
-                    
-                    return f"#{r:02x}{g:02x}{b:02x}"
-                
-                # Calcular min/max para escala de colores
-                valid_values = result_df['value'].dropna()
-                if len(valid_values) > 0:
-                    vmin = float(valid_values.min())
-                    vmax = float(valid_values.max())
-                    
-                    # Aplicar colores vectorizadamente
-                    result_df['color'] = result_df['value'].apply(
-                        lambda v: get_color_for_value(v, vmin, vmax)
-                    )
-                else:
-                    result_df['color'] = "#CCCCCC"
-            
-            # Convertir a lista de diccionarios
-            grid_cells = result_df.to_dict('records')
-            
-            # Estadísticas
-            values = result_df['value'].dropna()
-            total_cells = len(result_df)
-            valid_cells = len(values)
-            statistics = {
-                "mean": float(values.mean()) if len(values) > 0 else None,
-                "min": float(values.min()) if len(values) > 0 else None,
-                "max": float(values.max()) if len(values) > 0 else None,
-                "std": float(values.std()) if len(values) > 0 else None,
-                "count": valid_cells,
-                "total_cells": total_cells,
-                "unique_cells": total_cells,
-                "valid_cells": valid_cells,
-                "null_cells": total_cells - valid_cells,
-                "raw_records_aggregated": int(result_df['records_in_cell'].sum()) if 'records_in_cell' in result_df else len(result_df)
-            }
-            
-            # Cache (15 minutos) - como dict para serialización JSON
-            if cache_key:
-                result_dict = {
-                    "data": grid_cells,
-                    "statistics": statistics,
-                    "used_date": str(used_date)
-                }
-                self.cache.set(cache_key, result_dict, expire=900)
-            
-            return grid_cells, statistics, used_date
-            
-        except Exception as e:
-            raise Exception(f"Error consultando datos espaciales: {str(e)}")
     
     def get_date_range(self, parquet_url: str) -> Tuple[date, date]:
         """

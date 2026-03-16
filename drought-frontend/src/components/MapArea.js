@@ -1,11 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { memo, useState, useCallback, useMemo } from 'react';
 import { RotateCcw, Download, MapPin, ChevronLeft, ChevronRight, Home, Layers, Grid3x3, Navigation, Droplets, Database, Map as MapIcon } from 'lucide-react';
 import Button from './ui/Button';
 import { useTheme } from '@/contexts/ThemeContext';
 import dynamic from 'next/dynamic';
-import TimeSeriesChart from './TimeSeriesChart';
+const TimeSeriesChart = dynamic(() => import('./TimeSeriesChart'), { ssr: false });
 import { useGridNavigation } from '../hooks/useGridNavigation';
 import { formatLevelLabel } from '../utils/gridLevels';
 
@@ -42,73 +42,67 @@ export default function MapArea({
 
  // Normalizar variable para evitar fallos por mayúsculas/minúsculas o espacios
   const normalizedVariable = String(plotData?.variable ?? '').trim().toUpperCase();
-  const isDroughtIndex = ['SPI', 'SPEI', 'RAI', 'EDDI', 'PDSI'].includes(normalizedVariable);
-  const hasCategorizedCells = Boolean(
-    plotData?.gridCells?.some((c) => c?.color && c?.category)
+  const isDroughtIndex = useMemo(
+    () => ['SPI', 'SPEI', 'RAI', 'EDDI', 'PDSI'].includes(normalizedVariable),
+    [normalizedVariable]
+  );
+  const hasCategorizedCells = useMemo(
+    () => Boolean(plotData?.gridCells?.some((c) => c?.color && c?.category)),
+    [plotData?.gridCells]
   );
 
   // Usar el hook de navegación jerárquica
   const gridNav = useGridNavigation('LOW');
   const [layerMenuOpen, setLayerMenuOpen] = useState(false);
 
-  const toggleLayer = (key) => {
+  const toggleLayer = useCallback((key) => {
     setMapLayers(prev => ({ ...prev, [key]: !prev[key] }));
-  };
+  }, [setMapLayers]);
 
-  const handleReset = () => {
-    // Force complete remount with new timestamp
+  const handleReset = useCallback(() => {
     setMapKey(Date.now());
     onStationSelect(null);
     onCellSelect(null);
     gridNav.resetToRoot();
     gridNav.clearSelection();
     onReset();
-  };
+  }, [onStationSelect, onCellSelect, gridNav, onReset]);
 
-  const handleStationSelect = (station) => {
+  const handleStationSelect = useCallback((station) => {
     onStationSelect(station);
-    onCellSelect(null); // Clear cell when station is selected
+    onCellSelect(null);
     gridNav.clearSelection();
-    console.log('Estación seleccionada:', station);
-  };
+  }, [onStationSelect, onCellSelect, gridNav]);
 
-  const handleGridCellClick = (cell) => {
-    // Single click: selecciona la celda para análisis
+  const handleGridCellClick = useCallback((cell) => {
     onCellSelect(cell);
-    onStationSelect(null); // Clear station when cell is selected
-    console.log('Celda seleccionada para análisis:', cell);
-  };
+    onStationSelect(null);
+  }, [onCellSelect, onStationSelect]);
 
-  const handleGridCellDoubleClick = (cell) => {
-    // Double click: intenta hacer drill down
+  const handleGridCellDoubleClick = useCallback((cell) => {
     const didDrill = gridNav.handleCellClick(cell, 'double');
-    
     if (didDrill) {
-      // Si navegó, limpiar selección
       onCellSelect(null);
       onStationSelect(null);
-      console.log('Drill down a celda:', cell);
     } else {
-      // Si no puede navegar (nivel máximo), selecciona
       onCellSelect(cell);
       onStationSelect(null);
-      console.log('Nivel máximo alcanzado, celda seleccionada:', cell);
     }
-  };
+  }, [gridNav, onCellSelect, onStationSelect]);
 
-  const handleDrillUp = () => {
+  const handleDrillUp = useCallback(() => {
     const success = gridNav.drillUp();
     if (success) {
       onCellSelect(null);
       onStationSelect(null);
     }
-  };
-  
-  const handleBackToRoot = () => {
+  }, [gridNav, onCellSelect, onStationSelect]);
+
+  const handleBackToRoot = useCallback(() => {
     gridNav.resetToRoot();
     onCellSelect(null);
     onStationSelect(null);
-  };
+  }, [gridNav, onCellSelect, onStationSelect]);
 
   return (
     <main className="flex-1 flex flex-col bg-gradient-to-br from-blue-50/30 via-blue-50/20 to-gray-50 dark:from-[#0f1419] dark:via-[#141920] dark:to-[#0f1419] rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden shadow-2xl">
@@ -419,32 +413,7 @@ Los colores representan {isDroughtIndex ? 'las categorías de sequía' : 'los va
                   </p>
                   
 {/* Leyenda de colores para índices de sequía — dinámica desde datos del backend */}
-{isDroughtIndex && hasCategorizedCells && (() => {
-  const seen = new Map();
-  plotData.gridCells.forEach(c => {
-    if (c.color && c.category && !seen.has(c.category)) {
-      seen.set(c.category, { color: c.color, severity: c.severity ?? 99 });
-    }
-  });
-
-  const legend = [...seen.entries()]
-    .map(([label, { color, severity }]) => ({ label, color, severity }))
-    .sort((a, b) => a.severity - b.severity);
-
-  return (
-    <div className="mt-4">
-      <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">Leyenda:</p>
-      <div className="grid grid-cols-2 gap-2 text-xs">
-        {legend.map(({ label, color }) => (
-          <div key={label} className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded" style={{ backgroundColor: color }}></div>
-            <span className="text-gray-700 dark:text-gray-300">{label}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-})()}
+{isDroughtIndex && hasCategorizedCells && <DroughtLegend gridCells={plotData.gridCells} />}
                 </div>
               </div>
             ) : (plotData.type === 'Serie de Tiempo' || plotData.type === '1D') && plotData.data ? (
@@ -529,6 +498,34 @@ Los colores representan {isDroughtIndex ? 'las categorías de sequía' : 'los va
     </main>
   );
 }
+
+const DroughtLegend = memo(function DroughtLegend({ gridCells }) {
+  const legend = useMemo(() => {
+    const seen = new Map();
+    for (const c of gridCells) {
+      if (c.color && c.category && !seen.has(c.category)) {
+        seen.set(c.category, { color: c.color, severity: c.severity ?? 99 });
+      }
+    }
+    return [...seen.entries()]
+      .map(([label, { color, severity }]) => ({ label, color, severity }))
+      .sort((a, b) => a.severity - b.severity);
+  }, [gridCells]);
+
+  return (
+    <div className="mt-4">
+      <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">Leyenda:</p>
+      <div className="grid grid-cols-2 gap-2 text-xs">
+        {legend.map(({ label, color }) => (
+          <div key={label} className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded" style={{ backgroundColor: color }}></div>
+            <span className="text-gray-700 dark:text-gray-300">{label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+});
 
 function BarChart3({ className }) {
   return (

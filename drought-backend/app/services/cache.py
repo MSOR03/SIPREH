@@ -23,15 +23,21 @@ class CacheService:
         try:
             import redis
             from app.core.config import settings
-            
+
             # Redis connection (optional)
-            if hasattr(settings, 'REDIS_URL'):
+            if hasattr(settings, 'REDIS_URL') and settings.REDIS_URL:
                 self.redis_client = redis.from_url(
                     settings.REDIS_URL,
-                    decode_responses=False
+                    decode_responses=False,
+                    socket_connect_timeout=2,
+                    socket_timeout=2,
+                    retry_on_timeout=False,
                 )
+                # Verify connection immediately — if Redis is down, disable it
+                self.redis_client.ping()
                 print("Redis cache connected")
         except (ImportError, Exception) as e:
+            self.redis_client = None
             print(f"Redis not available, using memory cache: {e}")
     
     def _generate_key(self, prefix: str, **kwargs) -> str:
@@ -68,8 +74,9 @@ class CacheService:
                 if value:
                     return pickle.loads(value)
             except Exception as e:
-                print(f"Redis get error: {e}")
-        
+                print(f"Redis get error (disabling Redis): {e}")
+                self.redis_client = None
+
         # Fallback to memory cache
         return self.memory_cache.get(key)
     
@@ -97,7 +104,8 @@ class CacheService:
                 self.redis_client.setex(key, expire, serialized)
                 return True
             except Exception as e:
-                print(f"Redis set error: {e}")
+                print(f"Redis set error (disabling Redis): {e}")
+                self.redis_client = None
         
         # Fallback to memory cache (with simple expiration tracking)
         self.memory_cache[key] = value
@@ -117,7 +125,8 @@ class CacheService:
             try:
                 self.redis_client.delete(key)
             except Exception as e:
-                print(f"Redis delete error: {e}")
+                print(f"Redis delete error (disabling Redis): {e}")
+                self.redis_client = None
         
         if key in self.memory_cache:
             del self.memory_cache[key]
@@ -142,7 +151,8 @@ class CacheService:
                 if keys:
                     count = self.redis_client.delete(*keys)
             except Exception as e:
-                print(f"Redis clear pattern error: {e}")
+                print(f"Redis clear pattern error (disabling Redis): {e}")
+                self.redis_client = None
         
         # Clear from memory cache
         keys_to_delete = [k for k in self.memory_cache.keys() if pattern.replace('*', '') in k]
