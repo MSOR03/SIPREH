@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
 import MapArea from '@/components/MapArea';
@@ -24,6 +24,8 @@ export default function Home() {
     spatialResolution: 0.05,    // Resolución para modo 2D (0.25, 0.1, 0.05)
     variable: '',
     droughtIndex: '',
+    indexScale: 1,              // Escala temporal para índices (1, 3, 6, 12 meses)
+    frequency: 'D',             // Frecuencia para variables: 'D' (diaria) o 'M' (mensual)
     startDate: '',
     endDate: '',
     useSpatialInterval: false,
@@ -65,7 +67,7 @@ export default function Home() {
   }, [analysisState.dataCategory]);
 
   // Handle Analysis Plot
-  const handleAnalysisPlot = async () => {
+  const handleAnalysisPlot = useCallback(async () => {
     const is2DMode = analysisState.visualizationType === '2D';
     const useSpatialInterval = is2DMode && Boolean(analysisState.useSpatialInterval);
     
@@ -136,17 +138,23 @@ export default function Home() {
           startDate: useSpatialInterval ? analysisState.startDate : null,
           endDate: useSpatialInterval ? analysisState.endDate : null,
           useInterval: useSpatialInterval,
+          scale: analysisState.droughtIndex ? analysisState.indexScale : null,
+          frequency: (!analysisState.droughtIndex && analysisState.variable === 'precip') ? analysisState.frequency : null,
         });
 
         const periodSubtitle = response.is_interval
           ? `Periodo: ${response.period?.start_date} a ${response.period?.end_date} (promedio)`
           : `Fecha: ${response.date}`;
 
+        const freqNote = !analysisState.droughtIndex && analysisState.frequency
+          ? ` | Freq: ${analysisState.frequency === 'M' ? 'Mensual' : 'Diaria'}`
+          : '';
+
         // Procesar respuesta y actualizar plotData para modo 2D
         setPlotData({
           type: '2D',
           title: `${response.variable_name} - Mapa Espacial`,
-          subtitle: `${periodSubtitle} | Resolución: ${targetResolution}°`,
+          subtitle: `${periodSubtitle}${freqNote} | Resolución: ${targetResolution}°`,
           variable: response.variable,
           unit: response.unit,
           date: response.date,
@@ -197,15 +205,19 @@ export default function Home() {
             startDate: analysisState.startDate,
             endDate: analysisState.endDate,
             cellId: selectedCell.cell_id,
+            scale: analysisState.droughtIndex ? analysisState.indexScale : null,
+            frequency: !analysisState.droughtIndex ? analysisState.frequency : null,
           });
 
           // Procesar respuesta y mostrar gráfico
+          const freqLabel = response.frequency === 'M' ? 'Mensual' : 'Diaria';
           setPlotData({
             type: '1D',
             title: `${response.variable_name} - Serie de Tiempo`,
-            subtitle: `Celda: ${selectedCell.cell_id}`,
+            subtitle: `Celda: ${selectedCell.cell_id} | Frecuencia: ${freqLabel}`,
             variable: response.variable,
             unit: response.unit,
+            frequency: response.frequency,
             data: response.data,
             statistics: response.statistics,
             location: response.location,
@@ -230,10 +242,10 @@ export default function Home() {
         'Error en la consulta'
       );
     }
-  };
+  }, [analysisState, selectedCell, selectedStation, showError, showWarning, showInfo, showSuccess]);
 
   // Handle Prediction Plot
-  const handlePredictionPlot = async () => {
+  const handlePredictionPlot = useCallback(async () => {
     // Validate selection first
     if (!selectedStation && !selectedCell) {
       showError(
@@ -274,10 +286,10 @@ export default function Home() {
       type: 'Mapa de Predicción',
       data: predictionState,
     });
-  };
+  }, [predictionState, selectedStation, selectedCell, showError, showWarning, showSuccess]);
 
   // Handle Save functions
-  const handleAnalysisSave = () => {
+  const handleAnalysisSave = useCallback(() => {
     if (!plotData) {
       showWarning('Primero genera un analisis para poder guardar datos', 'Sin datos');
       return;
@@ -298,9 +310,9 @@ export default function Home() {
       console.error('Error saving analysis JSON:', error);
       showError(error.message || 'No se pudo guardar el JSON', 'Error de exportacion');
     }
-  };
+  }, [plotData, analysisState, selectedCell, showWarning, showSuccess, showError]);
 
-  const handleAnalysisImageExport = async () => {
+  const handleAnalysisImageExport = useCallback(async () => {
     if (!plotData) {
       showWarning('Primero genera un analisis para exportar imagen', 'Sin datos');
       return;
@@ -317,11 +329,11 @@ export default function Home() {
       console.error('Error exporting analysis image:', error);
       showError(error.message || 'No se pudo exportar la imagen', 'Error de exportacion');
     }
-  };
+  }, [plotData, analysisState, showWarning, showSuccess, showError]);
 
 
   // Handle Prediction History Plot
-  const handlePredictionHistoryPlot = async () => {
+  const handlePredictionHistoryPlot = useCallback(async () => {
     if (!selectedStation && !selectedCell) {
       showError('Debes seleccionar una estación o celda del mapa', 'Selección Requerida');
       return;
@@ -351,15 +363,15 @@ export default function Home() {
       type: 'Histórico de Predicción',
       data: predictionHistoryState,
     });
-  };
+  }, [predictionHistoryState, selectedStation, selectedCell, showError, showWarning, showSuccess]);
 
   // Handle Reset
-  const handleReset = () => {
+  const handleReset = useCallback(() => {
     setPlotData(null);
     setSelectedStation(null);
     setSelectedCell(null);
     console.log('Map and selections reset');
-  };
+  }, []);
 
   return (
     <div className="flex flex-col h-screen bg-gradient-to-br from-blue-50/30 via-blue-50/20 to-blue-50/20 dark:from-[#0f1419] dark:via-[#0a0e13] dark:to-[#0f1419] p-4">
