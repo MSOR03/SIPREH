@@ -48,7 +48,13 @@ async def lifespan(app: FastAPI):
     db.close()
     
     print("Application startup complete")
-    
+
+    # Lanzar preload de archivos parquet en background (no bloquea startup)
+    import asyncio
+    from app.services.tiered_storage import background_preload, periodic_cache_eviction
+    asyncio.create_task(background_preload())
+    asyncio.create_task(periodic_cache_eviction())
+
     yield
     
     # Shutdown

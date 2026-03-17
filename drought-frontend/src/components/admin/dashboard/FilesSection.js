@@ -8,6 +8,7 @@ import {
   CloudRain,
   Clock,
   Database,
+  Download,
   FileText,
   GitMerge,
   HardDrive,
@@ -157,6 +158,21 @@ export default function FilesSection() {
       setSuccess('');
       setError('');
     }, 4000);
+  };
+
+  const handleDownload = async (fileId, filename) => {
+    try {
+      const data = await filesApi.getDownloadUrl(fileId);
+      const a = document.createElement('a');
+      a.href = data.download_url;
+      a.download = data.filename || filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (err) {
+      setError('Error descargando: ' + err.message);
+      setTimeout(() => setError(''), 4000);
+    }
   };
 
   const handleAttachToDataset = async () => {
@@ -336,6 +352,7 @@ export default function FilesSection() {
         loading={loading}
         onDelete={handleDelete}
         onActivate={handleActivate}
+        onDownload={handleDownload}
         uploadOpen={uploadSection === 'hydromet'}
         onToggleUpload={() => setUploadSection(uploadSection === 'hydromet' ? null : 'hydromet')}
         onUpload={handleUpload}
@@ -354,6 +371,7 @@ export default function FilesSection() {
         loading={loading}
         onDelete={handleDelete}
         onActivate={handleActivate}
+        onDownload={handleDownload}
         uploadOpen={uploadSection === 'hydrological'}
         onToggleUpload={() => setUploadSection(uploadSection === 'hydrological' ? null : 'hydrological')}
         onUpload={handleUpload}
@@ -372,6 +390,7 @@ export default function FilesSection() {
         loading={loading}
         onDelete={handleDelete}
         onActivate={handleActivate}
+        onDownload={handleDownload}
         uploadOpen={uploadSection === 'prediction'}
         onToggleUpload={() => setUploadSection(uploadSection === 'prediction' ? null : 'prediction')}
         onUpload={handleUpload}
@@ -391,6 +410,7 @@ export default function FilesSection() {
           loading={loading}
           onDelete={handleDelete}
           onActivate={handleActivate}
+          onDownload={handleDownload}
           uploadOpen={false}
           onToggleUpload={() => {}}
           onUpload={handleUpload}
@@ -614,6 +634,7 @@ function FileCategory({
   loading,
   onDelete,
   onActivate,
+  onDownload,
   uploadOpen,
   onToggleUpload,
   onUpload,
@@ -748,6 +769,13 @@ function FileCategory({
                   </div>
                 </div>
                 <div className="ds-file-actions">
+                  <button
+                    className="ds-icon-btn ds-icon-btn--blue"
+                    onClick={() => onDownload(file.id, file.original_filename)}
+                    title="Descargar"
+                  >
+                    <Download size={16} />
+                  </button>
                   {!isActive && (
                     <button
                       className="ds-icon-btn ds-icon-btn--green"

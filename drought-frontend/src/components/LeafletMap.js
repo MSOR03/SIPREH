@@ -2,17 +2,19 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { getCellStyle } from '../utils/gridLevels';
+import { HYDRO_STATIONS } from '../utils/hydroStations';
 
 const BOGOTA_CENTER = [4.7110, -74.0721];
 
 
-const stations = [
-  { id: 1, position: [4.7110, -74.0721], name: 'Estación Centro', area: 'Bogotá D.C.', type: 'principal' },
-  { id: 2, position: [4.6097, -74.0817], name: 'Estación Sur', area: 'Zona Sur de Bogotá', type: 'secundaria' },
-  { id: 3, position: [4.7567, -74.0309], name: 'Estación Norte', area: 'Zona Norte de Bogotá', type: 'secundaria' },
-  { id: 4, position: [4.6500, -74.1100], name: 'Estación Occidental', area: 'Zona Occidental', type: 'secundaria' },
-  { id: 5, position: [4.7200, -74.0400], name: 'Estación Oriental', area: 'Zona Oriental', type: 'secundaria' },
-];
+const stations = HYDRO_STATIONS.map(s => ({
+  id: s.codigo,
+  codigo: s.codigo,
+  position: [s.lat, s.lon],
+  name: s.name,
+  area: `Código: ${s.codigo}`,
+  type: 'secundaria',
+}));
 
 export default function LeafletMap({ 
   onStationSelect, 
@@ -146,6 +148,54 @@ export default function LeafletMap({
         L.control.zoom({ position: 'topright' }).addTo(map);
         L.control.scale({ position: 'bottomleft', metric: true, imperial: false, maxWidth: 200 }).addTo(map);
 
+        // Coordenadas del cursor junto a la escala (abajo a la izquierda)
+        const MousePosition = L.Control.extend({
+          options: { position: 'bottomright' },
+          onAdd() {
+            const div = L.DomUtil.create('div', 'leaflet-control-mousepos');
+            div.style.marginTop = '4px';
+
+            // Estilo compatible con escala Leaflet
+            div.style.background = 'rgba(255, 255, 255, 0.8)';
+            div.style.color = '#333';
+            div.style.font = '11px/1.1 "Helvetica Neue", Arial, Helvetica, sans-serif';
+
+            // Caja completa (cerrada)
+            div.style.border = '2px solid #777';
+            div.style.padding = '2px 5px';
+            div.style.minWidth = 'unset';
+            div.style.width = 'auto';
+            div.style.display = 'inline-block';
+
+            div.textContent = 'Latitud: -- | Longitud: --';
+            this._div = div;
+            return div;
+          },
+          update(latlng) {
+            if (!this._div) return;
+
+            if (!latlng) {
+              this._div.textContent = 'Latitud: -- | Longitud: --';
+              return;
+            }
+
+            const lat = latlng.lat.toFixed(5);
+            const lon = latlng.lng.toFixed(5);
+            this._div.textContent = `Latitud: ${lat} | Longitud: ${lon}`;
+          },
+        });
+
+        const mousePosControl = new MousePosition();
+        mousePosControl.addTo(map);
+
+        map.on('mousemove', (e) => {
+          mousePosControl.update(e.latlng);
+        });
+
+        map.on('mouseout', () => {
+          mousePosControl.update(null);
+        });
+
         // CartoDB tiles — light_all / dark_all según tema activo
         const initialTheme = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
         const tileUrl = initialTheme === 'dark'
@@ -260,27 +310,37 @@ export default function LeafletMap({
           }).addTo(map);
 
           marker.bindPopup(`
-            <div style="font-size:13px;min-width:150px;">
+            <div style="font-size:13px;min-width:180px;">
               <div style="font-weight:bold;color:#1f2937;margin-bottom:4px;">${station.name}</div>
               <div style="color:#6b7280;font-size:12px;">${station.area}</div>
               <div style="margin-top:8px;padding-top:8px;border-top:1px solid #e5e7eb;">
-                <button onclick="window.__selectStation(${station.id})" style="background:#2563eb;color:white;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:12px;width:100%;">
+                <button onclick="window.__selectStation('${station.id}')" style="background:#2563eb;color:white;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:12px;width:100%;">
                   Seleccionar estación
                 </button>
               </div>
             </div>`);
 
           marker.on('click', () => {
-            onStationSelectRef.current?.(station);
+            onStationSelectRef.current?.({
+              ...station,
+              codigo: station.codigo,
+              lat: station.position[0],
+              lon: station.position[1],
+            });
           });
 
           markersRef.current.push({ marker, station, L });
         });
 
         window.__selectStation = (id) => {
-          const station = stations.find(s => s.id === id);
+          const station = stations.find(s => String(s.id) === String(id));
           if (station) {
-            onStationSelectRef.current?.(station);
+            onStationSelectRef.current?.({
+              ...station,
+              codigo: station.codigo,
+              lat: station.position[0],
+              lon: station.position[1],
+            });
             map.closePopup();
           }
         };
@@ -378,7 +438,7 @@ export default function LeafletMap({
 
     import('leaflet').then(({ default: L }) => {
       markersRef.current.forEach(({ marker, station }) => {
-        const isSelected = selectedStation?.id === station.id;
+        const isSelected = String(selectedStation?.id) === String(station.id) || selectedStation?.codigo === station.codigo;
         const isPrincipal = station.type === 'principal';
         const color = isSelected ? '#dc2626' : isPrincipal ? '#2563eb' : '#059669';
         const size = isSelected ? 16 : isPrincipal ? 14 : 12;
@@ -486,8 +546,32 @@ export default function LeafletMap({
     if (!mapRef.current || !spatialLayerRef.current) return;
     
     import('leaflet').then(({ default: L }) => {
-      // Limpiar celdas espaciales existentes
-      spatialCellsRef.current.forEach(({ rect }) => rect.remove());
+      // Restaurar marcadores de estación que fueron coloreados por datos 2D
+      spatialCellsRef.current.forEach(({ rect, isStationOverride }) => {
+        if (isStationOverride) {
+          // Restaurar icono original del marcador
+          const entry = markersRef.current.find((m) => m.marker === rect);
+          if (entry) {
+            const isSelected = String(selectedStation?.id) === String(entry.station.id)
+              || selectedStation?.codigo === entry.station.codigo;
+            const isPrincipal = entry.station.type === 'principal';
+            const color = isSelected ? '#dc2626' : isPrincipal ? '#2563eb' : '#059669';
+            const size = isSelected ? 16 : isPrincipal ? 14 : 12;
+            rect.setIcon(L.divIcon({
+              html: `<div style="position:relative;">
+                <div style="width:${size}px;height:${size}px;background:${color};border:3px solid white;border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,0.3);cursor:pointer;${isSelected ? 'animation:pulse 2s infinite;' : ''}"></div>
+                ${isSelected ? `<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:${size + 12}px;height:${size + 12}px;border:2px solid ${color};border-radius:50%;opacity:0.5;"></div>` : ''}
+              </div>`,
+              className: 'custom-station-marker',
+              iconSize: [size + 6, size + 6],
+              iconAnchor: [(size + 6) / 2, (size + 6) / 2],
+            }));
+            rect.unbindTooltip();
+          }
+        } else {
+          rect.remove();
+        }
+      });
       spatialCellsRef.current = [];
       
       // Si no hay datos espaciales, salir
@@ -516,6 +600,54 @@ export default function LeafletMap({
       let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
 
       uniqueSpatialCells.forEach(cell => {
+        const isHydroStation = Boolean(cell.codigo);
+
+        if (isHydroStation) {
+          // Estaciones hidrológicas: colorear el marcador de la estación directamente
+          // en vez de dibujar un buffer circular que queda oculto detrás del punto.
+          const cellValue = typeof cell.value === 'number' ? cell.value : parseFloat(cell.value);
+          const color = cell.color || '#3b82f6';
+
+          // Buscar el marcador existente por código de estación
+          const entry = markersRef.current.find(
+            (m) => String(m.station.codigo) === String(cell.codigo)
+          );
+
+          if (entry) {
+            const size = 18;
+            entry.marker.setIcon(L.divIcon({
+              html: `<div style="position:relative;">
+                <div style="width:${size}px;height:${size}px;background:${color};border:3px solid white;border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,0.4);cursor:pointer;"></div>
+              </div>`,
+              className: 'custom-station-marker',
+              iconSize: [size + 6, size + 6],
+              iconAnchor: [(size + 6) / 2, (size + 6) / 2],
+            }));
+
+            // Tooltip con info 2D al hover
+            entry.marker.unbindTooltip();
+            entry.marker.bindTooltip(
+              `<div style="font-size:12px;line-height:1.4">
+                <strong style="color:#1f2937">${cell.station_name || cell.codigo}</strong><br/>
+                Código: <b>${cell.codigo}</b><br/>
+                Valor: <b>${!isNaN(cellValue) && cellValue !== null ? cellValue.toFixed(3) : 'N/A'}</b><br/>
+                ${cell.category ? `Categoría: ${cell.category}<br/>` : ''}
+                ${cell.severity != null ? `Severidad: ${cell.severity}` : ''}
+              </div>`,
+              { direction: 'top', offset: [0, -8] }
+            );
+
+            // Guardar referencia para restaurar cuando se limpien datos espaciales
+            spatialCellsRef.current.push({ rect: entry.marker, cell, isStationOverride: true });
+          }
+
+          if (cell.lat < minLat) minLat = cell.lat;
+          if (cell.lat > maxLat) maxLat = cell.lat;
+          if (cell.lon < minLon) minLon = cell.lon;
+          if (cell.lon > maxLon) maxLon = cell.lon;
+
+        } else {
+          // Celdas meteorológicas: renderizar como rectángulos
         const halfRes = spatialResolution / 2;
         const cellBounds = [
           [cell.lat - halfRes, cell.lon - halfRes],
@@ -542,12 +674,10 @@ export default function LeafletMap({
         // Actualizar tooltip compartido en hover (no bindTooltip por celda)
         rect.on('mouseover', (e) => {
           sharedTooltip.setContent(
-            `<div style="font-size:12px;line-height:1.4">
-              <strong style="color:#1f2937">${cell.cell_id || `[${cell.lat.toFixed(3)}, ${cell.lon.toFixed(3)}]`}</strong><br/>
-              Valor: <b>${!isNaN(cellValue) && cellValue !== null ? cellValue.toFixed(3) : 'N/A'}</b><br/>
-              ${cell.category ? `Categoría: ${cell.category}<br/>` : ''}
-              ${cell.severity != null ? `Severidad: ${cell.severity}` : ''}
-            </div>`
+          '<div style="font-size:12px;line-height:1.4">' +
+          'Valor: <b>' + (!isNaN(cellValue) && cellValue !== null ? cellValue.toFixed(3) : 'N/A') + '</b><br/>' +
+          (cell.category ? ('Categoría: ' + cell.category) : 'Categoría: N/A') +
+          '</div>'
           );
           sharedTooltip.setLatLng(e.latlng);
           if (!mapRef.current.hasLayer(sharedTooltip)) sharedTooltip.addTo(mapRef.current);
@@ -560,6 +690,7 @@ export default function LeafletMap({
         });
 
         spatialCellsRef.current.push({ rect, cell });
+        }
       });
 
       // fitBounds sin animación ni spread de arrays grandes

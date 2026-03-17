@@ -1,10 +1,11 @@
 """
-Mixin con la lógica de consulta de series de tiempo históricas.
-Se mezcla en HistoricalDataService mediante herencia múltiple.
+Mixin con la logica de consulta de series de tiempo historicas.
+Se mezcla en HistoricalDataService mediante herencia multiple.
 
 Requiere que la clase base provea:
-    self.cache, self._get_connection(), self._get_parquet_url(),
-    self._detect_parquet_format(), self._apply_drought_scale()
+    self.cache, self._get_connection(), self._resolve_parquet_source(),
+    self._detect_parquet_format(), self._apply_drought_scale(),
+    self._get_available_freqs()
 """
 import pandas as pd
 import numpy as np
@@ -81,11 +82,13 @@ class TimeseriesMixin:
 
             conn = self._get_connection()
 
-            # ⚡ Resolver path local UNA sola vez, reutilizar para formato y query
-            local_path = self._get_parquet_url(parquet_url)
+            # Resolver source (soporta single file y multi-archivo tiered)
+            source_info = self._resolve_parquet_source(parquet_url)
+            parquet_source = source_info["source_expr"]
+            primary_path = source_info["primary_path"]
 
             # Detectar formato y columna de fecha (cacheado 24h en Redis)
-            format_info = self._detect_parquet_format(parquet_url, resolved_path=local_path)
+            format_info = self._detect_parquet_format(parquet_url, resolved_path=primary_path, source_expr=parquet_source)
             file_format = format_info['format']
             date_col = format_info['date_column']
 
@@ -113,7 +116,7 @@ class TimeseriesMixin:
                 else:
                     # Detectar qué frecuencias REALMENTE existen para esta variable en el parquet
                     var_col_name = format_info.get('var_column', 'var')
-                    available_freqs = self._get_available_freqs(local_path, parquet_url, variable, file_format, var_col_name)
+                    available_freqs = self._get_available_freqs(parquet_source, parquet_url, variable, file_format, var_col_name)
 
                     if requested_freq and requested_freq in available_freqs:
                         # User pidió una freq que SÍ existe → usarla directo
@@ -175,7 +178,7 @@ class TimeseriesMixin:
                     lat,
                     lon,
                     CAST(value AS DOUBLE) as value
-                FROM read_parquet('{local_path}')
+                FROM {parquet_source}
                 WHERE {where_clause}
                 LIMIT {limit}
                 """
@@ -188,7 +191,7 @@ class TimeseriesMixin:
                     lat,
                     lon,
                     CAST({variable} AS DOUBLE) as value
-                FROM read_parquet('{local_path}')
+                FROM {parquet_source}
                 WHERE {where_clause}
                 LIMIT {limit}
                 """
@@ -212,7 +215,7 @@ class TimeseriesMixin:
                     lat,
                     lon,
                     CAST(value AS DOUBLE) as value
-                FROM read_parquet('{local_path}')
+                FROM {parquet_source}
                 WHERE {fallback_where}
                 LIMIT {limit}
                 """

@@ -6,6 +6,7 @@ import Button from './ui/Button';
 import { useTheme } from '@/contexts/ThemeContext';
 import dynamic from 'next/dynamic';
 const TimeSeriesChart = dynamic(() => import('./TimeSeriesChart'), { ssr: false });
+const DroughtEventTimeline = dynamic(() => import('./DroughtEventTimeline'), { ssr: false });
 import { useGridNavigation } from '../hooks/useGridNavigation';
 import { formatLevelLabel } from '../utils/gridLevels';
 
@@ -43,7 +44,7 @@ export default function MapArea({
  // Normalizar variable para evitar fallos por mayúsculas/minúsculas o espacios
   const normalizedVariable = String(plotData?.variable ?? '').trim().toUpperCase();
   const isDroughtIndex = useMemo(
-    () => ['SPI', 'SPEI', 'RAI', 'EDDI', 'PDSI'].includes(normalizedVariable),
+    () => ['SPI', 'SPEI', 'RAI', 'EDDI', 'PDSI', 'SDI', 'SRI', 'MFI', 'DDI', 'HDI'].includes(normalizedVariable),
     [normalizedVariable]
   );
   const hasCategorizedCells = useMemo(
@@ -199,7 +200,7 @@ export default function MapArea({
                     <span className="absolute inline-flex w-2 h-2 bg-red-600 rounded-full animate-ping opacity-75"></span>
                   </span>
                   <span className="font-semibold text-gray-900 dark:text-gray-100">{selectedStation.name}</span>
-                  <span className="text-xs px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded font-medium">{selectedStation.area}</span>
+                  <span className="text-xs px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded font-medium">{selectedStation.codigo || selectedStation.area}</span>
                 </p>
               )}
               
@@ -461,6 +462,11 @@ Los colores representan {isDroughtIndex ? 'las categorías de sequía' : 'los va
                     title={plotData.variable_name || plotData.title}
                   />
                 </div>
+
+                {/* Timeline de eventos de sequía con duración */}
+                {plotData.hasDuration && (plotData.rawData || plotData.data) && (
+                  <DroughtEventTimeline data={plotData.rawData || plotData.data} />
+                )}
               </div>
             ) : (
               <div className="relative h-80 bg-gradient-to-br from-blue-50/30 via-blue-50/20 to-blue-50/30 dark:from-[#1a1f2e] dark:via-[#141920] dark:to-blue-950/20 rounded-2xl flex items-center justify-center border-2 border-dashed border-gray-300 dark:border-gray-600 shadow-inner overflow-hidden">

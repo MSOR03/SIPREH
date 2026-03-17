@@ -5,6 +5,7 @@ import Select from '../ui/Select';
 import Button from '../ui/Button';
 import DateRangePicker from '../ui/DateRangePicker';
 import { CollapsiblePanel, RadioCard, RadioOption, StepSection } from './primitives';
+import { INDICES_WITHOUT_SCALE } from '@/utils/hydroStations';
 
 export default function HistoricalSection({
   historicalOpen,
@@ -112,7 +113,7 @@ export default function HistoricalSection({
                   Datos Hidrológicos
                 </span>
                 <span className={`text-[11px] block mt-0.5 ${isHydrological ? 'text-teal-600 dark:text-teal-400' : 'text-gray-500 dark:text-gray-400'}`}>
-                  Caudales, niveles - Estaciones, cuencas, embalses
+                  Caudales, niveles - Estaciones hidrológicas (SDI, SRI, MFI, DDI, HDI)
                 </span>
               </div>
             </button>
@@ -144,24 +145,34 @@ export default function HistoricalSection({
             </div>
 
             <StepSection step={stepNumbers.variables} title="Variables" collapsible defaultOpen>
-              <div className="grid grid-cols-2 gap-3">
+              {currentVariables.length > 0 ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <Select
+                    label="Variable climática"
+                    options={currentVariables}
+                    value={analysisState.variable}
+                    onChange={(value) => setAnalysisState((prev) => ({ ...prev, variable: value }))}
+                    placeholder="Seleccionar..."
+                  />
+                  <Select
+                    label="Índice de sequía"
+                    options={currentIndices}
+                    value={analysisState.droughtIndex}
+                    onChange={(value) => setAnalysisState((prev) => ({ ...prev, droughtIndex: value }))}
+                    placeholder="Seleccionar..."
+                  />
+                </div>
+              ) : (
                 <Select
-                  label="Variable climática"
-                  options={currentVariables}
-                  value={analysisState.variable}
-                  onChange={(value) => setAnalysisState((prev) => ({ ...prev, variable: value }))}
-                  placeholder="Seleccionar..."
-                />
-                <Select
-                  label="Índice de sequía"
+                  label="Índice hidrológico"
                   options={currentIndices}
                   value={analysisState.droughtIndex}
                   onChange={(value) => setAnalysisState((prev) => ({ ...prev, droughtIndex: value }))}
-                  placeholder="Seleccionar..."
+                  placeholder="Seleccionar índice..."
                 />
-              </div>
+              )}
 
-              {analysisState.droughtIndex && (
+              {analysisState.droughtIndex && !INDICES_WITHOUT_SCALE.has(analysisState.droughtIndex) && (
                 <div className="mt-3">
                   <label className="flex items-center gap-1.5 text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
                     <Clock className="w-3.5 h-3.5 text-blue-500 dark:text-blue-400" />
@@ -186,7 +197,7 @@ export default function HistoricalSection({
                 </div>
               )}
 
-              {analysisState.variable && !analysisState.droughtIndex && (
+              {isHydromet && analysisState.variable && !analysisState.droughtIndex && (
                 analysisState.visualizationType === '1D' || analysisState.variable === 'precip'
               ) && (
                 <div className="mt-3">

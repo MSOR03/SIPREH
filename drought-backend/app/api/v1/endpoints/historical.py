@@ -33,6 +33,11 @@ from app.api.v1.endpoints.historical_utils import (
     infer_resolution_from_filename,
     orjson_response,
 )
+from app.services.tiered_storage import (
+    get_active_cloud_keys_for_dataset,
+    encode_multi_keys,
+    _parse_meta,
+)
 
 
 # ============================================================================
@@ -45,6 +50,54 @@ logger = logging.getLogger("historical")
 
 # Inicializar servicios (usando singleton global)
 historical_service = HistoricalDataService(cache_service=cache_service)
+
+
+def _resolve_cloud_keys(file_id: int, db) -> str:
+    """
+    Resuelve file_id a cloud_key(s).
+
+    Para datasets con estrategia historical_updates: retorna "key1|key2"
+    (historical_base | updates) para que _resolve_parquet_source() los
+    descargue a ambos y DuckDB lea en paralelo.
+
+    Para datasets single_file o archivos sin dataset_key: retorna el cloud_key
+    del archivo tal cual (comportamiento legacy).
+
+    El resultado se cachea 1h en cache_service.
+    """
+    cache_key_for_file = f"file_cloud_keys_v2:{file_id}"
+    cached = cache_service.get(cache_key_for_file)
+    if cached:
+        return cached
+
+    file = db.query(ParquetFile).filter(
+        ParquetFile.id == file_id,
+        ParquetFile.status == "active"
+    ).first()
+
+    if not file:
+        return None
+
+    if not file.cloud_key:
+        return None
+
+    # Verificar si pertenece a dataset tiered
+    meta = _parse_meta(file.file_metadata)
+    dataset_key = meta.get("dataset_key")
+
+    if dataset_key:
+        from app.services.tiered_storage import is_tiered
+        if is_tiered(dataset_key):
+            keys = get_active_cloud_keys_for_dataset(dataset_key, db)
+            if len(keys) > 1:
+                result = encode_multi_keys(keys)
+                cache_service.set(cache_key_for_file, result, expire=3600)
+                return result
+
+    # Fallback: single file
+    result = file.cloud_key
+    cache_service.set(cache_key_for_file, result, expire=3600)
+    return result
 
 
 # ============================================================================
@@ -389,32 +442,18 @@ def get_timeseries(
     if cached and isinstance(cached, dict):
         return orjson_response(cached)
     
-    # Cachear el cloud_key para evitar consulta DB en cada request
-    cache_key_for_file = f"file_cloud_key:{request.parquet_file_id}"
+    # Resolver cloud_key(s) — soporta tiered (multi-archivo)
+    cache_key_for_file = f"file_cloud_keys_v2:{request.parquet_file_id}"
     cloud_key = cache_service.get(cache_key_for_file)
-    
+
     if not cloud_key:
-        # Solo consultar DB si no está en caché
-        file = db.query(ParquetFile).filter(
-            ParquetFile.id == request.parquet_file_id,
-            ParquetFile.status == "active"
-        ).first()
-        
-        if not file:
+        cloud_key = _resolve_cloud_keys(request.parquet_file_id, db)
+
+        if not cloud_key:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Archivo parquet no encontrado"
+                detail="Archivo parquet no encontrado o sin cloud_key"
             )
-        
-        if not file.cloud_key:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="El archivo no tiene cloud_key configurado"
-            )
-        
-        cloud_key = file.cloud_key
-        # Cachear por 1 hora
-        cache_service.set(cache_key_for_file, cloud_key, expire=3600)
     
     # Consultar datos con DuckDB
     try:
@@ -518,32 +557,18 @@ def get_spatial_data(
     if cached and isinstance(cached, dict):
         return orjson_response(cached)
     
-    # Cachear el cloud_key para evitar consulta DB
-    cache_key_for_file = f"file_cloud_key:{request.parquet_file_id}"
+    # Resolver cloud_key(s) — soporta tiered (multi-archivo)
+    cache_key_for_file = f"file_cloud_keys_v2:{request.parquet_file_id}"
     cloud_key = cache_service.get(cache_key_for_file)
-    
+
     if not cloud_key:
-        # Solo consultar DB si no está en caché
-        file = db.query(ParquetFile).filter(
-            ParquetFile.id == request.parquet_file_id,
-            ParquetFile.status == "active"
-        ).first()
-        
-        if not file:
+        cloud_key = _resolve_cloud_keys(request.parquet_file_id, db)
+
+        if not cloud_key:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Archivo parquet no encontrado"
+                detail="Archivo parquet no encontrado o sin cloud_key"
             )
-        
-        if not file.cloud_key:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="El archivo no tiene cloud_key configurado"
-            )
-        
-        cloud_key = file.cloud_key
-        # Cachear por 1 hora
-        cache_service.set(cache_key_for_file, cloud_key, expire=3600)
     
     # Construir bounds si se proporcionaron
     bounds = None

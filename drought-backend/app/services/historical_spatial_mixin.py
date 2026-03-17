@@ -1,10 +1,11 @@
 """
-Mixin con la lógica de consulta de datos espaciales (mapas 2D) históricos.
-Se mezcla en HistoricalDataService mediante herencia múltiple.
+Mixin con la logica de consulta de datos espaciales (mapas 2D) historicos.
+Se mezcla en HistoricalDataService mediante herencia multiple.
 
 Requiere que la clase base provea:
-    self.cache, self._get_connection(), self._get_parquet_url(),
-    self._detect_parquet_format(), self._apply_drought_scale()
+    self.cache, self._get_connection(), self._resolve_parquet_source(),
+    self._detect_parquet_format(), self._apply_drought_scale(),
+    self._get_available_freqs()
 """
 import pandas as pd
 import numpy as np
@@ -131,11 +132,13 @@ class SpatialMixin:
             elif not target_date:
                 raise ValueError("En modo fecha única debes enviar target_date")
 
-            # ⚡ Resolver path local UNA sola vez
-            local_path = self._get_parquet_url(parquet_url)
+            # Resolver source (soporta single file y multi-archivo tiered)
+            source_info = self._resolve_parquet_source(parquet_url)
+            parquet_source = source_info["source_expr"]
+            primary_path = source_info["primary_path"]
 
-            # Detectar formato (cacheado 24h, reutiliza local_path)
-            format_info = self._detect_parquet_format(parquet_url, resolved_path=local_path)
+            # Detectar formato (cacheado 24h, reutiliza source_expr)
+            format_info = self._detect_parquet_format(parquet_url, resolved_path=primary_path, source_expr=parquet_source)
             file_format = format_info['format']
             date_col = format_info['date_column']
 
@@ -162,7 +165,7 @@ class SpatialMixin:
                     base_clauses.append("freq = 'M'")
                 else:
                     var_col_name = format_info.get('var_column', 'var')
-                    available_freqs = self._get_available_freqs(local_path, parquet_url, variable, file_format, var_col_name)
+                    available_freqs = self._get_available_freqs(parquet_source, parquet_url, variable, file_format, var_col_name)
 
                     if requested_freq and requested_freq in available_freqs:
                         effective_freq = requested_freq
@@ -199,7 +202,7 @@ class SpatialMixin:
                     CAST(PRINTF('%.6f', lon) || '_' || PRINTF('%.6f', lat) AS VARCHAR) as cell_id,
                     AVG(CAST({value_expr} AS DOUBLE)) as value,
                     COUNT(*) as records_in_cell
-                FROM read_parquet('{local_path}')
+                FROM {parquet_source}
                 WHERE {where_clause}
                 GROUP BY lat, lon
                 LIMIT {limit}
@@ -218,7 +221,7 @@ class SpatialMixin:
                     CAST(PRINTF('%.6f', lon) || '_' || PRINTF('%.6f', lat) AS VARCHAR) as cell_id,
                     AVG(CAST({value_expr} AS DOUBLE)) as value,
                     COUNT(*) as records_in_cell
-                FROM read_parquet('{local_path}')
+                FROM {parquet_source}
                 WHERE {where_clause}
                 GROUP BY lat, lon
                 LIMIT {limit}
@@ -238,7 +241,7 @@ class SpatialMixin:
                 if result_df.empty:
                     nearest_date_query = f"""
                     SELECT CAST({date_col} AS DATE) AS d
-                    FROM read_parquet('{local_path}')
+                    FROM {parquet_source}
                     WHERE {base_where} AND {value_expr} IS NOT NULL
                     GROUP BY 1
                     ORDER BY ABS(DATEDIFF('day', d, '{target_date}'::DATE))
@@ -267,7 +270,7 @@ class SpatialMixin:
                            CAST(PRINTF('%.6f', lon) || '_' || PRINTF('%.6f', lat) AS VARCHAR) as cell_id,
                            AVG(CAST({value_expr} AS DOUBLE)) as value,
                            COUNT(*) as records_in_cell
-                    FROM read_parquet('{local_path}')
+                    FROM {parquet_source}
                     WHERE {fw} GROUP BY lat, lon LIMIT {limit}
                     """
                     return conn.execute(q).fetchdf()
@@ -279,7 +282,7 @@ class SpatialMixin:
                            CAST(PRINTF('%.6f', lon) || '_' || PRINTF('%.6f', lat) AS VARCHAR) as cell_id,
                            AVG(CAST({value_expr} AS DOUBLE)) as value,
                            COUNT(*) as records_in_cell
-                    FROM read_parquet('{local_path}')
+                    FROM {parquet_source}
                     WHERE {fw} GROUP BY lat, lon LIMIT {limit}
                     """
                     return conn.execute(q).fetchdf()

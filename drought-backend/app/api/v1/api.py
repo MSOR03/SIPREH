@@ -2,7 +2,7 @@
 API v1 router configuration.
 """
 from fastapi import APIRouter
-from app.api.v1.endpoints import auth, dashboard, dashboard_v2, admin, parquet, drought, historical
+from app.api.v1.endpoints import auth, dashboard, dashboard_v2, admin, parquet, drought, historical, hydro
 
 
 api_router = APIRouter()
@@ -54,4 +54,11 @@ api_router.include_router(
     historical.router,
     prefix="/historical",
     tags=["historical-data"]
+)
+
+# Hydrological station data endpoints
+api_router.include_router(
+    hydro.router,
+    prefix="/hydro",
+    tags=["hydrological-stations"]
 )

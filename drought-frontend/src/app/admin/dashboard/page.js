@@ -444,6 +444,15 @@ const DS = `
     border-color: rgba(100,116,139,0.3);
   }
 
+  .ds-icon-btn--blue {
+    color: #2563eb;
+    border-color: rgba(37,99,235,0.2);
+  }
+  .ds-icon-btn--blue:hover {
+    background: rgba(37,99,235,0.08);
+    border-color: rgba(37,99,235,0.35);
+  }
+
   /* ── Text buttons ── */
   .ds-btn {
     display: inline-flex;
