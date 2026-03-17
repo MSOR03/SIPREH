@@ -146,6 +146,67 @@ export default function LeafletMap({
         L.control.zoom({ position: 'topright' }).addTo(map);
         L.control.scale({ position: 'bottomleft', metric: true, imperial: false, maxWidth: 200 }).addTo(map);
 
+        // Coordenadas del cursor junto a la escala (abajo a la izquierda)
+        const MousePosition = L.Control.extend({
+        options: { position: 'bottomright' },
+        onAdd() {
+          const div = L.DomUtil.create('div', 'leaflet-control-mousepos');
+
+          // Visual homogéneo con la escala (fondo claro, texto oscuro, borde suave)
+          div.style.background = '#ffffff';
+          div.style.color = '#333333';
+          div.style.padding = '8px 12px';
+          div.style.border = '1px solid rgba(0,0,0,0.25)';
+          div.style.borderRadius = '8px';
+          div.style.fontSize = '14px';
+          div.style.fontFamily = 'system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+          div.style.lineHeight = '1.2';
+          div.style.boxShadow = '0 1px 2px rgba(0,0,0,0.08)';
+          div.style.minWidth = '200px';
+
+          div.innerHTML =
+            '<span style="color:#e11d48;margin-right:8px;">📍</span>' +
+            '<span style="color:#333;">--</span>' +
+            '<span style="color:#6b7280;margin:0 8px;">,</span>' +
+            '<span style="color:#333;">--</span>';
+
+          this._div = div;
+          return div;
+        },
+        update(latlng) {
+          if (!this._div) return;
+
+          if (!latlng) {
+            this._div.innerHTML =
+              '<span style="color:#e11d48;margin-right:8px;">📍</span>' +
+              '<span style="color:#333;">--</span>' +
+              '<span style="color:#6b7280;margin:0 8px;">,</span>' +
+              '<span style="color:#333;">--</span>';
+            return;
+          }
+
+          const lat = latlng.lat.toFixed(5);
+          const lon = latlng.lng.toFixed(5);
+
+          this._div.innerHTML =
+            '<span style="color:#e11d48;margin-right:8px;">📍</span>' +
+            `<span style="color:#333;font-weight:500;">${lat}</span>` +
+            '<span style="color:#6b7280;margin:0 8px;">,</span>' +
+            `<span style="color:#333;font-weight:500;">${lon}</span>`;
+        },
+      });
+
+        const mousePosControl = new MousePosition();
+        mousePosControl.addTo(map);
+
+        map.on('mousemove', (e) => {
+          mousePosControl.update(e.latlng);
+        });
+
+        map.on('mouseout', () => {
+          mousePosControl.update(null);
+        });
+
         // CartoDB tiles — light_all / dark_all según tema activo
         const initialTheme = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
         const tileUrl = initialTheme === 'dark'
