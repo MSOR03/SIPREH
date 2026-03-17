@@ -109,7 +109,8 @@ export default function Home() {
       showInfo(is2DMode ? 'Consultando datos espaciales...' : 'Consultando datos históricos...', 'Cargando');
 
       // Importar API
-      const { historicalApi } = await import('@/services/api');
+      const { historicalApi, hydroApi } = await import('@/services/api');
+      const { INDICES_WITHOUT_SCALE } = await import('@/utils/hydroStations');
 
       // Determinar variable a consultar (priorizar índice de sequía)
       const variable = analysisState.droughtIndex || analysisState.variable;
@@ -119,6 +120,63 @@ export default function Home() {
       
       // ===== MODO 2D: VISUALIZACIÓN ESPACIAL =====
       if (is2DMode) {
+        const isHydrological = analysisState.dataCategory === 'hydrological';
+
+        if (isHydrological) {
+          // ===== 2D HIDROLÓGICO: estaciones =====
+          const hydroFile = files.find(f => {
+            const meta = f.filename || '';
+            return meta.toLowerCase().includes('hydro');
+          });
+
+          if (!hydroFile) {
+            showError('No se encontró archivo de datos hidrológicos. Sube uno desde el panel admin con dataset_key "hydro_main".', 'Error');
+            return;
+          }
+
+          const index = analysisState.droughtIndex;
+          const noScale = INDICES_WITHOUT_SCALE.has(index);
+          const scale = noScale ? null : (analysisState.indexScale || 1);
+
+          const response = await hydroApi.getSpatialData({
+            fileId: hydroFile.file_id,
+            indexName: index,
+            scale: scale,
+            targetDate: useSpatialInterval ? null : analysisState.startDate,
+            startDate: useSpatialInterval ? analysisState.startDate : null,
+            endDate: useSpatialInterval ? analysisState.endDate : null,
+            useInterval: useSpatialInterval,
+          });
+
+          const periodSubtitle = response.is_interval
+            ? `Periodo: ${response.period?.start_date} a ${response.period?.end_date} (promedio)`
+            : `Fecha: ${response.date}`;
+
+          const scaleLabel = noScale ? '' : ` (Escala ${scale})`;
+
+          setPlotData({
+            type: '2D',
+            title: `${response.index_display_name}${scaleLabel} - Estaciones`,
+            subtitle: `${periodSubtitle}`,
+            variable: response.index_name,
+            variable_name: response.index_display_name,
+            unit: response.unit,
+            date: response.date,
+            period: response.period,
+            isInterval: Boolean(response.is_interval),
+            gridCells: response.stations,
+            statistics: response.statistics,
+            bounds: response.bounds,
+            isHydro: true,
+          });
+
+          const validStations = response.statistics?.valid_stations ?? response.stations.length;
+          showSuccess(
+            `Mapa 2D generado: ${validStations} estaciones con dato válido`,
+            '¡Listo!'
+          );
+
+        } else {
         // Usar la resolución seleccionada por el usuario
         const targetResolution = analysisState.spatialResolution || 0.05;
         const file = files.find(f => Math.abs((f.resolution || 0.1) - targetResolution) < 0.01);
@@ -180,7 +238,7 @@ export default function Home() {
           `Mapa 2D generado: ${uniqueCells} celdas únicas, ${validCells} con dato válido (${targetResolution}°)${intervalNote}${dateNote}`,
           '¡Listo!'
         );
-        
+        } // cierre else (hidrometeorológico 2D)
       } 
       // ===== MODO 1D: SERIE TEMPORAL =====
       else {
@@ -229,9 +287,77 @@ export default function Home() {
           );
 
         } else if (selectedStation) {
-          // TODO: Implementar para estaciones
-          showWarning('Análisis para estaciones estará disponible próximamente', 'En desarrollo');
-          return;
+          // ===== 1D HIDROLÓGICO: estación seleccionada =====
+          const hydroFile = files.find(f => {
+            const meta = (f.filename || '').toLowerCase();
+            return meta.includes('hydro');
+          });
+
+          if (!hydroFile) {
+            showError('No se encontró archivo de datos hidrológicos. Sube uno desde el panel admin con dataset_key "hydro_main".', 'Error');
+            return;
+          }
+
+          if (!analysisState.droughtIndex) {
+            showWarning('Selecciona un índice hidrológico (SDI, SRI, MFI, DDI, HDI)', 'Índice requerido');
+            return;
+          }
+
+          const index = analysisState.droughtIndex;
+          const noScale = INDICES_WITHOUT_SCALE.has(index);
+          const scale = noScale ? null : (analysisState.indexScale || 1);
+
+          const response = await hydroApi.getTimeSeries({
+            fileId: hydroFile.file_id,
+            stationCode: selectedStation.codigo,
+            indexName: index,
+            scale: scale,
+            startDate: analysisState.startDate,
+            endDate: analysisState.endDate,
+          });
+
+          const scaleLabel1D = noScale ? '' : ` (Escala ${scale})`;
+
+          // Para DDI/HDI (eventos con duración), expandir cada evento en dos
+          // puntos (fecha_inicial, valor) y (fecha_final, valor) para que el
+          // chart dibuje un pulso/step constante entre ambas fechas.
+          let chartData = response.data;
+          if (response.has_duration && response.data?.length > 0) {
+            const expanded = [];
+            for (const evt of response.data) {
+              if (evt.fecha_final && evt.fecha_final !== 'None' && evt.fecha_final !== 'NaT') {
+                // Punto inicio del pulso
+                expanded.push({ ...evt, date: evt.date });
+                // Punto fin del pulso (misma value)
+                expanded.push({ ...evt, date: evt.fecha_final });
+                // Separador (gap) para que no conecte con el siguiente evento
+                const gapDate = new Date(new Date(evt.fecha_final).getTime() + 86400000);
+                expanded.push({ date: gapDate.toISOString().split('T')[0], value: null });
+              } else {
+                expanded.push(evt);
+              }
+            }
+            chartData = expanded;
+          }
+
+          setPlotData({
+            type: '1D',
+            title: `${response.index_display_name}${scaleLabel1D}`,
+            subtitle: `Estación: ${selectedStation.codigo} - ${selectedStation.name}`,
+            variable: response.index_name,
+            variable_name: response.index_display_name,
+            unit: response.unit,
+            data: chartData,
+            rawData: response.data,
+            statistics: response.statistics,
+            location: response.station,
+            hasDuration: response.has_duration,
+          });
+
+          showSuccess(
+            `Serie generada para estación ${selectedStation.name} (${response.statistics?.count || 0} registros)`,
+            '¡Listo!'
+          );
         }
       }
 
