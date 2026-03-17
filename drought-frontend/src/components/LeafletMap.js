@@ -542,12 +542,10 @@ export default function LeafletMap({
         // Actualizar tooltip compartido en hover (no bindTooltip por celda)
         rect.on('mouseover', (e) => {
           sharedTooltip.setContent(
-            `<div style="font-size:12px;line-height:1.4">
-              <strong style="color:#1f2937">${cell.cell_id || `[${cell.lat.toFixed(3)}, ${cell.lon.toFixed(3)}]`}</strong><br/>
-              Valor: <b>${!isNaN(cellValue) && cellValue !== null ? cellValue.toFixed(3) : 'N/A'}</b><br/>
-              ${cell.category ? `Categoría: ${cell.category}<br/>` : ''}
-              ${cell.severity != null ? `Severidad: ${cell.severity}` : ''}
-            </div>`
+          '<div style="font-size:12px;line-height:1.4">' +
+          'Valor: <b>' + (!isNaN(cellValue) && cellValue !== null ? cellValue.toFixed(3) : 'N/A') + '</b><br/>' +
+          (cell.category ? ('Categoría: ' + cell.category) : 'Categoría: N/A') +
+          '</div>'
           );
           sharedTooltip.setLatLng(e.latlng);
           if (!mapRef.current.hasLayer(sharedTooltip)) sharedTooltip.addTo(mapRef.current);
