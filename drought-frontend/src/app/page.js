@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
 import MapArea from '@/components/MapArea';
@@ -16,27 +16,57 @@ export default function Home() {
   
   // Historical Analysis State
   const [analysisState, setAnalysisState] = useState({
-    visualizationType: '1D', // '1D' = Serie Temporal, '2D' = Mapa Espacial
-    spatialResolution: 0.05, // Resolución para modo 2D (0.25, 0.1, 0.05)
+    dataCategory: 'hydromet',   // 'hydromet' | 'hydrological'
+    visualizationType: '1D',    // '1D' = Serie Temporal, '2D' = Mapa Espacial
+    spatialUnit: 'grid',        // 'grid' | 'cuencas' | 'embalses' | 'estaciones'
+    dataSource: 'ERA5',         // 'ERA5' | 'IMERG' | 'CHIRPS' (hydromet only)
+    spatialResolution: 0.05,    // Resolución para modo 2D (0.25, 0.1, 0.05)
     variable: '',
     droughtIndex: '',
     startDate: '',
     endDate: '',
+    useSpatialInterval: false,
   });
 
   // Prediction State
   const [predictionState, setPredictionState] = useState({
     droughtIndex: '',
-    macroclimaticIndex: '',
     timeHorizon: '',
+  });
+
+  // Prediction History State
+  const [predictionHistoryState, setPredictionHistoryState] = useState({
+    droughtIndex: '',
+    timeHorizon: '',
+    predictionDate: '',
   });
 
   // Plot data state
   const [plotData, setPlotData] = useState(null);
 
+  // Map layer visibility state
+  const [mapLayers, setMapLayers] = useState({
+    grid: true,        // Celdas del grid
+    stations: false,   // Estaciones hidrológicas
+    cuencas: false,    // Cuencas hidrográficas
+    embalses: false,   // Embalses
+    boundary: true,    // Límite del área de estudio
+  });
+
+  // Auto-switch visible layers when data category changes
+  useEffect(() => {
+    const cat = analysisState.dataCategory;
+    if (cat === 'hydromet') {
+      setMapLayers(prev => ({ ...prev, grid: true, stations: false }));
+    } else if (cat === 'hydrological') {
+      setMapLayers(prev => ({ ...prev, grid: false, stations: true }));
+    }
+  }, [analysisState.dataCategory]);
+
   // Handle Analysis Plot
   const handleAnalysisPlot = async () => {
     const is2DMode = analysisState.visualizationType === '2D';
+    const useSpatialInterval = is2DMode && Boolean(analysisState.useSpatialInterval);
     
     // Validaciones: para 1D requiere celda/estación, para 2D no
     if (!is2DMode && !selectedStation && !selectedCell) {
@@ -59,6 +89,16 @@ export default function Home() {
     
     if (!is2DMode && !analysisState.endDate) {
       showWarning('Por favor selecciona el rango de fechas completo', 'Fechas requeridas');
+      return;
+    }
+
+    if (useSpatialInterval && !analysisState.endDate) {
+      showWarning('Por favor selecciona la fecha final del intervalo', 'Fechas requeridas');
+      return;
+    }
+
+    if (useSpatialInterval && analysisState.startDate > analysisState.endDate) {
+      showWarning('La fecha inicial no puede ser mayor que la fecha final', 'Rango inválido');
       return;
     }
 
@@ -91,17 +131,26 @@ export default function Home() {
         const response = await historicalApi.getSpatialData({
           fileId: file.file_id,
           variable: variable,
-          targetDate: analysisState.startDate, // Usar startDate como fecha única
+          targetDate: useSpatialInterval ? null : analysisState.startDate,
+          startDate: useSpatialInterval ? analysisState.startDate : null,
+          endDate: useSpatialInterval ? analysisState.endDate : null,
+          useInterval: useSpatialInterval,
         });
+
+        const periodSubtitle = response.is_interval
+          ? `Periodo: ${response.period?.start_date} a ${response.period?.end_date} (promedio)`
+          : `Fecha: ${response.date}`;
 
         // Procesar respuesta y actualizar plotData para modo 2D
         setPlotData({
           type: '2D',
           title: `${response.variable_name} - Mapa Espacial`,
-          subtitle: `Fecha: ${response.date} | Resolución: ${targetResolution}°`,
-          variable: String(response.variable || variable || '').trim().toUpperCase(),
+          subtitle: `${periodSubtitle} | Resolución: ${targetResolution}°`,
+          variable: response.variable,
           unit: response.unit,
           date: response.date,
+          period: response.period,
+          isInterval: Boolean(response.is_interval),
           gridCells: response.grid_cells,  // Array de celdas con lat, lon, value, color, etc.
           statistics: response.statistics,
           bounds: response.bounds,
@@ -114,9 +163,12 @@ export default function Home() {
         const dateNote = usedFallbackDate
           ? ` | fecha solicitada ${response.requested_date}, usada ${response.date}`
           : '';
+        const intervalNote = response.is_interval
+          ? ` | promedio ${response.period?.start_date} a ${response.period?.end_date}`
+          : '';
 
         showSuccess(
-          `Mapa 2D generado: ${uniqueCells} celdas únicas, ${validCells} con dato válido (${targetResolution}°)${dateNote}`,
+          `Mapa 2D generado: ${uniqueCells} celdas únicas, ${validCells} con dato válido (${targetResolution}°)${intervalNote}${dateNote}`,
           '¡Listo!'
         );
         
@@ -236,6 +288,44 @@ export default function Home() {
     showInfo('La funcionalidad de guardado estará disponible próximamente', 'En desarrollo');
   };
 
+  // Handle Prediction History Plot
+  const handlePredictionHistoryPlot = async () => {
+    if (!selectedStation && !selectedCell) {
+      showError('Debes seleccionar una estación o celda del mapa', 'Selección Requerida');
+      return;
+    }
+    if (!predictionHistoryState.droughtIndex) {
+      showWarning('Por favor selecciona un índice de sequía', 'Datos incompletos');
+      return;
+    }
+    if (!predictionHistoryState.predictionDate) {
+      showWarning('Por favor selecciona la fecha de emisión de la predicción', 'Fecha requerida');
+      return;
+    }
+
+    const location = selectedStation
+      ? `Estación: ${selectedStation.name}`
+      : `Celda: [${selectedCell.center[0].toFixed(3)}, ${selectedCell.center[1].toFixed(3)}]`;
+
+    console.log('Querying prediction history:', {
+      ...predictionHistoryState,
+      location: selectedStation || selectedCell,
+    });
+
+    showSuccess(`Histórico de predicción consultado para ${location}`, '¡Listo!');
+
+    setPlotData({
+      title: `Histórico Predicción: ${predictionHistoryState.droughtIndex} - ${predictionHistoryState.timeHorizon}`,
+      type: 'Histórico de Predicción',
+      data: predictionHistoryState,
+    });
+  };
+
+  const handlePredictionHistorySave = () => {
+    console.log('Saving prediction history data');
+    showInfo('La funcionalidad de guardado estará disponible próximamente', 'En desarrollo');
+  };
+
   // Handle Reset
   const handleReset = () => {
     setPlotData(null);
@@ -254,10 +344,14 @@ export default function Home() {
           setAnalysisState={setAnalysisState}
           predictionState={predictionState}
           setPredictionState={setPredictionState}
+          predictionHistoryState={predictionHistoryState}
+          setPredictionHistoryState={setPredictionHistoryState}
           onAnalysisPlot={handleAnalysisPlot}
           onPredictionPlot={handlePredictionPlot}
+          onPredictionHistoryPlot={handlePredictionHistoryPlot}
           onAnalysisSave={handleAnalysisSave}
           onPredictionSave={handlePredictionSave}
+          onPredictionHistorySave={handlePredictionHistorySave}
           selectedStation={selectedStation}
           selectedCell={selectedCell}
         />
@@ -269,6 +363,8 @@ export default function Home() {
           selectedCell={selectedCell}
           onStationSelect={setSelectedStation}
           onCellSelect={setSelectedCell}
+          mapLayers={mapLayers}
+          setMapLayers={setMapLayers}
         />
       </div>
       

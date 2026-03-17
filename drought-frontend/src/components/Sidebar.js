@@ -1,11 +1,11 @@
 'use client';
 
-import { BarChart3, TrendingUp, Download, Info, AlertCircle, CheckCircle2 } from 'lucide-react';
-import Select from './ui/Select';
-import Button from './ui/Button';
-import DateRangePicker from './ui/DateRangePicker';
+import { useMemo, useState } from 'react';
+import { AlertCircle, CheckCircle2, Info, Database, Droplets, Grid3x3, MapPin } from 'lucide-react';
+import HistoricalSection from './sidebar/HistoricalSection';
+import PredictionSection from './sidebar/PredictionSection';
+import PredictionHistorySection from './sidebar/PredictionHistorySection';
 
-// Variables hidrometeorológicas disponibles en el backend
 const hydrometeorologicalVariables = [
   { value: 'precip', label: 'Precipitación' },
   { value: 'tmean', label: 'Temperatura Media' },
@@ -15,8 +15,7 @@ const hydrometeorologicalVariables = [
   { value: 'balance', label: 'Balance Hídrico' },
 ];
 
-// Índices de sequía disponibles en el backend
-const droughtIndices = [
+const hydrometIndices = [
   { value: 'SPI', label: 'SPI - Índice de Precipitación Estandarizado', category: 'meteorological' },
   { value: 'SPEI', label: 'SPEI - Índice de Precipitación-Evapotranspiración Estandarizado', category: 'meteorological' },
   { value: 'RAI', label: 'RAI - Índice de Anomalía de Lluvia', category: 'meteorological' },
@@ -24,10 +23,16 @@ const droughtIndices = [
   { value: 'PDSI', label: 'PDSI - Índice de Severidad de Sequía de Palmer', category: 'hydrological' },
 ];
 
-const macroclimaticIndices = [
-  { value: 'enso', label: 'ENSO - El Niño Southern Oscillation' },
-  { value: 'pdo', label: 'PDO - Oscilación Decadal del Pacífico' },
-  { value: 'nao', label: 'NAO - Oscilación del Atlántico Norte' },
+const hydrologicalVariables = [
+  { value: 'caudal_medio', label: 'Caudal (Medio)' },
+  { value: 'caudal_max', label: 'Caudal (Máximo)' },
+  { value: 'caudal_min', label: 'Caudal (Mínimo)' },
+  { value: 'nivel', label: 'Nivel' },
+];
+
+const hydrologicalIndices = [
+  { value: 'SSI', label: 'SSI - Índice de Sequía de Caudales' },
+  { value: 'SDI', label: 'SDI - Índice de Sequía Hidrológica' },
 ];
 
 const timeHorizons = [
@@ -36,37 +41,172 @@ const timeHorizons = [
   { value: '6m', label: '6 meses' },
 ];
 
-export default function Sidebar({ 
-  analysisState, 
-  setAnalysisState, 
-  predictionState, 
+const RESOLUTION_SOURCE_BY_VALUE = { 0.25: 'ERA5', 0.1: 'IMERG', 0.05: 'CHIRPS' };
+const SPATIAL_UNIT_LABELS = { grid: 'Grid', cuencas: 'Cuencas', embalses: 'Embalses', estaciones: 'Estaciones' };
+const ALL_INDICES = [...hydrometIndices, ...hydrologicalIndices];
+
+export default function Sidebar({
+  analysisState,
+  setAnalysisState,
+  predictionState,
   setPredictionState,
+  predictionHistoryState,
+  setPredictionHistoryState,
   onAnalysisPlot,
   onPredictionPlot,
+  onPredictionHistoryPlot,
   onAnalysisSave,
   onPredictionSave,
+  onPredictionHistorySave,
   selectedStation,
-  selectedCell
+  selectedCell,
 }) {
+  const [historicalOpen, setHistoricalOpen] = useState(true);
+  const [predictionOpen, setPredictionOpen] = useState(true);
+  const [predictionHistoryOpen, setPredictionHistoryOpen] = useState(false);
+  const [showCategoryPicker, setShowCategoryPicker] = useState(true);
+
+  const isHydromet = (analysisState.dataCategory || 'hydromet') === 'hydromet';
+  const isHydrological = (analysisState.dataCategory || 'hydromet') === 'hydrological';
+  const is2DMode = analysisState.visualizationType === '2D';
+  const needsSelection = !is2DMode;
   const hasSelection = selectedStation || selectedCell;
-  const selectionText = selectedStation 
-    ? selectedStation.name 
-    : selectedCell 
+
+  const selectionText = selectedStation
+    ? selectedStation.name
+    : selectedCell
       ? `Celda [${selectedCell.center[0].toFixed(2)}, ${selectedCell.center[1].toFixed(2)}]`
       : null;
-  
-  // Para 2D, no requiere selección de celda
-  const is2DMode = analysisState.visualizationType === '2D';
-  const needsSelection = !is2DMode; // Solo requiere selección en modo 1D
-  
+
+  const currentVariables = useMemo(
+    () => (isHydromet ? hydrometeorologicalVariables : hydrologicalVariables),
+    [isHydromet]
+  );
+
+  const currentIndices = useMemo(
+    () => (isHydromet ? hydrometIndices : hydrologicalIndices),
+    [isHydromet]
+  );
+
+  const spatialUnitOptions = useMemo(() => {
+    if (isHydrological) {
+      return [
+        { value: 'cuencas', label: 'Cuencas', icon: Droplets },
+        { value: 'embalses', label: 'Embalses', icon: Database },
+        { value: 'estaciones', label: 'Estaciones', icon: MapPin },
+      ];
+    }
+
+    return [
+      { value: 'grid', label: 'Celdas', icon: Grid3x3 },
+      { value: 'cuencas', label: 'Cuencas', icon: Droplets },
+      { value: 'embalses', label: 'Embalses', icon: Database },
+    ];
+  }, [isHydrological]);
+
+  const handleCategoryChange = (newCat) => {
+    const updates = { dataCategory: newCat, variable: '', droughtIndex: '' };
+
+    if (newCat === 'hydrological') {
+      updates.spatialUnit = 'estaciones';
+      updates.dataSource = '';
+    } else if (analysisState.spatialUnit === 'estaciones') {
+      updates.spatialUnit = 'grid';
+    }
+
+    setAnalysisState((prev) => ({ ...prev, ...updates }));
+    setShowCategoryPicker(false);
+  };
+
+  const resolutionLabel = useMemo(
+    () => (isHydromet ? RESOLUTION_SOURCE_BY_VALUE[analysisState.spatialResolution] || null : null),
+    [isHydromet, analysisState.spatialResolution]
+  );
+
+  const summaryParts = useMemo(() => {
+    const variableLabel = analysisState.variable
+      ? (currentVariables.find((v) => v.value === analysisState.variable)?.label || analysisState.variable)
+      : null;
+
+    return [
+      isHydromet ? 'Hidrometeorológico' : 'Hidrológico',
+      variableLabel,
+      analysisState.droughtIndex || null,
+      is2DMode && analysisState.spatialUnit ? SPATIAL_UNIT_LABELS[analysisState.spatialUnit] || null : null,
+      is2DMode && resolutionLabel ? `${resolutionLabel} (${analysisState.spatialResolution}°)` : null,
+      is2DMode && analysisState.useSpatialInterval
+        ? (analysisState.startDate && analysisState.endDate ? `${analysisState.startDate} - ${analysisState.endDate}` : null)
+        : (analysisState.startDate || null),
+    ].filter(Boolean).join(' • ');
+  }, [
+    isHydromet,
+    is2DMode,
+    analysisState.variable,
+    analysisState.droughtIndex,
+    analysisState.spatialUnit,
+    analysisState.spatialResolution,
+    analysisState.useSpatialInterval,
+    analysisState.startDate,
+    analysisState.endDate,
+    currentVariables,
+    resolutionLabel,
+  ]);
+
+  const predictionSummary = useMemo(
+    () => [
+      predictionState.droughtIndex
+        ? (ALL_INDICES.find((i) => i.value === predictionState.droughtIndex)?.label || predictionState.droughtIndex)
+        : null,
+      predictionState.timeHorizon
+        ? (timeHorizons.find((h) => h.value === predictionState.timeHorizon)?.label || predictionState.timeHorizon)
+        : null,
+    ].filter(Boolean).join(' • ') || null,
+    [predictionState.droughtIndex, predictionState.timeHorizon]
+  );
+
+  const predictionHistorySummary = useMemo(
+    () => [
+      predictionHistoryState.droughtIndex
+        ? (ALL_INDICES.find((i) => i.value === predictionHistoryState.droughtIndex)?.label || predictionHistoryState.droughtIndex)
+        : null,
+      predictionHistoryState.timeHorizon
+        ? (timeHorizons.find((h) => h.value === predictionHistoryState.timeHorizon)?.label || predictionHistoryState.timeHorizon)
+        : null,
+      predictionHistoryState.predictionDate || null,
+    ].filter(Boolean).join(' • ') || null,
+    [
+      predictionHistoryState.droughtIndex,
+      predictionHistoryState.timeHorizon,
+      predictionHistoryState.predictionDate,
+    ]
+  );
+
+  const analysisDisabled = useMemo(
+    () => (needsSelection && !hasSelection)
+      || (!analysisState.variable && !analysisState.droughtIndex)
+      || !analysisState.startDate
+      || ((needsSelection || (is2DMode && analysisState.useSpatialInterval)) && !analysisState.endDate),
+    [
+      needsSelection,
+      hasSelection,
+      analysisState.variable,
+      analysisState.droughtIndex,
+      analysisState.startDate,
+      analysisState.endDate,
+      is2DMode,
+      analysisState.useSpatialInterval,
+    ]
+  );
+
+  const showDataSource = is2DMode && isHydromet && (analysisState.spatialUnit || 'grid') === 'grid';
+  const showSpatialUnit = is2DMode;
+
   return (
-    <aside className="w-96 bg-gradient-to-b from-gray-50 to-gray-100/50 dark:from-[#141920] dark:to-[#0f1419] border border-gray-200 dark:border-gray-700 overflow-y-auto shadow-2xl rounded-xl">
-      <div className="px-6 py-5 space-y-8">
-        
-        {/* Selection Indicator */}
-        <div className={`p-4 rounded-xl border-2 transition-all duration-300 ${
-          !needsSelection || hasSelection 
-            ? 'bg-green-50 dark:bg-green-900/20 border-green-500 dark:border-green-600' 
+    <aside className="w-[480px] min-w-[420px] bg-gradient-to-b from-gray-50 to-gray-100/50 dark:from-[#141920] dark:to-[#0f1419] border border-gray-200 dark:border-gray-700 overflow-y-auto shadow-2xl rounded-xl">
+      <div className="px-6 py-5 space-y-6">
+        <div className={`p-3 rounded-xl border-2 transition-all duration-300 ${
+          !needsSelection || hasSelection
+            ? 'bg-green-50 dark:bg-green-900/20 border-green-500 dark:border-green-600'
             : 'bg-amber-50 dark:bg-amber-900/20 border-amber-500 dark:border-amber-600 animate-pulse'
         }`}>
           <div className="flex items-start gap-3">
@@ -77,283 +217,79 @@ export default function Sidebar({
             )}
             <div className="flex-1">
               <p className={`text-sm font-semibold ${
-                !needsSelection || hasSelection 
-                  ? 'text-green-800 dark:text-green-300' 
+                !needsSelection || hasSelection
+                  ? 'text-green-800 dark:text-green-300'
                   : 'text-amber-800 dark:text-amber-300'
               }`}>
                 {is2DMode ? 'Modo Espacial (2D)' : hasSelection ? 'Ubicación Seleccionada' : 'Falta Selección'}
               </p>
-              <p className={`text-xs mt-1 ${
-                !needsSelection || hasSelection 
-                  ? 'text-green-700 dark:text-green-400' 
+              <p className={`text-xs mt-0.5 ${
+                !needsSelection || hasSelection
+                  ? 'text-green-700 dark:text-green-400'
                   : 'text-amber-700 dark:text-amber-400'
               }`}>
-                {is2DMode 
-                  ? 'Visualización 2D: muestra todas las celdas del dominio'
-                  : hasSelection 
+                {is2DMode
+                  ? 'Visualizacion 2D: muestra todas las celdas del dominio'
+                  : hasSelection
                     ? selectionText
-                    : 'Selecciona una estación o celda del mapa para continuar'
-                }
+                    : 'Selecciona una estación o celda del mapa para continuar'}
               </p>
-            </div>
-          </div>
-        </div>
-        
-        {/* Historical Analysis Section */}
-        <div className="animate-fade-in">
-          <div className="relative flex items-center gap-3 mb-5 pb-4 border-b-2 border-blue-500 dark:border-blue-400">
-            {/* Glow effect */}
-            <div className="absolute -left-2 -right-2 -top-1 -bottom-1 bg-blue-500/10 dark:bg-blue-400/10 rounded-lg blur-sm"></div>
-            
-            <div className="relative p-2.5 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg">
-              <BarChart3 className="w-6 h-6 text-white" strokeWidth={2.5} />
-            </div>
-            <div className="relative">
-              <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">
-                Análisis Histórico
-              </h2>
-              <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></span>
-                Últimos 30 años
-              </p>
-            </div>
-          </div>
-          
-          <div className="space-y-5 p-5 bg-gradient-to-br from-blue-50/50 via-blue-50/20 to-blue-50/30 dark:from-[#1a1f2e] dark:via-[#141920] dark:to-blue-950/10 rounded-2xl border border-blue-200/50 dark:border-blue-900/30 shadow-lg">
-            
-            {/* Visualization Type Selector */}
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
-                Tipo de Visualización
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setAnalysisState({ ...analysisState, visualizationType: '1D' })}
-                  className={`px-4 py-2.5 rounded-lg font-medium text-sm transition-all ${
-                    analysisState.visualizationType === '1D'
-                      ? 'bg-blue-600 text-white shadow-md'
-                      : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-blue-50 dark:hover:bg-gray-700'
-                  }`}
-                >
-                  Serie Temporal (1D)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAnalysisState({ ...analysisState, visualizationType: '2D' })}
-                  className={`px-4 py-2.5 rounded-lg font-medium text-sm transition-all ${
-                    analysisState.visualizationType === '2D'
-                      ? 'bg-blue-600 text-white shadow-md'
-                      : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-blue-50 dark:hover:bg-gray-700'
-                  }`}
-                >
-                  Mapa Espacial (2D)
-                </button>
-              </div>
-              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                {is2DMode 
-                  ? '📍 Modo 2D: Muestra todas las celdas coloreadas según el valor en una fecha específica' 
-                  : '📈 Modo 1D: Muestra la evolución temporal de una celda seleccionada'}
-              </p>
-            </div>
-            
-            {/* Resolution Selector - Solo visible en modo 2D */}
-            {is2DMode && (
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
-                  Resolución Espacial
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setAnalysisState({ ...analysisState, spatialResolution: 0.25 })}
-                    className={`px-3 py-2 rounded-lg font-medium text-xs transition-all ${
-                      analysisState.spatialResolution === 0.25
-                        ? 'bg-purple-600 text-white shadow-md'
-                        : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-purple-50 dark:hover:bg-gray-700'
-                    }`}
-                  >
-                    LOW<br/>0.25°
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAnalysisState({ ...analysisState, spatialResolution: 0.1 })}
-                    className={`px-3 py-2 rounded-lg font-medium text-xs transition-all ${
-                      analysisState.spatialResolution === 0.1
-                        ? 'bg-purple-600 text-white shadow-md'
-                        : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-purple-50 dark:hover:bg-gray-700'
-                    }`}
-                  >
-                    MEDIUM<br/>0.1°
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAnalysisState({ ...analysisState, spatialResolution: 0.05 })}
-                    className={`px-3 py-2 rounded-lg font-medium text-xs transition-all ${
-                      analysisState.spatialResolution === 0.05
-                        ? 'bg-purple-600 text-white shadow-md'
-                        : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-purple-50 dark:hover:bg-gray-700'
-                    }`}
-                  >
-                    HIGH<br/>0.05°
-                  </button>
-                </div>
-                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                  Mayor resolución = más celdas, más detalle
-                </p>
-              </div>
-            )}
-            
-            <Select
-              label="Variables Hidrometeorológicas"
-              options={hydrometeorologicalVariables}
-              value={analysisState.variable}
-              onChange={(value) => setAnalysisState({ ...analysisState, variable: value })}
-              placeholder="Seleccionar variable..."
-            />
-            
-            <Select
-              label="Índices de Sequía"
-              options={droughtIndices}
-              value={analysisState.droughtIndex}
-              onChange={(value) => setAnalysisState({ ...analysisState, droughtIndex: value })}
-              placeholder="Seleccionar índice..."
-            />
-            
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
-                {is2DMode ? 'Fecha para Mapa 2D' : 'Periodo de Tiempo'}
-              </label>
-              {is2DMode ? (
-                <input
-                  type="date"
-                  value={analysisState.startDate}
-                  onChange={(e) => setAnalysisState({ ...analysisState, startDate: e.target.value, endDate: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              ) : (
-                <DateRangePicker
-                  startDate={analysisState.startDate}
-                  endDate={analysisState.endDate}
-                  onStartDateChange={(date) => setAnalysisState({ ...analysisState, startDate: date })}
-                  onEndDateChange={(date) => setAnalysisState({ ...analysisState, endDate: date })}
-                />
-              )}
-            </div>
-            
-            <div className="flex gap-3 pt-3">
-              <Button
-                onClick={onAnalysisPlot}
-                variant="primary"
-                className={`flex-1 shadow-md hover:shadow-lg transition-all ${
-                  ((needsSelection && !hasSelection) || (!analysisState.variable && !analysisState.droughtIndex) || !analysisState.startDate || (needsSelection && !analysisState.endDate)) 
-                    ? 'opacity-50 cursor-not-allowed' 
-                    : ''
-                }`}
-                disabled={(needsSelection && !hasSelection) || (!analysisState.variable && !analysisState.droughtIndex) || !analysisState.startDate || (needsSelection && !analysisState.endDate)}
-              >
-                <BarChart3 className="w-4 h-4" />
-                Graficar
-              </Button>
-              <Button
-                onClick={onAnalysisSave}
-                variant="secondary"
-                className="flex-1"
-              >
-                <Download className="w-4 h-4" />
-                Guardar
-              </Button>
             </div>
           </div>
         </div>
 
-        {/* Divider */}
-        <div className="relative py-2">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t-2 border-gray-300 dark:border-gray-600"></div>
-          </div>
-          <div className="relative flex justify-center">
-            <span className="px-4 py-1 bg-gradient-to-r from-gray-100 via-gray-50 to-gray-100 dark:from-[#141920] dark:via-[#0f1419] dark:to-[#141920] text-xs font-bold text-gray-600 dark:text-gray-400 rounded-full border border-gray-300 dark:border-gray-600 shadow-sm">
-              PREDICCIÓN
-            </span>
-          </div>
-        </div>
+        <HistoricalSection
+          historicalOpen={historicalOpen}
+          setHistoricalOpen={setHistoricalOpen}
+          summaryParts={summaryParts}
+          showCategoryPicker={showCategoryPicker}
+          setShowCategoryPicker={setShowCategoryPicker}
+          handleCategoryChange={handleCategoryChange}
+          isHydromet={isHydromet}
+          isHydrological={isHydrological}
+          currentVariables={currentVariables}
+          currentIndices={currentIndices}
+          analysisState={analysisState}
+          setAnalysisState={setAnalysisState}
+          showSpatialUnit={showSpatialUnit}
+          spatialUnitOptions={spatialUnitOptions}
+          showDataSource={showDataSource}
+          analysisDisabled={analysisDisabled}
+          onAnalysisPlot={onAnalysisPlot}
+          onAnalysisSave={onAnalysisSave}
+        />
 
-        {/* Prediction Section */}
-        <div className="animate-fade-in">
-          <div className="relative flex items-center gap-3 mb-5 pb-4 border-b-2 border-green-500 dark:border-green-400">
-            {/* Glow effect */}
-            <div className="absolute -left-2 -right-2 -top-1 -bottom-1 bg-green-500/10 dark:bg-green-400/10 rounded-lg blur-sm"></div>
-            
-            <div className="relative p-2.5 bg-gradient-to-br from-green-500 to-green-600 rounded-xl shadow-lg">
-              <TrendingUp className="w-6 h-6 text-white" strokeWidth={2.5} />
-            </div>
-            <div className="relative">
-              <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">
-                Predicción
-              </h2>
-              <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
-                Modelos predictivos
-              </p>
-            </div>
-          </div>
-          
-          <div className="space-y-5 p-5 bg-gradient-to-br from-green-50/50 via-green-50/20 to-green-50/30 dark:from-[#1a1f2e] dark:via-[#141920] dark:to-green-950/10 rounded-2xl border border-green-200/50 dark:border-green-900/30 shadow-lg">
-            <Select
-              label="Índice de Sequía"
-              options={droughtIndices}
-              value={predictionState.droughtIndex}
-              onChange={(value) => setPredictionState({ ...predictionState, droughtIndex: value })}
-              placeholder="Seleccionar índice..."
-            />
-            
-            <Select
-              label="Fenómenos Macroclimáticos"
-              options={macroclimaticIndices}
-              value={predictionState.macroclimaticIndex}
-              onChange={(value) => setPredictionState({ ...predictionState, macroclimaticIndex: value })}
-              placeholder="Seleccionar correlación..."
-            />
-            
-            <Select
-              label="Horizonte de Predicción"
-              options={timeHorizons}
-              value={predictionState.timeHorizon}
-              onChange={(value) => setPredictionState({ ...predictionState, timeHorizon: value })}
-              placeholder="Seleccionar horizonte..."
-            />
-            
-            <div className="flex gap-3 pt-3">
-              <Button
-                onClick={onPredictionPlot}
-                variant="success"
-                className={`flex-1 shadow-md hover:shadow-lg transition-all ${
-                  !hasSelection ? 'opacity-50 cursor-not-allowed' : ''
-                }`}
-                disabled={!hasSelection}
-              >
-                <TrendingUp className="w-4 h-4" />
-                Graficar
-              </Button>
-              <Button
-                onClick={onPredictionSave}
-                variant="secondary"
-                className="flex-1"
-              >
-                <Download className="w-4 h-4" />
-                Guardar
-              </Button>
-            </div>
-          </div>
-        </div>
+        <PredictionSection
+          predictionOpen={predictionOpen}
+          setPredictionOpen={setPredictionOpen}
+          predictionSummary={predictionSummary}
+          predictionState={predictionState}
+          setPredictionState={setPredictionState}
+          allIndices={ALL_INDICES}
+          timeHorizons={timeHorizons}
+          hasSelection={hasSelection}
+          onPredictionPlot={onPredictionPlot}
+          onPredictionSave={onPredictionSave}
+        />
 
-        {/* Reference Link */}
-        <div className="text-xs text-gray-600 dark:text-gray-400 p-4 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 rounded-xl border border-blue-200 dark:border-blue-800 shadow-sm">
+        <PredictionHistorySection
+          predictionHistoryOpen={predictionHistoryOpen}
+          setPredictionHistoryOpen={setPredictionHistoryOpen}
+          predictionHistorySummary={predictionHistorySummary}
+          predictionHistoryState={predictionHistoryState}
+          setPredictionHistoryState={setPredictionHistoryState}
+          allIndices={ALL_INDICES}
+          timeHorizons={timeHorizons}
+          hasSelection={hasSelection}
+          onPredictionHistoryPlot={onPredictionHistoryPlot}
+          onPredictionHistorySave={onPredictionHistorySave}
+        />
+
+        <div className="text-xs text-gray-600 dark:text-gray-400 p-3 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 rounded-xl border border-blue-200 dark:border-blue-800 shadow-sm">
           <div className="flex items-start gap-2">
             <Info className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
             <div>
-              <p className="mb-2 font-semibold text-blue-900 dark:text-blue-300">Ver ejemplo detallado:</p>
+              <p className="mb-1 font-semibold text-blue-900 dark:text-blue-300">Ver ejemplo detallado:</p>
               <a
                 href="https://droughtmonitor.unl.edu/CurrentMap.aspx"
                 target="_blank"
