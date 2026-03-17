@@ -148,28 +148,40 @@ export default function LeafletMap({
 
         // Coordenadas del cursor junto a la escala (abajo a la izquierda)
         const MousePosition = L.Control.extend({
-        options: { position: 'bottomright' },
-        onAdd() {
-        const div = L.DomUtil.create('div', 'leaflet-control-scale-line leaflet-control-mousepos');
-        div.style.marginTop = '4px';
-        div.style.minWidth = 'auto';
-        div.textContent = 'Latitud: -- | Longitud: --';
-        this._div = div;
-        return div;
-        },
-        update(latlng) {
-        if (!this._div) return;
+          options: { position: 'bottomright' },
+          onAdd() {
+            const div = L.DomUtil.create('div', 'leaflet-control-mousepos');
+            div.style.marginTop = '4px';
 
-        if (!latlng) {
-        this._div.textContent = 'Latitud: -- | Longitud: --';
-        return;
-        }
+            // Estilo compatible con escala Leaflet
+            div.style.background = 'rgba(255, 255, 255, 0.8)';
+            div.style.color = '#333';
+            div.style.font = '11px/1.1 "Helvetica Neue", Arial, Helvetica, sans-serif';
 
-        const lat = latlng.lat.toFixed(5);
-        const lon = latlng.lng.toFixed(5);
-        this._div.textContent = `Latitud: ${lat} | Longitud: ${lon}`;
-        },
-      });
+            // Caja completa (cerrada)
+            div.style.border = '2px solid #777';
+            div.style.padding = '2px 5px';
+            div.style.minWidth = 'unset';
+            div.style.width = 'auto';
+            div.style.display = 'inline-block';
+
+            div.textContent = 'Latitud: -- | Longitud: --';
+            this._div = div;
+            return div;
+          },
+          update(latlng) {
+            if (!this._div) return;
+
+            if (!latlng) {
+              this._div.textContent = 'Latitud: -- | Longitud: --';
+              return;
+            }
+
+            const lat = latlng.lat.toFixed(5);
+            const lon = latlng.lng.toFixed(5);
+            this._div.textContent = `Latitud: ${lat} | Longitud: ${lon}`;
+          },
+        });
 
         const mousePosControl = new MousePosition();
         mousePosControl.addTo(map);
