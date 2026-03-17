@@ -28,6 +28,8 @@ const LeafletMap = dynamic(
 export default function MapArea({ 
   plotData, 
   onReset, 
+  onSaveData,
+  onExportImage,
   selectedStation, 
   selectedCell,
   onStationSelect,
@@ -351,10 +353,24 @@ export default function MapArea({
                   <p className="text-xs text-gray-500 dark:text-gray-400">Análisis de datos</p>
                 </div>
               </div>
-              <Button variant="secondary" className="shadow-lg hover:shadow-xl">
-                <Download className="w-4 h-4" />
-                Exportar Gráfico
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="secondary"
+                  className="shadow-lg hover:shadow-xl"
+                  onClick={onSaveData}
+                >
+                  <Download className="w-4 h-4" />
+                  Guardar JSON
+                </Button>
+                <Button
+                  variant="secondary"
+                  className="shadow-lg hover:shadow-xl"
+                  onClick={onExportImage}
+                >
+                  <Download className="w-4 h-4" />
+                  Exportar Imagen
+                </Button>
+              </div>
             </div>
             
             {/* Chart area: show time series when available or 2D spatial info */}
