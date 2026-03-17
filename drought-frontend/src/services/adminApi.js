@@ -138,6 +138,10 @@ export const filesApi = {
     });
   },
 
+  async getDownloadUrl(fileId) {
+    return fetchAdmin(`/admin/files/${fileId}/download-url`);
+  },
+
   async upload(file) {
     const formData = new FormData();
     formData.append('file', file);

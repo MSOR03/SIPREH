@@ -31,6 +31,7 @@ from app.services.historical_constants import (
 )
 from app.services.historical_timeseries_mixin import TimeseriesMixin
 from app.services.historical_spatial_mixin import SpatialMixin
+from app.services.tiered_storage import decode_multi_keys, build_duckdb_source, touch_cache_file
 
 
 class HistoricalDataService(TimeseriesMixin, SpatialMixin):
@@ -184,10 +185,17 @@ class HistoricalDataService(TimeseriesMixin, SpatialMixin):
         
         return self.conn
 
-    def _get_available_freqs(self, local_path: str, parquet_url: str, variable: str, file_format: str, var_column: str = 'var') -> list:
+    def _get_available_freqs(self, parquet_source: str, parquet_url: str, variable: str, file_format: str, var_column: str = 'var') -> list:
         """
         Detecta frecuencias disponibles para una variable en un parquet.
         Resultado cacheado 24h (las frecuencias no cambian).
+
+        Args:
+            parquet_source: expresion DuckDB source (read_parquet(...)) o path local
+            parquet_url: clave original (para cache key)
+            variable: nombre de la variable
+            file_format: 'long' o 'wide'
+            var_column: nombre de la columna de variable en formato long
         """
         cache_key = f"freqs:{hashlib.md5((parquet_url + ':' + variable).encode()).hexdigest()}"
         cached = self.cache.get(cache_key)
@@ -196,10 +204,17 @@ class HistoricalDataService(TimeseriesMixin, SpatialMixin):
 
         try:
             conn = self._get_connection()
-            if file_format == 'long':
-                freq_query = f"SELECT DISTINCT freq FROM read_parquet('{local_path}') WHERE {var_column} = '{variable}'"
+            # Si parquet_source ya es una expresion read_parquet(...), usarla directamente
+            # Si es un path local simple, envolverla
+            if parquet_source.startswith("read_parquet("):
+                from_expr = parquet_source
             else:
-                freq_query = f"SELECT DISTINCT freq FROM read_parquet('{local_path}') WHERE {variable} IS NOT NULL"
+                from_expr = f"read_parquet('{parquet_source}')"
+
+            if file_format == 'long':
+                freq_query = f"SELECT DISTINCT freq FROM {from_expr} WHERE {var_column} = '{variable}'"
+            else:
+                freq_query = f"SELECT DISTINCT freq FROM {from_expr} WHERE {variable} IS NOT NULL"
             available_freqs = [r[0] for r in conn.execute(freq_query).fetchall() if r[0]]
         except Exception:
             available_freqs = []
@@ -258,6 +273,7 @@ class HistoricalDataService(TimeseriesMixin, SpatialMixin):
         
         # Cache hit → retornar inmediato
         if os.path.exists(local_path) and os.path.getsize(local_path) > 1024:
+            touch_cache_file(local_path)
             return local_path
         
         # Cache miss → descargar
@@ -283,7 +299,34 @@ class HistoricalDataService(TimeseriesMixin, SpatialMixin):
         
         # Si todo falla, retornar URL directo
         return f"s3://{settings.CLOUD_STORAGE_BUCKET}/{cloud_key}"
-    
+
+    def _resolve_parquet_source(self, parquet_url: str) -> Dict[str, Any]:
+        """
+        Resuelve un parquet_url a una expresion DuckDB valida.
+
+        Soporta:
+        - Single key: "parquet/file.parquet" -> read_parquet('/local/path.parquet')
+        - Multi key (tiered): "key1|key2" -> read_parquet(['/path1.parquet', '/path2.parquet'])
+
+        El separador '|' es inyectado por historical.py cuando detecta un dataset
+        con estrategia historical_updates.
+
+        Returns:
+            Dict con:
+            - "source_expr": string listo para usar en FROM de DuckDB
+            - "local_paths": lista de paths locales
+            - "primary_path": primer path (para deteccion de formato, freqs, etc.)
+        """
+        keys = decode_multi_keys(parquet_url)
+        local_paths = [self._get_parquet_url(k) for k in keys]
+        source_expr = build_duckdb_source(local_paths)
+
+        return {
+            "source_expr": source_expr,
+            "local_paths": local_paths,
+            "primary_path": local_paths[0],
+        }
+
     def get_available_variables(self) -> List[Dict[str, Any]]:
         """
         Obtiene lista de variables y índices disponibles del CATÁLOGO FIJO.
@@ -486,19 +529,20 @@ class HistoricalDataService(TimeseriesMixin, SpatialMixin):
         return {"category": label, "label": label, "color": cat_info["color"],
                 "severity": cat_info["severity"], "value": value}
         
-    def _detect_parquet_format(self, parquet_url: str, resolved_path: str = None) -> dict:
+    def _detect_parquet_format(self, parquet_url: str, resolved_path: str = None, source_expr: str = None) -> dict:
         """
         Detecta el formato del parquet leyendo SOLO metadatos (no descarga archivo completo).
 
         Args:
             parquet_url: URL del parquet o cloud_key (usado como cache key)
             resolved_path: Path local ya resuelto (evita llamar _get_parquet_url de nuevo)
+            source_expr: Expresion DuckDB source (read_parquet(...)) para multi-archivo
 
         Returns:
             Dict con 'format' ('wide' o 'long') y 'date_column' (nombre de la columna de fecha)
         """
         # Cache para evitar lecturas repetidas de metadatos
-        # v2: incluye 'columns' — invalida cache anterior que no lo tenía
+        # v2: incluye 'columns' — invalida cache anterior que no lo tenia
         cache_key = f"format_v2:{hashlib.md5(parquet_url.encode()).hexdigest()}"
         cached = self.cache.get(cache_key)
         if cached and 'columns' in cached:
@@ -506,10 +550,18 @@ class HistoricalDataService(TimeseriesMixin, SpatialMixin):
 
         try:
             conn = self._get_connection()
-            url = resolved_path or self._get_parquet_url(parquet_url)
-            
-            # ✅ DuckDB lee solo metadatos (~10 KB en vez de todo el archivo)
-            schema_query = f"DESCRIBE SELECT * FROM read_parquet('{url}') LIMIT 0"
+
+            # Determinar la expresion FROM para DuckDB
+            if source_expr and source_expr.startswith("read_parquet("):
+                from_expr = source_expr
+            elif resolved_path:
+                from_expr = f"read_parquet('{resolved_path}')"
+            else:
+                url = self._get_parquet_url(parquet_url)
+                from_expr = f"read_parquet('{url}')"
+
+            # DuckDB lee solo metadatos (~10 KB en vez de todo el archivo)
+            schema_query = f"DESCRIBE SELECT * FROM {from_expr} LIMIT 0"
             schema_df = conn.execute(schema_query).fetchdf()
             
             column_names = schema_df['column_name'].tolist()
@@ -556,28 +608,23 @@ class HistoricalDataService(TimeseriesMixin, SpatialMixin):
     def get_date_range(self, parquet_url: str) -> Tuple[date, date]:
         """
         Obtiene el rango de fechas disponible en un archivo parquet.
-        
-        Args:
-            parquet_url: URL del archivo
-            
-        Returns:
-            Tupla (fecha_inicio, fecha_fin)
+        Soporta multi-archivo (parquet_url con '|').
         """
         cache_key = f"date_range:{hashlib.md5(parquet_url.encode()).hexdigest()}"
-        
+
         cached = self.cache.get(cache_key)
         if cached:
             return cached
-        
+
         try:
             conn = self._get_connection()
-            url = self._get_parquet_url(parquet_url)
-            
+            source = self._resolve_parquet_source(parquet_url)
+
             query = f"""
-            SELECT 
+            SELECT
                 MIN(date) as min_date,
                 MAX(date) as max_date
-            FROM read_parquet('{url}')
+            FROM {source['source_expr']}
             """
             
             result = conn.execute(query).fetchone()
@@ -593,31 +640,26 @@ class HistoricalDataService(TimeseriesMixin, SpatialMixin):
     
     def get_spatial_bounds(self, parquet_url: str) -> Dict[str, float]:
         """
-        Obtiene los límites espaciales del archivo parquet.
-        
-        Args:
-            parquet_url: URL del archivo
-            
-        Returns:
-            Diccionario con min_lat, max_lat, min_lon, max_lon
+        Obtiene los limites espaciales del archivo parquet.
+        Soporta multi-archivo (parquet_url con '|').
         """
         cache_key = f"spatial_bounds:{hashlib.md5(parquet_url.encode()).hexdigest()}"
-        
+
         cached = self.cache.get(cache_key)
         if cached:
             return cached
-        
+
         try:
             conn = self._get_connection()
-            url = self._get_parquet_url(parquet_url)
-            
+            source = self._resolve_parquet_source(parquet_url)
+
             query = f"""
-            SELECT 
+            SELECT
                 MIN(lat) as min_lat,
                 MAX(lat) as max_lat,
                 MIN(lon) as min_lon,
                 MAX(lon) as max_lon
-            FROM read_parquet('{url}')
+            FROM {source['source_expr']}
             """
             
             result = conn.execute(query).fetchone()
@@ -637,28 +679,22 @@ class HistoricalDataService(TimeseriesMixin, SpatialMixin):
             raise Exception(f"Error obteniendo límites espaciales: {str(e)}")
     def get_unique_cells(self, parquet_url: str) -> List[str]:
         """
-        Obtiene los cell_ids únicos de un archivo parquet.
-        Útil para navegación jerárquica de grillas (0.25° → 0.1° → 0.05°).
-        
-        Args:
-            parquet_url: URL del archivo parquet
-            
-        Returns:
-            Lista de cell_ids únicos ordenados (formato "LON_LAT")
+        Obtiene los cell_ids unicos de un archivo parquet.
+        Soporta multi-archivo (parquet_url con '|').
         """
         cache_key = f"unique_cells:{hashlib.md5(parquet_url.encode()).hexdigest()}"
-        
+
         cached = self.cache.get(cache_key)
         if cached:
             return cached
-        
+
         try:
             conn = self._get_connection()
-            url = self._get_parquet_url(parquet_url)
-            
+            source = self._resolve_parquet_source(parquet_url)
+
             query = f"""
             SELECT DISTINCT cell_id
-            FROM read_parquet('{url}')
+            FROM {source['source_expr']}
             ORDER BY cell_id
             """
             
