@@ -273,7 +273,7 @@ export default function Home() {
             type: '1D',
             title: `${response.variable_name} - Serie de Tiempo`,
             subtitle: `Celda: ${selectedCell.cell_id} | Frecuencia: ${freqLabel}`,
-            variable: response.variable,
+            variable: String(response.variable || variable || '').trim().toUpperCase(),
             unit: response.unit,
             frequency: response.frequency,
             data: response.data,

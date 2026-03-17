@@ -148,6 +148,54 @@ export default function LeafletMap({
         L.control.zoom({ position: 'topright' }).addTo(map);
         L.control.scale({ position: 'bottomleft', metric: true, imperial: false, maxWidth: 200 }).addTo(map);
 
+        // Coordenadas del cursor junto a la escala (abajo a la izquierda)
+        const MousePosition = L.Control.extend({
+          options: { position: 'bottomright' },
+          onAdd() {
+            const div = L.DomUtil.create('div', 'leaflet-control-mousepos');
+            div.style.marginTop = '4px';
+
+            // Estilo compatible con escala Leaflet
+            div.style.background = 'rgba(255, 255, 255, 0.8)';
+            div.style.color = '#333';
+            div.style.font = '11px/1.1 "Helvetica Neue", Arial, Helvetica, sans-serif';
+
+            // Caja completa (cerrada)
+            div.style.border = '2px solid #777';
+            div.style.padding = '2px 5px';
+            div.style.minWidth = 'unset';
+            div.style.width = 'auto';
+            div.style.display = 'inline-block';
+
+            div.textContent = 'Latitud: -- | Longitud: --';
+            this._div = div;
+            return div;
+          },
+          update(latlng) {
+            if (!this._div) return;
+
+            if (!latlng) {
+              this._div.textContent = 'Latitud: -- | Longitud: --';
+              return;
+            }
+
+            const lat = latlng.lat.toFixed(5);
+            const lon = latlng.lng.toFixed(5);
+            this._div.textContent = `Latitud: ${lat} | Longitud: ${lon}`;
+          },
+        });
+
+        const mousePosControl = new MousePosition();
+        mousePosControl.addTo(map);
+
+        map.on('mousemove', (e) => {
+          mousePosControl.update(e.latlng);
+        });
+
+        map.on('mouseout', () => {
+          mousePosControl.update(null);
+        });
+
         // CartoDB tiles — light_all / dark_all según tema activo
         const initialTheme = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
         const tileUrl = initialTheme === 'dark'
@@ -626,12 +674,10 @@ export default function LeafletMap({
         // Actualizar tooltip compartido en hover (no bindTooltip por celda)
         rect.on('mouseover', (e) => {
           sharedTooltip.setContent(
-            `<div style="font-size:12px;line-height:1.4">
-              <strong style="color:#1f2937">${cell.cell_id || `[${cell.lat.toFixed(3)}, ${cell.lon.toFixed(3)}]`}</strong><br/>
-              Valor: <b>${!isNaN(cellValue) && cellValue !== null ? cellValue.toFixed(3) : 'N/A'}</b><br/>
-              ${cell.category ? `Categoría: ${cell.category}<br/>` : ''}
-              ${cell.severity != null ? `Severidad: ${cell.severity}` : ''}
-            </div>`
+          '<div style="font-size:12px;line-height:1.4">' +
+          'Valor: <b>' + (!isNaN(cellValue) && cellValue !== null ? cellValue.toFixed(3) : 'N/A') + '</b><br/>' +
+          (cell.category ? ('Categoría: ' + cell.category) : 'Categoría: N/A') +
+          '</div>'
           );
           sharedTooltip.setLatLng(e.latlng);
           if (!mapRef.current.hasLayer(sharedTooltip)) sharedTooltip.addTo(mapRef.current);
