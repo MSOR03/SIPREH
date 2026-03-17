@@ -150,49 +150,24 @@ export default function LeafletMap({
         const MousePosition = L.Control.extend({
         options: { position: 'bottomright' },
         onAdd() {
-          const div = L.DomUtil.create('div', 'leaflet-control-mousepos');
-
-          // Visual homogéneo con la escala (fondo claro, texto oscuro, borde suave)
-          div.style.background = '#ffffff';
-          div.style.color = '#333333';
-          div.style.padding = '8px 12px';
-          div.style.border = '1px solid rgba(0,0,0,0.25)';
-          div.style.borderRadius = '8px';
-          div.style.fontSize = '14px';
-          div.style.fontFamily = 'system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif';
-          div.style.lineHeight = '1.2';
-          div.style.boxShadow = '0 1px 2px rgba(0,0,0,0.08)';
-          div.style.minWidth = '200px';
-
-          div.innerHTML =
-            '<span style="color:#e11d48;margin-right:8px;">📍</span>' +
-            '<span style="color:#333;">--</span>' +
-            '<span style="color:#6b7280;margin:0 8px;">,</span>' +
-            '<span style="color:#333;">--</span>';
-
-          this._div = div;
-          return div;
+        const div = L.DomUtil.create('div', 'leaflet-control-scale-line leaflet-control-mousepos');
+        div.style.marginTop = '4px';
+        div.style.minWidth = 'auto';
+        div.textContent = 'Latitud: -- | Longitud: --';
+        this._div = div;
+        return div;
         },
         update(latlng) {
-          if (!this._div) return;
+        if (!this._div) return;
 
-          if (!latlng) {
-            this._div.innerHTML =
-              '<span style="color:#e11d48;margin-right:8px;">📍</span>' +
-              '<span style="color:#333;">--</span>' +
-              '<span style="color:#6b7280;margin:0 8px;">,</span>' +
-              '<span style="color:#333;">--</span>';
-            return;
-          }
+        if (!latlng) {
+        this._div.textContent = 'Latitud: -- | Longitud: --';
+        return;
+        }
 
-          const lat = latlng.lat.toFixed(5);
-          const lon = latlng.lng.toFixed(5);
-
-          this._div.innerHTML =
-            '<span style="color:#e11d48;margin-right:8px;">📍</span>' +
-            `<span style="color:#333;font-weight:500;">${lat}</span>` +
-            '<span style="color:#6b7280;margin:0 8px;">,</span>' +
-            `<span style="color:#333;font-weight:500;">${lon}</span>`;
+        const lat = latlng.lat.toFixed(5);
+        const lon = latlng.lng.toFixed(5);
+        this._div.textContent = `Latitud: ${lat} | Longitud: ${lon}`;
         },
       });
 
