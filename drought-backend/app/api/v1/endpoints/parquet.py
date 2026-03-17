@@ -20,6 +20,18 @@ import ast
 router = APIRouter()
 
 
+def infer_resolution_from_filename(filename: str) -> tuple[str, float] | tuple[None, None]:
+    """Infer grid resolution from known historical file naming conventions."""
+    name = (filename or "").lower()
+    if "chirps" in name:
+        return "high", 0.05
+    if "imerg" in name:
+        return "medium", 0.10
+    if "era5" in name:
+        return "low", 0.25
+    return None, None
+
+
 def parse_file_metadata(raw_metadata: str | None) -> dict:
     """Parse metadata from DB supporting JSON and legacy python-dict strings."""
     if not raw_metadata:
@@ -53,15 +65,16 @@ async def upload_parquet_file(
     4. Saves record to database
     """
     # Validate file extension
-    if not file.filename.endswith('.parquet'):
+    if not file.filename.lower().endswith('.parquet'):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only .parquet files are allowed"
         )
-    
-    # Read file content
-    file_content = await file.read()
-    file_size = len(file_content)
+
+    # Get file size without loading full content into memory.
+    file.file.seek(0, os.SEEK_END)
+    file_size = file.file.tell()
+    file.file.seek(0)
     
     # Check file size
     if file_size > settings.MAX_UPLOAD_SIZE:
@@ -70,29 +83,32 @@ async def upload_parquet_file(
             detail=f"File size exceeds maximum allowed size of {settings.MAX_UPLOAD_SIZE} bytes"
         )
     
-    # Validate parquet structure
-    df = parquet_processor.read_parquet(file_content)
-    if df is None:
+    # Validate parquet structure and extract metadata from parquet footer only.
+    metadata = parquet_processor.get_parquet_metadata_from_fileobj(file.file)
+    if metadata is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid parquet file format"
         )
-    
-    # Extract metadata
-    metadata = parquet_processor.get_parquet_metadata(file_content)
+
+    resolution_level, resolution = infer_resolution_from_filename(file.filename)
+    if resolution is not None and metadata.get("resolution") is None:
+        metadata["resolution"] = resolution
+        metadata["resolution_level"] = resolution_level
+        metadata["resolution_source"] = "filename_inference"
     
     # Generate unique filename
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     unique_filename = f"{timestamp}_{file.filename}"
     cloud_key = f"parquet/{unique_filename}"
     
-    # Calculate file hash
-    from io import BytesIO
-    file_hash = cloud_storage.calculate_file_hash(BytesIO(file_content))
-    
+    # Calculate hash and upload from stream (no full-copy in RAM)
+    file_hash = cloud_storage.calculate_file_hash(file.file)
+    file.file.seek(0)
+
     # Upload to cloud storage
     success, result = cloud_storage.upload_file(
-        BytesIO(file_content),
+        file.file,
         cloud_key,
         metadata={'original_name': file.filename}
     )

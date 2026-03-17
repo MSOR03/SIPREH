@@ -2,131 +2,42 @@
 Endpoints optimizados para análisis histórico de datos de sequía.
 Utiliza DuckDB para consultas rápidas sobre archivos .parquet en Cloudflare.
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from fastapi.responses import JSONResponse, Response
+import logging
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import date, datetime
-import math
-import orjson
+from datetime import date
 
 from app.db.session import get_db
 from app.models.parquet_file import ParquetFile
 from app.services.historical_data_service import HistoricalDataService
 from app.services.cache import cache_service
-from pydantic import BaseModel, Field
-import json
-import ast
-
-
-# ============================================================================
-# SCHEMAS
-# ============================================================================
-
-class VariableInfo(BaseModel):
-    """Información de una variable o índice."""
-    id: str
-    name: str
-    unit: str
-    category: str
-    available: bool = True
-    supports_prediction: bool = False
-
-
-class CatalogResponse(BaseModel):
-    """Response con catálogo de variables/índices."""
-    total: int
-    items: List[VariableInfo]
-
-
-class TimeSeriesPoint(BaseModel):
-    """Punto en serie de tiempo."""
-    date: date
-    value: Optional[float]
-    category: Optional[str] = None
-    color: Optional[str] = None
-    severity: Optional[int] = None
-    
-
-
-class StatisticsInfo(BaseModel):
-    """Estadísticas de los datos."""
-    mean: Optional[float]
-    min: Optional[float]
-    max: Optional[float]
-    std: Optional[float]
-    count: int
-    missing: Optional[int] = 0
-
-
-class TimeSeriesRequest(BaseModel):
-    """Request para serie de tiempo."""
-    parquet_file_id: int = Field(..., description="ID del archivo parquet en la base de datos")
-    variable: str = Field(..., description="Variable o índice (precip, SPI, SPEI, etc.)")
-    start_date: date = Field(..., description="Fecha inicial")
-    end_date: date = Field(..., description="Fecha final")
-    lat: Optional[float] = Field(None, description="Latitud del punto")
-    lon: Optional[float] = Field(None, description="Longitud del punto")
-    cell_id: Optional[str] = Field(None, description="ID de celda específica")
-    limit: int = Field(70000, description="Máximo de registros a retornar (default: 70000)")
-
-
-class TimeSeriesResponse(BaseModel):
-    """Response con serie de tiempo."""
-    variable: str
-    variable_name: str
-    unit: str
-    location: dict
-    data: List[TimeSeriesPoint]
-    statistics: StatisticsInfo
-
-
-class SpatialDataRequest(BaseModel):
-    """Request para datos espaciales (mapa 2D)."""
-    parquet_file_id: int = Field(..., description="ID del archivo parquet")
-    variable: str = Field(..., description="Variable o índice")
-    target_date: Optional[date] = Field(None, description="Fecha objetivo (modo fecha única)")
-    start_date: Optional[date] = Field(None, description="Fecha inicial (modo intervalo)")
-    end_date: Optional[date] = Field(None, description="Fecha final (modo intervalo)")
-    use_interval: bool = Field(False, description="Si true, usa rango [start_date, end_date] y promedia por celda")
-    min_lat: Optional[float] = None
-    max_lat: Optional[float] = None
-    min_lon: Optional[float] = None
-    max_lon: Optional[float] = None
-    limit: int = Field(100000, description="Máximo de celdas a retornar (default: 100000)")
-
-
-class GridCell(BaseModel):
-    """Celda de la malla con datos."""
-    cell_id: str
-    lat: float
-    lon: float
-    value: Optional[float]
-    category: Optional[str] = None
-    color: Optional[str] = None
-    severity: Optional[int] = None
-
-
-class SpatialDataResponse(BaseModel):
-    """Response con datos espaciales."""
-    variable: str
-    variable_name: str
-    unit: str
-    date: date
-    grid_cells: List[GridCell]
-    statistics: StatisticsInfo
-    bounds: dict
-
-
-class FileInfoResponse(BaseModel):
-    """Información sobre un archivo parquet."""
-    file_id: int
-    filename: str
-    resolution: Optional[float] = None
-    date_range: dict
-    spatial_bounds: dict
-    size_mb: Optional[float] = None
-    record_count: Optional[int] = None
+from app.api.v1.endpoints.historical_schemas import (
+    VariableInfo,
+    CatalogResponse,
+    TimeSeriesPoint,
+    StatisticsInfo,
+    TimeSeriesRequest,
+    TimeSeriesResponse,
+    SpatialDataRequest,
+    GridCell,
+    SpatialDataResponse,
+    FileInfoResponse,
+    ColumnInfo,
+    FileColumnsResponse,
+    FileValidationResponse,
+)
+from app.api.v1.endpoints.historical_utils import (
+    get_file_metadata,
+    infer_resolution_from_filename,
+    orjson_response,
+)
+from app.services.tiered_storage import (
+    get_active_cloud_keys_for_dataset,
+    encode_multi_keys,
+    _parse_meta,
+)
 
 
 # ============================================================================
@@ -135,79 +46,58 @@ class FileInfoResponse(BaseModel):
 
 router = APIRouter()
 
+logger = logging.getLogger("historical")
+
 # Inicializar servicios (usando singleton global)
 historical_service = HistoricalDataService(cache_service=cache_service)
 
 
-# ============================================================================
-# HELPER FUNCTIONS
-# ============================================================================
-
-def get_file_metadata(file: ParquetFile) -> dict:
+def _resolve_cloud_keys(file_id: int, db) -> str:
     """
-    Parse file_metadata JSON string to dict.
-    
-    Args:
-        file: ParquetFile instance
-        
-    Returns:
-        Dict with metadata or empty dict if parsing fails
+    Resuelve file_id a cloud_key(s).
+
+    Para datasets con estrategia historical_updates: retorna "key1|key2"
+    (historical_base | updates) para que _resolve_parquet_source() los
+    descargue a ambos y DuckDB lea en paralelo.
+
+    Para datasets single_file o archivos sin dataset_key: retorna el cloud_key
+    del archivo tal cual (comportamiento legacy).
+
+    El resultado se cachea 1h en cache_service.
     """
-    if file.file_metadata:
-        try:
-            parsed = json.loads(file.file_metadata)
-            return parsed if isinstance(parsed, dict) else {}
-        except (json.JSONDecodeError, TypeError):
-            # Compatibilidad con datos viejos guardados como str(dict)
-            try:
-                parsed = ast.literal_eval(file.file_metadata)
-                return parsed if isinstance(parsed, dict) else {}
-            except (ValueError, SyntaxError):
-                return {}
-    return {}
+    cache_key_for_file = f"file_cloud_keys_v2:{file_id}"
+    cached = cache_service.get(cache_key_for_file)
+    if cached:
+        return cached
 
+    file = db.query(ParquetFile).filter(
+        ParquetFile.id == file_id,
+        ParquetFile.status == "active"
+    ).first()
 
-def to_json_safe(value):
-    """Recursively convert values to JSON-safe types (replace NaN/Inf with None)."""
-    if isinstance(value, dict):
-        return {k: to_json_safe(v) for k, v in value.items()}
+    if not file:
+        return None
 
-    if isinstance(value, list):
-        return [to_json_safe(v) for v in value]
+    if not file.cloud_key:
+        return None
 
-    if isinstance(value, tuple):
-        return [to_json_safe(v) for v in value]
+    # Verificar si pertenece a dataset tiered
+    meta = _parse_meta(file.file_metadata)
+    dataset_key = meta.get("dataset_key")
 
-    if isinstance(value, float):
-        return value if math.isfinite(value) else None
+    if dataset_key:
+        from app.services.tiered_storage import is_tiered
+        if is_tiered(dataset_key):
+            keys = get_active_cloud_keys_for_dataset(dataset_key, db)
+            if len(keys) > 1:
+                result = encode_multi_keys(keys)
+                cache_service.set(cache_key_for_file, result, expire=3600)
+                return result
 
-    # numpy/pandas scalar support (e.g., np.float64, np.int64, pd.NA)
-    if hasattr(value, "item") and callable(getattr(value, "item")):
-        try:
-            return to_json_safe(value.item())
-        except Exception:
-            pass
-
-    # Generic NaN check for remaining scalar-like values
-    try:
-        if value != value:  # NaN is not equal to itself
-            return None
-    except Exception:
-        pass
-
-    return value
-
-
-def _orjson_response(data: dict) -> Response:
-    """
-    Serialize a dict to a JSON Response using orjson.
-    orjson handles natively: float NaN/Inf → null, numpy scalars, pd.NA → null,
-    datetime.date → ISO string.  3-10x faster than stdlib json for large payloads.
-    """
-    return Response(
-        content=orjson.dumps(data, option=orjson.OPT_NON_STR_KEYS | orjson.OPT_SERIALIZE_NUMPY),
-        media_type="application/json",
-    )
+    # Fallback: single file
+    result = file.cloud_key
+    cache_service.set(cache_key_for_file, result, expire=3600)
+    return result
 
 
 # ============================================================================
@@ -262,37 +152,6 @@ def get_all_variables_and_indices():
 # ============================================================================
 # DETECCIÓN AUTOMÁTICA DE COLUMNAS
 # ============================================================================
-
-class ColumnInfo(BaseModel):
-    """Información de una columna detectada."""
-    name: str
-    type: str
-    source: str = "detected"
-    display_name: Optional[str] = None
-    unit: Optional[str] = None
-    category: Optional[str] = None
-    in_catalog: bool = False
-
-
-class FileColumnsResponse(BaseModel):
-    """Response con columnas detectadas de un archivo."""
-    file_id: int
-    filename: str
-    metadata_columns: List[ColumnInfo]
-    data_columns: List[ColumnInfo]
-    all_columns: List[ColumnInfo]
-    summary: dict
-
-
-class FileValidationResponse(BaseModel):
-    """Response de validación de estructura."""
-    file_id: int
-    filename: str
-    valid: bool
-    errors: List[str]
-    warnings: List[str]
-    info: List[str]
-
 
 @router.get("/files/{file_id}/columns", response_model=FileColumnsResponse)
 def get_file_columns(
@@ -410,40 +269,57 @@ def list_available_files(
 ):
     """
     Lista todos los archivos parquet disponibles.
+
+    NOTA: No ejecuta queries remotas a Cloudflare para cada archivo.
+    Solo retorna metadata local (DB + cache). Los datos de date_range
+    y spatial_bounds se obtienen solo si ya están en cache.
     """
+    logger.info("GET /files - listing available files")
     files = db.query(ParquetFile).filter(
         ParquetFile.status == "active"
     ).all()
-    
+
     result = []
     for file in files:
         metadata = get_file_metadata(file)
+        resolution = metadata.get("resolution")
+        if resolution is None:
+            resolution = infer_resolution_from_filename(file.original_filename) or infer_resolution_from_filename(file.filename)
+
         file_info = {
             "file_id": file.id,
             "filename": file.filename,
-            "resolution": metadata.get("resolution"),
+            "resolution": resolution,
             "date_range": {"start": None, "end": None},
             "spatial_bounds": {},
             "size_mb": file.file_size / (1024 * 1024) if file.file_size else None,
             "record_count": metadata.get("num_rows")
         }
-        
-        # Intentar obtener rango de fechas y bounds (si está en cache)
+
+        # Solo usar datos de cache — NO hacer queries remotas aquí
+        # Las queries remotas a Cloudflare R2 bloquean el servidor durante ~20-30s
+        # y con N archivos bloquea completamente el threadpool de FastAPI.
         try:
             if file.cloud_url:
-                date_range = historical_service.get_date_range(file.cloud_url)
-                file_info["date_range"] = {
-                    "start": date_range[0],
-                    "end": date_range[1]
-                }
-                
-                bounds = historical_service.get_spatial_bounds(file.cloud_url)
-                file_info["spatial_bounds"] = bounds
-        except:
-            pass  # Si falla, continuar sin esa info
-        
+                import hashlib
+                url_hash = hashlib.md5(file.cloud_url.encode()).hexdigest()
+
+                # Intentar leer de cache sin ejecutar queries remotas
+                cached_range = cache_service.get(f"date_range:{url_hash}")
+                if cached_range:
+                    file_info["date_range"] = {
+                        "start": cached_range[0],
+                        "end": cached_range[1]
+                    }
+
+                cached_bounds = cache_service.get(f"spatial_bounds:{url_hash}")
+                if cached_bounds:
+                    file_info["spatial_bounds"] = cached_bounds
+        except Exception:
+            pass
+
         result.append(file_info)
-    
+
     return result
 
 
@@ -557,44 +433,31 @@ def get_timeseries(
     
     Respuesta rápida gracias a DuckDB + cache.
     """
+    logger.info(f"POST /timeseries - file={request.parquet_file_id} var={request.variable} cell={request.cell_id}")
     # 🚀 Caché a nivel de endpoint (bypass completo del servicio)
     # Usar string concatenation (más rápido que MD5)
-    endpoint_cache_key = f"endpoint:ts:{request.parquet_file_id}:{request.variable}:{request.start_date}:{request.end_date}:{request.lat}:{request.lon}:{request.cell_id}:{request.limit}"
+    endpoint_cache_key = f"endpoint:ts:{request.parquet_file_id}:{request.variable}:{request.start_date}:{request.end_date}:{request.lat}:{request.lon}:{request.cell_id}:{request.scale}:{request.source}:{request.frequency}:{request.limit}"
     
     cached = cache_service.get(endpoint_cache_key)
     if cached and isinstance(cached, dict):
-        return _orjson_response(cached)
+        return orjson_response(cached)
     
-    # Cachear el cloud_key para evitar consulta DB en cada request
-    cache_key_for_file = f"file_cloud_key:{request.parquet_file_id}"
+    # Resolver cloud_key(s) — soporta tiered (multi-archivo)
+    cache_key_for_file = f"file_cloud_keys_v2:{request.parquet_file_id}"
     cloud_key = cache_service.get(cache_key_for_file)
-    
+
     if not cloud_key:
-        # Solo consultar DB si no está en caché
-        file = db.query(ParquetFile).filter(
-            ParquetFile.id == request.parquet_file_id,
-            ParquetFile.status == "active"
-        ).first()
-        
-        if not file:
+        cloud_key = _resolve_cloud_keys(request.parquet_file_id, db)
+
+        if not cloud_key:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Archivo parquet no encontrado"
+                detail="Archivo parquet no encontrado o sin cloud_key"
             )
-        
-        if not file.cloud_key:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="El archivo no tiene cloud_key configurado"
-            )
-        
-        cloud_key = file.cloud_key
-        # Cachear por 1 hora
-        cache_service.set(cache_key_for_file, cloud_key, expire=3600)
     
     # Consultar datos con DuckDB
     try:
-        data_points, statistics, coordinates = historical_service.query_timeseries(
+        data_points, statistics, coordinates, returned_freq = historical_service.query_timeseries(
             parquet_url=cloud_key,
             variable=request.variable,
             start_date=request.start_date,
@@ -602,17 +465,21 @@ def get_timeseries(
             lat=request.lat,
             lon=request.lon,
             cell_id=request.cell_id,
+            scale=request.scale,
+            source=request.source,
+            frequency=request.frequency,
             limit=request.limit
         )
-        
+
         # Obtener info de la variable
         var_info = historical_service.COLUMN_MAPPING.get(request.variable, {})
-        
+
         # 🎯 OPTIMIZACIÓN: Usar coordenadas reales del servicio (punto más cercano)
         response_data = {
             "variable": request.variable,
             "variable_name": var_info.get("name", request.variable),
             "unit": var_info.get("unit", ""),
+            "frequency": returned_freq,
             "location": coordinates,
             "data": data_points,
             "statistics": statistics
@@ -622,7 +489,7 @@ def get_timeseries(
         cache_service.set(endpoint_cache_key, response_data, expire=900)
 
         # orjson serializa NaN/Inf→null, np/pd types nativo — sin recursión O(n)
-        return _orjson_response(response_data)
+        return orjson_response(response_data)
         
     except ValueError as e:
         raise HTTPException(
@@ -655,6 +522,7 @@ def get_spatial_data(
     
     Respuesta rápida gracias a DuckDB + cache.
     """
+    logger.info(f"POST /spatial - file={request.parquet_file_id} var={request.variable} date={request.target_date}")
     # 🚀 Caché a nivel de endpoint
     interval_mode = request.use_interval or (
         request.start_date is not None and request.end_date is not None and request.start_date != request.end_date
@@ -681,39 +549,26 @@ def get_spatial_data(
         f"endpoint:spatial:{request.parquet_file_id}:{request.variable}:"
         f"mode:{'interval' if interval_mode else 'single'}:"
         f"target:{request.target_date}:start:{request.start_date}:end:{request.end_date}:"
+        f"scale:{request.scale}:source:{request.source}:freq:{request.frequency}:"
         f"{request.min_lat}:{request.max_lat}:{request.min_lon}:{request.max_lon}:limit:{request.limit}"
     )
     
     cached = cache_service.get(endpoint_cache_key)
     if cached and isinstance(cached, dict):
-        return _orjson_response(cached)
+        return orjson_response(cached)
     
-    # Cachear el cloud_key para evitar consulta DB
-    cache_key_for_file = f"file_cloud_key:{request.parquet_file_id}"
+    # Resolver cloud_key(s) — soporta tiered (multi-archivo)
+    cache_key_for_file = f"file_cloud_keys_v2:{request.parquet_file_id}"
     cloud_key = cache_service.get(cache_key_for_file)
-    
+
     if not cloud_key:
-        # Solo consultar DB si no está en caché
-        file = db.query(ParquetFile).filter(
-            ParquetFile.id == request.parquet_file_id,
-            ParquetFile.status == "active"
-        ).first()
-        
-        if not file:
+        cloud_key = _resolve_cloud_keys(request.parquet_file_id, db)
+
+        if not cloud_key:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Archivo parquet no encontrado"
+                detail="Archivo parquet no encontrado o sin cloud_key"
             )
-        
-        if not file.cloud_key:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="El archivo no tiene cloud_key configurado"
-            )
-        
-        cloud_key = file.cloud_key
-        # Cachear por 1 hora
-        cache_service.set(cache_key_for_file, cloud_key, expire=3600)
     
     # Construir bounds si se proporcionaron
     bounds = None
@@ -727,7 +582,7 @@ def get_spatial_data(
     
     # Consultar datos
     try:
-        grid_cells, statistics, used_date = historical_service.query_spatial_data(
+        grid_cells, statistics, used_date, actual_bounds = historical_service.query_spatial_data(
             parquet_url=cloud_key,  # Usar cloud_key cacheado
             variable=request.variable,
             target_date=request.target_date,
@@ -735,25 +590,15 @@ def get_spatial_data(
             end_date=request.end_date,
             use_interval=interval_mode,
             bounds=bounds,
+            scale=request.scale,
+            source=request.source,
+            frequency=request.frequency,
             limit=request.limit
         )
-        
+
         # Info de la variable
         var_info = historical_service.COLUMN_MAPPING.get(request.variable, {})
-        
-        # Calcular bounds reales de los datos
-        if grid_cells:
-            lats = [cell["lat"] for cell in grid_cells]
-            lons = [cell["lon"] for cell in grid_cells]
-            actual_bounds = {
-                "min_lat": min(lats),
-                "max_lat": max(lats),
-                "min_lon": min(lons),
-                "max_lon": max(lons)
-            }
-        else:
-            actual_bounds = bounds or {}
-        
+
         response_data = {
             "variable": request.variable,
             "variable_name": var_info.get("name", request.variable),
@@ -776,7 +621,7 @@ def get_spatial_data(
         cache_service.set(endpoint_cache_key, response_data, expire=900)
 
         # orjson serializa NaN/Inf→null, np/pd types nativo — sin recursión O(n)
-        return _orjson_response(response_data)
+        return orjson_response(response_data)
         
     except ValueError as e:
         raise HTTPException(
@@ -866,6 +711,7 @@ def health_check():
     """
     Verifica el estado del servicio.
     """
+    logger.info("GET /health - health check")
     return {
         "status": "healthy",
         "service": "historical-data",

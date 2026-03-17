@@ -287,6 +287,9 @@ export const historicalApi = {
       lat = null,
       lon = null,
       cellId = null,
+      scale = null,
+      source = null,
+      frequency = null,
       limit = 70000,
     } = params;
 
@@ -300,6 +303,9 @@ export const historicalApi = {
         lat: lat,
         lon: lon,
         cell_id: cellId,
+        scale: scale,
+        source: source,
+        frequency: frequency,
         limit: limit,
       }),
     });
@@ -314,6 +320,9 @@ export const historicalApi = {
       startDate = null,
       endDate = null,
       useInterval = false,
+      scale = null,
+      source = null,
+      frequency = null,
       minLat = null,
       maxLat = null,
       minLon = null,
@@ -330,6 +339,9 @@ export const historicalApi = {
         start_date: startDate,
         end_date: endDate,
         use_interval: useInterval,
+        scale: scale,
+        source: source,
+        frequency: frequency,
         min_lat: minLat,
         max_lat: maxLat,
         min_lon: minLon,
@@ -370,6 +382,55 @@ export const historicalApi = {
       return Math.abs(fileResolution - resolution) < 0.01;
     });
     return file || files[0];
+  },
+};
+
+/**
+ * Hydrological Station Data API
+ */
+export const hydroApi = {
+  // Obtener las 29 estaciones hidrológicas
+  getStations: async () => {
+    return fetchApi('/hydro/stations');
+  },
+
+  // Catálogo de índices hidrológicos
+  getIndices: async () => {
+    return fetchApi('/hydro/indices');
+  },
+
+  // Serie de tiempo 1D para una estación
+  getTimeSeries: async (params) => {
+    const { fileId, stationCode, indexName, scale, startDate, endDate, limit = 70000 } = params;
+    return fetchApi('/hydro/timeseries', {
+      method: 'POST',
+      body: JSON.stringify({
+        parquet_file_id: fileId,
+        station_code: stationCode,
+        index_name: indexName,
+        scale: scale,
+        start_date: startDate,
+        end_date: endDate,
+        limit: limit,
+      }),
+    });
+  },
+
+  // Datos espaciales 2D para todas las estaciones
+  getSpatialData: async (params) => {
+    const { fileId, indexName, scale, targetDate, startDate, endDate, useInterval = false } = params;
+    return fetchApi('/hydro/spatial', {
+      method: 'POST',
+      body: JSON.stringify({
+        parquet_file_id: fileId,
+        index_name: indexName,
+        scale: scale,
+        target_date: targetDate,
+        start_date: startDate,
+        end_date: endDate,
+        use_interval: useInterval,
+      }),
+    });
   },
 };
 

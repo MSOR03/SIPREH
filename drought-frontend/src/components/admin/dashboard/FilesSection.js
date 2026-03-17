@@ -7,10 +7,14 @@ import {
   CheckCircle2,
   CloudRain,
   Clock,
+  Database,
+  Download,
   FileText,
+  GitMerge,
   HardDrive,
   Hash,
   Plus,
+  RefreshCw,
   Trash2,
   TrendingUp,
   Upload,
@@ -29,6 +33,17 @@ export default function FilesSection() {
   const [uploadSection, setUploadSection] = useState(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [datasetCatalog, setDatasetCatalog] = useState([]);
+  const [selectedDatasetKey, setSelectedDatasetKey] = useState('');
+  const [selectedFileId, setSelectedFileId] = useState('');
+  const [selectedRole, setSelectedRole] = useState('');
+  const [yearMonth, setYearMonth] = useState('');
+  const [periodStart, setPeriodStart] = useState('');
+  const [periodEnd, setPeriodEnd] = useState('');
+  const [activateNow, setActivateNow] = useState(false);
+  const [workflowBusy, setWorkflowBusy] = useState(false);
+  const [datasetStatusLoading, setDatasetStatusLoading] = useState(false);
+  const [datasetStatus, setDatasetStatus] = useState(null);
 
   const loadFiles = useCallback(async () => {
     try {
@@ -42,9 +57,48 @@ export default function FilesSection() {
     }
   }, []);
 
+  const loadDatasetCatalog = useCallback(async () => {
+    try {
+      const data = await filesApi.getDatasetCatalog();
+      const datasets = data.datasets || [];
+      setDatasetCatalog(datasets);
+      if (!selectedDatasetKey && datasets.length > 0) {
+        setSelectedDatasetKey(datasets[0].dataset_key);
+      }
+    } catch (err) {
+      setError('Error cargando catálogo de datasets: ' + err.message);
+    }
+  }, [selectedDatasetKey]);
+
+  const loadDatasetStatus = useCallback(async (datasetKey) => {
+    if (!datasetKey) return;
+    setDatasetStatusLoading(true);
+    try {
+      const data = await filesApi.getDatasetStatus(datasetKey);
+      setDatasetStatus(data);
+    } catch (err) {
+      setError('Error cargando estado de dataset: ' + err.message);
+      setDatasetStatus(null);
+    } finally {
+      setDatasetStatusLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadFiles();
-  }, [loadFiles]);
+    loadDatasetCatalog();
+  }, [loadFiles, loadDatasetCatalog]);
+
+  useEffect(() => {
+    if (!selectedDatasetKey) return;
+    const selected = datasetCatalog.find((d) => d.dataset_key === selectedDatasetKey);
+    const allowedRoles = selected?.allowed_roles || [];
+    if (allowedRoles.length > 0 && !allowedRoles.includes(selectedRole)) {
+      setSelectedRole(allowedRoles[0]);
+    }
+    setActivateNow(selected?.dataset_type === 'prediction');
+    loadDatasetStatus(selectedDatasetKey);
+  }, [datasetCatalog, selectedDatasetKey, selectedRole, loadDatasetStatus]);
 
   const handleUpload = async (fileList) => {
     setUploading(true);
@@ -106,10 +160,96 @@ export default function FilesSection() {
     }, 4000);
   };
 
+  const handleDownload = async (fileId, filename) => {
+    try {
+      const data = await filesApi.getDownloadUrl(fileId);
+      const a = document.createElement('a');
+      a.href = data.download_url;
+      a.download = data.filename || filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (err) {
+      setError('Error descargando: ' + err.message);
+      setTimeout(() => setError(''), 4000);
+    }
+  };
+
+  const handleAttachToDataset = async () => {
+    if (!selectedDatasetKey || !selectedFileId || !selectedRole) {
+      setError('Selecciona dataset, archivo y rol para adjuntar.');
+      return;
+    }
+
+    setWorkflowBusy(true);
+    setError('');
+    setSuccess('');
+    try {
+      await filesApi.attachToDataset({
+        file_id: Number(selectedFileId),
+        dataset_key: selectedDatasetKey,
+        role: selectedRole,
+        year_month: yearMonth || null,
+        period_start: periodStart || null,
+        period_end: periodEnd || null,
+        activate_now: activateNow,
+      });
+
+      setSuccess('Archivo adjuntado al dataset correctamente.');
+      await Promise.all([loadFiles(), loadDatasetStatus(selectedDatasetKey)]);
+    } catch (err) {
+      setError('Error adjuntando archivo al dataset: ' + err.message);
+    } finally {
+      setWorkflowBusy(false);
+    }
+  };
+
+  const handleMergeAndRollover = async () => {
+    const selected = datasetCatalog.find((d) => d.dataset_key === selectedDatasetKey);
+    if (!selected) {
+      setError('Selecciona un dataset.');
+      return;
+    }
+    if (selected.dataset_type === 'prediction') {
+      setError('prediction_main no usa merge-and-rollover; usa Adjuntar + Activar.');
+      return;
+    }
+    if (!selectedFileId) {
+      setError('Selecciona el archivo mensual (delta) para ejecutar merge.');
+      return;
+    }
+
+    setWorkflowBusy(true);
+    setError('');
+    setSuccess('');
+    try {
+      const result = await filesApi.mergeAndRollover({
+        dataset_key: selectedDatasetKey,
+        monthly_file_id: Number(selectedFileId),
+        year_month: yearMonth || null,
+        period_start: periodStart || null,
+        period_end: periodEnd || null,
+        archive_previous_snapshot: true,
+      });
+
+      setSuccess(
+        `Merge completado. Nuevo snapshot ID ${result.new_snapshot_file_id} (${result.output_rows} filas).`
+      );
+      await Promise.all([loadFiles(), loadDatasetStatus(selectedDatasetKey)]);
+    } catch (err) {
+      setError('Error en merge-and-rollover: ' + err.message);
+    } finally {
+      setWorkflowBusy(false);
+    }
+  };
+
   const hydrometFiles = files.filter((f) => classifyFile(f.original_filename).category === 'hydromet');
   const hydrologicalFiles = files.filter((f) => classifyFile(f.original_filename).category === 'hydrological');
   const predictionFiles = files.filter((f) => classifyFile(f.original_filename).category === 'prediction');
   const otherFiles = files.filter((f) => classifyFile(f.original_filename).category === 'other');
+  const selectedDataset = datasetCatalog.find((d) => d.dataset_key === selectedDatasetKey) || null;
+  const availableRoles = selectedDataset?.allowed_roles || [];
+  const candidateFiles = files.filter((f) => f.status !== 'archived');
 
   const stats = [
     {
@@ -175,6 +315,33 @@ export default function FilesSection() {
         ))}
       </div>
 
+      <DatasetWorkflowCard
+        datasetCatalog={datasetCatalog}
+        selectedDataset={selectedDataset}
+        selectedDatasetKey={selectedDatasetKey}
+        setSelectedDatasetKey={setSelectedDatasetKey}
+        candidateFiles={candidateFiles}
+        selectedFileId={selectedFileId}
+        setSelectedFileId={setSelectedFileId}
+        availableRoles={availableRoles}
+        selectedRole={selectedRole}
+        setSelectedRole={setSelectedRole}
+        yearMonth={yearMonth}
+        setYearMonth={setYearMonth}
+        periodStart={periodStart}
+        setPeriodStart={setPeriodStart}
+        periodEnd={periodEnd}
+        setPeriodEnd={setPeriodEnd}
+        activateNow={activateNow}
+        setActivateNow={setActivateNow}
+        workflowBusy={workflowBusy}
+        datasetStatusLoading={datasetStatusLoading}
+        datasetStatus={datasetStatus}
+        onRefreshStatus={() => loadDatasetStatus(selectedDatasetKey)}
+        onAttach={handleAttachToDataset}
+        onMerge={handleMergeAndRollover}
+      />
+
       <FileCategory
         title="Datos Hidrometeorológicos"
         subtitle="ERA5, IMERG, CHIRPS — archivos .parquet"
@@ -185,6 +352,7 @@ export default function FilesSection() {
         loading={loading}
         onDelete={handleDelete}
         onActivate={handleActivate}
+        onDownload={handleDownload}
         uploadOpen={uploadSection === 'hydromet'}
         onToggleUpload={() => setUploadSection(uploadSection === 'hydromet' ? null : 'hydromet')}
         onUpload={handleUpload}
@@ -203,6 +371,7 @@ export default function FilesSection() {
         loading={loading}
         onDelete={handleDelete}
         onActivate={handleActivate}
+        onDownload={handleDownload}
         uploadOpen={uploadSection === 'hydrological'}
         onToggleUpload={() => setUploadSection(uploadSection === 'hydrological' ? null : 'hydrological')}
         onUpload={handleUpload}
@@ -221,6 +390,7 @@ export default function FilesSection() {
         loading={loading}
         onDelete={handleDelete}
         onActivate={handleActivate}
+        onDownload={handleDownload}
         uploadOpen={uploadSection === 'prediction'}
         onToggleUpload={() => setUploadSection(uploadSection === 'prediction' ? null : 'prediction')}
         onUpload={handleUpload}
@@ -240,6 +410,7 @@ export default function FilesSection() {
           loading={loading}
           onDelete={handleDelete}
           onActivate={handleActivate}
+          onDownload={handleDownload}
           uploadOpen={false}
           onToggleUpload={() => {}}
           onUpload={handleUpload}
@@ -248,6 +419,207 @@ export default function FilesSection() {
           hideUpload
         />
       )}
+    </div>
+  );
+}
+
+function DatasetWorkflowCard({
+  datasetCatalog,
+  selectedDataset,
+  selectedDatasetKey,
+  setSelectedDatasetKey,
+  candidateFiles,
+  selectedFileId,
+  setSelectedFileId,
+  availableRoles,
+  selectedRole,
+  setSelectedRole,
+  yearMonth,
+  setYearMonth,
+  periodStart,
+  setPeriodStart,
+  periodEnd,
+  setPeriodEnd,
+  activateNow,
+  setActivateNow,
+  workflowBusy,
+  datasetStatusLoading,
+  datasetStatus,
+  onRefreshStatus,
+  onAttach,
+  onMerge,
+}) {
+  const isPredictionDataset = selectedDataset?.dataset_type === 'prediction';
+
+  return (
+    <div className="ds-card" style={{ borderTop: '3px solid #f97316' }}>
+      <div className="ds-card-header">
+        <div className="ds-card-header-left">
+          <div className="ds-card-icon" style={{ background: 'linear-gradient(135deg,#f97316,#ea580c)' }}>
+            <Database size={20} color="white" />
+          </div>
+          <div>
+            <p className="ds-card-title">Actualizacion Mensual por Dataset</p>
+            <p className="ds-card-subtitle">Adjuntar archivos por rol, ejecutar merge y revisar estado</p>
+          </div>
+        </div>
+        <button className="ds-btn ds-btn--ghost" onClick={onRefreshStatus} disabled={!selectedDatasetKey || datasetStatusLoading}>
+          <RefreshCw size={14} />
+          Actualizar estado
+        </button>
+      </div>
+
+      <div style={{ padding: '1.25rem 1.75rem', borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: '1rem' }}>
+          <div>
+            <label className="ds-field-label">Dataset</label>
+            <select className="ds-input" value={selectedDatasetKey} onChange={(e) => setSelectedDatasetKey(e.target.value)}>
+              <option value="">Seleccionar dataset</option>
+              {datasetCatalog.map((dataset) => (
+                <option key={dataset.dataset_key} value={dataset.dataset_key}>
+                  {dataset.dataset_key}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="ds-field-label">Archivo cargado</label>
+            <select className="ds-input" value={selectedFileId} onChange={(e) => setSelectedFileId(e.target.value)}>
+              <option value="">Seleccionar archivo</option>
+              {candidateFiles.map((file) => (
+                <option key={file.id} value={file.id}>
+                  {file.original_filename} (ID {file.id})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="ds-field-label">Rol</label>
+            <select className="ds-input" value={selectedRole} onChange={(e) => setSelectedRole(e.target.value)}>
+              <option value="">Seleccionar rol</option>
+              {availableRoles.map((role) => (
+                <option key={role} value={role}>
+                  {role}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="ds-field-label">Year-Month (opcional)</label>
+            <input
+              className="ds-input"
+              value={yearMonth}
+              onChange={(e) => setYearMonth(e.target.value)}
+              placeholder="2025-09"
+            />
+          </div>
+
+          <div>
+            <label className="ds-field-label">Periodo inicio (opcional)</label>
+            <input
+              className="ds-input"
+              value={periodStart}
+              onChange={(e) => setPeriodStart(e.target.value)}
+              placeholder="2025-09-01"
+            />
+          </div>
+
+          <div>
+            <label className="ds-field-label">Periodo fin (opcional)</label>
+            <input
+              className="ds-input"
+              value={periodEnd}
+              onChange={(e) => setPeriodEnd(e.target.value)}
+              placeholder="2025-09-30"
+            />
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginTop: '1rem', flexWrap: 'wrap' }}>
+          <label className="ds-check-label">
+            <input
+              type="checkbox"
+              checked={activateNow}
+              onChange={(e) => setActivateNow(e.target.checked)}
+              disabled={isPredictionDataset}
+            />
+            Activar archivo inmediatamente
+          </label>
+
+          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <button className="ds-btn ds-btn--primary" onClick={onAttach} disabled={workflowBusy}>
+              <CheckCircle2 size={14} />
+              Adjuntar al dataset
+            </button>
+            <button className="ds-btn ds-btn--orange" onClick={onMerge} disabled={workflowBusy || isPredictionDataset}>
+              <GitMerge size={14} />
+              Merge + Rollover
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ padding: '1.25rem 1.75rem' }}>
+        <p className="ds-field-label" style={{ marginBottom: '0.75rem' }}>Estado del Dataset</p>
+        {datasetStatusLoading ? (
+          <div className="ds-loader" style={{ padding: '1rem 0' }}>
+            <div className="ds-spinner" />
+          </div>
+        ) : !datasetStatus ? (
+          <p className="ds-empty-sub" style={{ margin: 0 }}>Selecciona un dataset para ver su estado.</p>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: '1rem' }}>
+            <div style={{ border: '1px solid rgba(0,0,0,0.07)', borderRadius: '12px', padding: '0.875rem' }}>
+              <p className="ds-card-subtitle" style={{ marginBottom: '0.5rem' }}>Activo</p>
+              {datasetStatus.active_file ? (
+                <>
+                  <p className="ds-file-name" style={{ maxWidth: '100%', marginBottom: '0.5rem' }}>{datasetStatus.active_file.filename}</p>
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <Badge color="green">Activo</Badge>
+                    {datasetStatus.active_file.role && <Badge color="blue">{datasetStatus.active_file.role}</Badge>}
+                    {datasetStatus.active_file.snapshot_version && (
+                      <Badge color="teal">v{datasetStatus.active_file.snapshot_version}</Badge>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <p className="ds-empty-sub" style={{ margin: 0 }}>Sin archivo activo</p>
+              )}
+            </div>
+
+            <div style={{ border: '1px solid rgba(0,0,0,0.07)', borderRadius: '12px', padding: '0.875rem' }}>
+              <p className="ds-card-subtitle" style={{ marginBottom: '0.5rem' }}>Pendientes</p>
+              {datasetStatus.pending_deltas?.length > 0 ? (
+                datasetStatus.pending_deltas.slice(0, 4).map((file) => (
+                  <div key={file.file_id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', marginBottom: '0.4rem' }}>
+                    <span className="ds-empty-sub" style={{ margin: 0, color: '#475569' }}>{file.filename}</span>
+                    <Badge color="amber">{file.role || 'pending'}</Badge>
+                  </div>
+                ))
+              ) : (
+                <p className="ds-empty-sub" style={{ margin: 0 }}>Sin pendientes</p>
+              )}
+            </div>
+
+            <div style={{ border: '1px solid rgba(0,0,0,0.07)', borderRadius: '12px', padding: '0.875rem' }}>
+              <p className="ds-card-subtitle" style={{ marginBottom: '0.5rem' }}>Archivados recientes</p>
+              {datasetStatus.archived_recent?.length > 0 ? (
+                datasetStatus.archived_recent.slice(0, 4).map((file) => (
+                  <div key={file.file_id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', marginBottom: '0.4rem' }}>
+                    <span className="ds-empty-sub" style={{ margin: 0, color: '#475569' }}>{file.filename}</span>
+                    <Badge color="gray">archived</Badge>
+                  </div>
+                ))
+              ) : (
+                <p className="ds-empty-sub" style={{ margin: 0 }}>Sin historico archivado</p>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -262,6 +634,7 @@ function FileCategory({
   loading,
   onDelete,
   onActivate,
+  onDownload,
   uploadOpen,
   onToggleUpload,
   onUpload,
@@ -396,6 +769,13 @@ function FileCategory({
                   </div>
                 </div>
                 <div className="ds-file-actions">
+                  <button
+                    className="ds-icon-btn ds-icon-btn--blue"
+                    onClick={() => onDownload(file.id, file.original_filename)}
+                    title="Descargar"
+                  >
+                    <Download size={16} />
+                  </button>
                   {!isActive && (
                     <button
                       className="ds-icon-btn ds-icon-btn--green"

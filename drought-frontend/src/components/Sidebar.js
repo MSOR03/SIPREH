@@ -23,16 +23,14 @@ const hydrometIndices = [
   { value: 'PDSI', label: 'PDSI - Índice de Severidad de Sequía de Palmer', category: 'hydrological' },
 ];
 
-const hydrologicalVariables = [
-  { value: 'caudal_medio', label: 'Caudal (Medio)' },
-  { value: 'caudal_max', label: 'Caudal (Máximo)' },
-  { value: 'caudal_min', label: 'Caudal (Mínimo)' },
-  { value: 'nivel', label: 'Nivel' },
-];
+const hydrologicalVariables = [];
 
 const hydrologicalIndices = [
-  { value: 'SSI', label: 'SSI - Índice de Sequía de Caudales' },
-  { value: 'SDI', label: 'SDI - Índice de Sequía Hidrológica' },
+  { value: 'SDI', label: 'SDI - Índice de Sequía de Caudales' },
+  { value: 'SRI', label: 'SRI - Índice de Recurrencia de Sequía' },
+  { value: 'MFI', label: 'MFI - Índice de Flujo Mensual' },
+  { value: 'DDI', label: 'DDI - Índice de Déficit de Duración' },
+  { value: 'HDI', label: 'HDI - Índice de Déficit Hidrológico' },
 ];
 
 const timeHorizons = [
@@ -88,8 +86,6 @@ export default function Sidebar({
   const spatialUnitOptions = useMemo(() => {
     if (isHydrological) {
       return [
-        { value: 'cuencas', label: 'Cuencas', icon: Droplets },
-        { value: 'embalses', label: 'Embalses', icon: Database },
         { value: 'estaciones', label: 'Estaciones', icon: MapPin },
       ];
     }

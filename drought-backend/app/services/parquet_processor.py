@@ -31,6 +31,38 @@ class ParquetProcessor:
             return None
     
     @staticmethod
+    def get_parquet_metadata_from_fileobj(file_obj) -> Optional[Dict[str, Any]]:
+        """
+        Extract metadata from a parquet file-like object.
+
+        This avoids reading the full parquet into memory and only inspects
+        parquet metadata/footer via pyarrow.
+        """
+        try:
+            file_obj.seek(0)
+            parquet_file = pq.ParquetFile(file_obj)
+            metadata = parquet_file.metadata
+
+            result = {
+                'num_rows': metadata.num_rows,
+                'num_columns': metadata.num_columns,
+                'num_row_groups': metadata.num_row_groups,
+                'format_version': metadata.format_version,
+                'created_by': metadata.created_by,
+                'schema': str(parquet_file.schema),
+                'columns': [field.name for field in parquet_file.schema],
+            }
+            file_obj.seek(0)
+            return result
+        except Exception as e:
+            print(f"Error extracting metadata from stream: {e}")
+            try:
+                file_obj.seek(0)
+            except Exception:
+                pass
+            return None
+
+    @staticmethod
     def get_parquet_metadata(file_data: bytes) -> Optional[Dict[str, Any]]:
         """
         Extract metadata from parquet file.

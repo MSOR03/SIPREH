@@ -1,10 +1,11 @@
 'use client';
 
-import { BarChart3, Calendar, ChevronLeft, CloudRain, Grid3x3, Waves } from 'lucide-react';
+import { BarChart3, Calendar, ChevronLeft, CloudRain, Clock, Grid3x3, Waves, ArrowDownUp } from 'lucide-react';
 import Select from '../ui/Select';
 import Button from '../ui/Button';
 import DateRangePicker from '../ui/DateRangePicker';
 import { CollapsiblePanel, RadioCard, RadioOption, StepSection } from './primitives';
+import { INDICES_WITHOUT_SCALE } from '@/utils/hydroStations';
 
 export default function HistoricalSection({
   historicalOpen,
@@ -112,7 +113,7 @@ export default function HistoricalSection({
                   Datos Hidrológicos
                 </span>
                 <span className={`text-[11px] block mt-0.5 ${isHydrological ? 'text-teal-600 dark:text-teal-400' : 'text-gray-500 dark:text-gray-400'}`}>
-                  Caudales, niveles - Estaciones, cuencas, embalses
+                  Caudales, niveles - Estaciones hidrológicas (SDI, SRI, MFI, DDI, HDI)
                 </span>
               </div>
             </button>
@@ -144,22 +145,87 @@ export default function HistoricalSection({
             </div>
 
             <StepSection step={stepNumbers.variables} title="Variables" collapsible defaultOpen>
-              <div className="grid grid-cols-2 gap-3">
+              {currentVariables.length > 0 ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <Select
+                    label="Variable climática"
+                    options={currentVariables}
+                    value={analysisState.variable}
+                    onChange={(value) => setAnalysisState((prev) => ({ ...prev, variable: value }))}
+                    placeholder="Seleccionar..."
+                  />
+                  <Select
+                    label="Índice de sequía"
+                    options={currentIndices}
+                    value={analysisState.droughtIndex}
+                    onChange={(value) => setAnalysisState((prev) => ({ ...prev, droughtIndex: value }))}
+                    placeholder="Seleccionar..."
+                  />
+                </div>
+              ) : (
                 <Select
-                  label="Variable climática"
-                  options={currentVariables}
-                  value={analysisState.variable}
-                  onChange={(value) => setAnalysisState((prev) => ({ ...prev, variable: value }))}
-                  placeholder="Seleccionar..."
-                />
-                <Select
-                  label="Índice de sequía"
+                  label="Índice hidrológico"
                   options={currentIndices}
                   value={analysisState.droughtIndex}
                   onChange={(value) => setAnalysisState((prev) => ({ ...prev, droughtIndex: value }))}
-                  placeholder="Seleccionar..."
+                  placeholder="Seleccionar índice..."
                 />
-              </div>
+              )}
+
+              {analysisState.droughtIndex && !INDICES_WITHOUT_SCALE.has(analysisState.droughtIndex) && (
+                <div className="mt-3">
+                  <label className="flex items-center gap-1.5 text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
+                    <Clock className="w-3.5 h-3.5 text-blue-500 dark:text-blue-400" />
+                    Escala temporal (meses)
+                  </label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {[1, 3, 6, 12].map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => setAnalysisState((prev) => ({ ...prev, indexScale: s }))}
+                        className={`py-2 px-3 rounded-lg text-sm font-semibold border-2 transition-all ${
+                          (analysisState.indexScale || 1) === s
+                            ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-500 dark:border-blue-400 text-blue-700 dark:text-blue-300 shadow-sm'
+                            : 'bg-white dark:bg-gray-800/50 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-blue-300 dark:hover:border-blue-600'
+                        }`}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {isHydromet && analysisState.variable && !analysisState.droughtIndex && (
+                analysisState.visualizationType === '1D' || analysisState.variable === 'precip'
+              ) && (
+                <div className="mt-3">
+                  <label className="flex items-center gap-1.5 text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
+                    <ArrowDownUp className="w-3.5 h-3.5 text-blue-500 dark:text-blue-400" />
+                    Frecuencia
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { key: 'D', label: 'Diaria' },
+                      { key: 'M', label: 'Mensual' },
+                    ].map((f) => (
+                      <button
+                        key={f.key}
+                        type="button"
+                        onClick={() => setAnalysisState((prev) => ({ ...prev, frequency: f.key }))}
+                        className={`py-2 px-3 rounded-lg text-sm font-semibold border-2 transition-all ${
+                          (analysisState.frequency || 'D') === f.key
+                            ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-500 dark:border-blue-400 text-blue-700 dark:text-blue-300 shadow-sm'
+                            : 'bg-white dark:bg-gray-800/50 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-blue-300 dark:hover:border-blue-600'
+                        }`}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </StepSection>
 
             <StepSection step={stepNumbers.visualizationType} title="Tipo de visualización" collapsible defaultOpen>

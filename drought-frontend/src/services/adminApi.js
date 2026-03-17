@@ -138,6 +138,10 @@ export const filesApi = {
     });
   },
 
+  async getDownloadUrl(fileId) {
+    return fetchAdmin(`/admin/files/${fileId}/download-url`);
+  },
+
   async upload(file) {
     const formData = new FormData();
     formData.append('file', file);
@@ -160,5 +164,27 @@ export const filesApi = {
       `/admin/files/cloud/sync?prefix=${encodeURIComponent(prefix)}&auto_activate=${autoActivate}&bidirectional=${bidirectional}`,
       { method: 'POST' }
     );
+  },
+
+  async getDatasetCatalog() {
+    return fetchAdmin('/admin/datasets/catalog');
+  },
+
+  async attachToDataset(payload) {
+    return fetchAdmin('/admin/datasets/attach-file', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async getDatasetStatus(datasetKey) {
+    return fetchAdmin(`/admin/datasets/${encodeURIComponent(datasetKey)}/status`);
+  },
+
+  async mergeAndRollover(payload) {
+    return fetchAdmin('/admin/datasets/merge-and-rollover', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   },
 };
