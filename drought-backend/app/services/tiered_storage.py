@@ -63,7 +63,7 @@ TIERED_STORAGE_CONFIG: Dict[str, Dict[str, Any]] = {
 # Roles validos para cada estrategia
 ROLES_BY_STRATEGY = {
     "single_file": ["snapshot", "delta"],
-    "historical_updates": ["historical_base", "updates", "snapshot", "delta"],
+    "historical_updates": ["historical_base", "updates", "delta"],
 }
 
 
@@ -170,12 +170,12 @@ def build_duckdb_source(local_paths: List[str]) -> str:
     Construye la expresion DuckDB FROM a partir de paths locales.
 
     - 1 path: read_parquet('/path/to/file.parquet')
-    - N paths: read_parquet(['/path1.parquet', '/path2.parquet'])
+    - N paths: read_parquet(['/path1.parquet', '/path2.parquet'], union_by_name=true)
     """
     if len(local_paths) == 1:
         return f"read_parquet('{local_paths[0]}')"
     paths_str = ", ".join(f"'{p}'" for p in local_paths)
-    return f"read_parquet([{paths_str}])"
+    return f"read_parquet([{paths_str}], union_by_name=true)"
 
 
 def encode_multi_keys(cloud_keys: List[str]) -> str:

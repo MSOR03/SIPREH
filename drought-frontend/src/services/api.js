@@ -111,17 +111,18 @@ export const droughtApi = {
   },
 
   // Obtener archivos disponibles
-  getFiles: async () => {
-    return fetchApi('/historical/files');
+  getFiles: async (datasetType) => {
+    const params = datasetType ? `?dataset_type=${datasetType}` : '';
+    return fetchApi(`/historical/files${params}`);
   },
 
-  // Obtener archivo por resolución específica
+  // Obtener archivo por resolución específica (solo archivos históricos)
   getFileByResolution: async (resolution) => {
-    const files = await fetchApi('/historical/files');
+    const files = await fetchApi('/historical/files?dataset_type=historical');
     // Buscar archivo que coincida con la resolución
     const file = files.find(f => {
       const metadata = f.metadata || {};
-      const fileResolution = metadata.resolution || 0.1;
+      const fileResolution = f.resolution || metadata.resolution || 0.1;
       return Math.abs(fileResolution - resolution) < 0.01;
     });
     return file || files[0]; // Fallback al primero si no encuentra
@@ -258,8 +259,9 @@ export const historicalApi = {
   },
 
   // Archivos disponibles
-  getFiles: async () => {
-    return fetchApi('/historical/files');
+  getFiles: async (datasetType) => {
+    const params = datasetType ? `?dataset_type=${datasetType}` : '';
+    return fetchApi(`/historical/files${params}`);
   },
 
   // Información de un archivo específico
@@ -374,9 +376,9 @@ export const historicalApi = {
     return fetchApi(`/historical/files/${fileId}/cells`);
   },
 
-  // Obtener archivo por resolución
+  // Obtener archivo por resolución (solo históricos)
   getFileByResolution: async (resolution) => {
-    const files = await fetchApi('/historical/files');
+    const files = await fetchApi('/historical/files?dataset_type=historical');
     const file = files.find(f => {
       const fileResolution = f.resolution || f.metadata?.resolution || 0.1;
       return Math.abs(fileResolution - resolution) < 0.01;

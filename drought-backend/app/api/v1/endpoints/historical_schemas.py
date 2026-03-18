@@ -112,6 +112,7 @@ class FileInfoResponse(BaseModel):
     file_id: int
     filename: str
     resolution: Optional[float] = None
+    dataset_type: Optional[str] = None
     date_range: dict
     spatial_bounds: dict
     size_mb: Optional[float] = None

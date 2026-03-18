@@ -177,9 +177,10 @@ export default function Home() {
           );
 
         } else {
-        // Usar la resolución seleccionada por el usuario
+        // Usar la resolución seleccionada por el usuario (solo archivos historicos)
         const targetResolution = analysisState.spatialResolution || 0.05;
-        const file = files.find(f => Math.abs((f.resolution || 0.1) - targetResolution) < 0.01);
+        const historicalFiles = files.filter(f => !f.dataset_type || f.dataset_type === 'historical');
+        const file = historicalFiles.find(f => Math.abs((f.resolution || 0.1) - targetResolution) < 0.01);
         
         if (!file) {
           showError(`No se encontró archivo para resolución ${targetResolution}°`, 'Error');
@@ -247,7 +248,8 @@ export default function Home() {
         if (selectedCell) {
           // Si hay celda seleccionada, buscar archivo con la resolución de la celda
           const resolution = selectedCell.resolution || 0.1;
-          const file = files.find(f => Math.abs((f.resolution || 0.1) - resolution) < 0.01);
+          const historicalOnly = files.filter(f => !f.dataset_type || f.dataset_type === 'historical');
+          const file = historicalOnly.find(f => Math.abs((f.resolution || 0.1) - resolution) < 0.01);
           
           if (!file) {
             showError(`No se encontró archivo para resolución ${resolution}°`, 'Error');
