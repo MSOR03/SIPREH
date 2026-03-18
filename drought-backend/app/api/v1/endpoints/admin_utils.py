@@ -87,6 +87,192 @@ DATASET_CONFIG: Dict[str, Dict[str, Any]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Expected parquet schemas per dataset_type
+# Values are abstract *type families* (not exact DuckDB types) so that
+# INT16 vs INT32, TIMESTAMP vs TIMESTAMP_NS, etc. are all accepted.
+# ---------------------------------------------------------------------------
+
+SCHEMA_HISTORICAL: Dict[str, str] = {
+    "ds":          "STRING",
+    "freq":        "STRING",
+    "date":        "TIMESTAMP",
+    "cell_id":     "STRING",
+    "lon":         "DOUBLE",
+    "lat":         "DOUBLE",
+    "elevation":   "NUMERIC",
+    "kind":        "STRING",
+    "var":         "STRING",
+    "source":      "STRING",
+    "scale":       "INTEGER",
+    "value":       "FLOAT",
+    "conf_interp": "NUMERIC",
+    "conf_flag":   "INTEGER",
+    "n_used":      "INTEGER",
+    "neff":        "NUMERIC",
+}
+
+SCHEMA_HYDRO: Dict[str, str] = {
+    "#":              "INTEGER",
+    "codigo":         "STRING",
+    "latitud":        "DOUBLE",
+    "longitud":       "DOUBLE",
+    "Indice":         "STRING",
+    "Escala":         "INTEGER",
+    "Umbral":         "FLOAT",
+    "Fecha_inicial":  "TIMESTAMP",
+    "Fecha_Final":    "TIMESTAMP",
+    "Duracion":       "INTEGER",
+    "Valor":          "FLOAT",
+}
+
+SCHEMA_PREDICTION: Dict[str, str] = {
+    **SCHEMA_HISTORICAL,
+    "q1":      "FLOAT",
+    "q3":      "FLOAT",
+    "iqr_min": "FLOAT",
+    "iqr_max": "FLOAT",
+}
+
+EXPECTED_SCHEMAS: Dict[str, Dict[str, str]] = {
+    "historical":   SCHEMA_HISTORICAL,
+    "hydrological": SCHEMA_HYDRO,
+    "prediction":   SCHEMA_PREDICTION,
+}
+
+
+# ---------------------------------------------------------------------------
+# Type family normalization: DuckDB type → abstract family
+# ---------------------------------------------------------------------------
+
+_TYPE_FAMILIES: Dict[str, str] = {}
+
+for _family, _variants in {
+    "STRING":    ["VARCHAR", "TEXT", "STRING", "CHAR", "BPCHAR", "NAME", "UUID"],
+    "INTEGER":   ["TINYINT", "SMALLINT", "INTEGER", "BIGINT", "HUGEINT",
+                  "UTINYINT", "USMALLINT", "UINTEGER", "UBIGINT",
+                  "INT8", "INT16", "INT32", "INT64", "INT128"],
+    "FLOAT":     ["FLOAT", "REAL", "FLOAT4"],
+    "DOUBLE":    ["DOUBLE", "FLOAT8"],
+    "NUMERIC":   ["DECIMAL", "NUMERIC"],
+    "TIMESTAMP": ["TIMESTAMP", "TIMESTAMP WITH TIME ZONE", "TIMESTAMPTZ",
+                  "TIMESTAMP_S", "TIMESTAMP_MS", "TIMESTAMP_NS"],
+    "BOOLEAN":   ["BOOLEAN", "BOOL"],
+    "DATE":      ["DATE"],
+    "BLOB":      ["BLOB", "BYTEA"],
+}.items():
+    for _v in _variants:
+        _TYPE_FAMILIES[_v.upper()] = _family
+
+# FLOAT / DOUBLE / NUMERIC are all acceptable for each other in lenient mode
+_NUMERIC_FAMILIES = {"FLOAT", "DOUBLE", "NUMERIC"}
+# INTEGER variants are interchangeable
+_INTEGER_FAMILIES = {"INTEGER"}
+# TIMESTAMP / DATE are close enough
+_TEMPORAL_FAMILIES = {"TIMESTAMP", "DATE"}
+
+
+def _normalize_duckdb_type(duckdb_type: str) -> str:
+    """Map a DuckDB column type string to an abstract type family."""
+    clean = duckdb_type.strip().upper()
+    base = clean.split("(")[0].strip()
+    return _TYPE_FAMILIES.get(base, clean)
+
+
+def _types_compatible(expected_family: str, actual_family: str) -> bool:
+    """Check if two type families are compatible (lenient)."""
+    if expected_family == actual_family:
+        return True
+    # All numeric types are interchangeable
+    if expected_family in _NUMERIC_FAMILIES | _INTEGER_FAMILIES and actual_family in _NUMERIC_FAMILIES | _INTEGER_FAMILIES:
+        return True
+    # FLOAT ↔ DOUBLE ↔ NUMERIC
+    if expected_family in _NUMERIC_FAMILIES and actual_family in _NUMERIC_FAMILIES:
+        return True
+    # TIMESTAMP ↔ DATE
+    if expected_family in _TEMPORAL_FAMILIES and actual_family in _TEMPORAL_FAMILIES:
+        return True
+    return False
+
+
+class SchemaValidationResult:
+    """Result of validating a parquet file's schema against the expected schema."""
+
+    def __init__(self):
+        self.is_valid: bool = True
+        self.missing_columns: List[str] = []
+        self.extra_columns: List[str] = []
+        self.type_mismatches: List[Dict[str, str]] = []
+
+    @property
+    def error_message(self) -> str:
+        parts = []
+        if self.missing_columns:
+            parts.append(
+                f"Columnas requeridas faltantes: {', '.join(sorted(self.missing_columns))}"
+            )
+        if self.type_mismatches:
+            mm = "; ".join(
+                f"{m['col']}: esperado {m['expected']}, encontrado {m['actual']}"
+                for m in self.type_mismatches
+            )
+            parts.append(f"Tipos incompatibles: {mm}")
+        return " | ".join(parts) if parts else "Schema valido"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "valid": self.is_valid,
+            "missing_columns": self.missing_columns,
+            "extra_columns": self.extra_columns,
+            "type_mismatches": self.type_mismatches,
+        }
+
+
+def validate_parquet_schema(
+    actual_schema: Dict[str, str],
+    dataset_type: str,
+) -> SchemaValidationResult:
+    """
+    Validate a parquet file's schema against the expected schema for a dataset_type.
+
+    Args:
+        actual_schema: {col_name: duckdb_type} from _duckdb_schema().
+        dataset_type: one of "historical", "hydrological", "prediction".
+
+    Returns:
+        SchemaValidationResult with is_valid, missing_columns, type_mismatches, etc.
+    """
+    expected = EXPECTED_SCHEMAS.get(dataset_type)
+    if expected is None:
+        return SchemaValidationResult()
+
+    result = SchemaValidationResult()
+
+    actual_names = set(actual_schema.keys())
+    expected_names = set(expected.keys())
+
+    # Missing columns → FAIL
+    result.missing_columns = sorted(expected_names - actual_names)
+    if result.missing_columns:
+        result.is_valid = False
+
+    # Extra columns → informational (not a failure)
+    result.extra_columns = sorted(actual_names - expected_names)
+
+    # Type mismatches on columns that exist in both → WARNING only
+    for col in sorted(expected_names & actual_names):
+        expected_family = expected[col]
+        actual_family = _normalize_duckdb_type(actual_schema[col])
+        if not _types_compatible(expected_family, actual_family):
+            result.type_mismatches.append({
+                "col": col,
+                "expected": expected_family,
+                "actual": f"{actual_family} (raw: {actual_schema[col]})",
+            })
+
+    return result
+
+
 def _parse_file_metadata(raw_metadata: Optional[str]) -> Dict[str, Any]:
     """Parse file metadata supporting JSON and legacy python-dict strings."""
     if not raw_metadata:

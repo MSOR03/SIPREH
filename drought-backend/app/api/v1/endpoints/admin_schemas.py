@@ -34,6 +34,10 @@ class DatasetAttachRequest(BaseModel):
     period_end: Optional[str] = None
     activate_now: bool = False
     extra_metadata: Dict[str, Any] = Field(default_factory=dict)
+    skip_schema_validation: bool = Field(
+        default=False,
+        description="Omitir validacion de schema del parquet. Usar solo en casos excepcionales.",
+    )
 
 
 class DatasetAttachResponse(BaseModel):
@@ -44,6 +48,7 @@ class DatasetAttachResponse(BaseModel):
     role: str
     status: str
     archived_previous_active: int = 0
+    schema_warnings: Optional[List[str]] = None
 
 
 class DatasetRolloverRequest(BaseModel):
@@ -93,6 +98,10 @@ class DatasetMergeAndRolloverRequest(BaseModel):
     period_start: Optional[str] = None
     period_end: Optional[str] = None
     archive_previous_snapshot: bool = True
+    skip_schema_validation: bool = Field(
+        default=False,
+        description="Omitir validacion de schema del delta mensual. Usar solo en casos excepcionales.",
+    )
 
 
 class DatasetMergeAndRolloverResponse(BaseModel):

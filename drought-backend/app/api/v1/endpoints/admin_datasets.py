@@ -28,6 +28,7 @@ from app.api.v1.endpoints.admin_schemas import (
 from app.api.v1.endpoints.admin_utils import (
     cloud_service,
     DATASET_CONFIG,
+    EXPECTED_SCHEMAS,
     _parse_file_metadata,
     _save_file_metadata,
     _archive_dataset_active_files,
@@ -35,8 +36,10 @@ from app.api.v1.endpoints.admin_utils import (
     _dataset_files,
     _sql_ident,
     _duckdb_columns,
+    _duckdb_schema,
     _choose_dedup_keys,
     _build_normalized_select,
+    validate_parquet_schema,
 )
 
 
@@ -92,6 +95,49 @@ def attach_file_to_dataset(
     if not file:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
+    # --- Schema validation ---
+    schema_warnings = None
+    if not payload.skip_schema_validation and file.cloud_key:
+        dataset_type = dataset_cfg["dataset_type"]
+        file_bytes = cloud_service.download_file(file.cloud_key)
+        if file_bytes is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="No se pudo descargar el archivo desde cloud para validar schema.",
+            )
+
+        with tempfile.TemporaryDirectory(prefix="drought_validate_") as tmpdir:
+            validate_path = os.path.join(tmpdir, "validate.parquet")
+            with open(validate_path, "wb") as vf:
+                vf.write(file_bytes)
+
+            conn = duckdb.connect(database=":memory:")
+            try:
+                actual_schema = _duckdb_schema(conn, validate_path)
+            finally:
+                conn.close()
+
+        validation = validate_parquet_schema(actual_schema, dataset_type)
+        if not validation.is_valid:
+            expected = EXPECTED_SCHEMAS.get(dataset_type, {})
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "message": (
+                        f"Schema del parquet no coincide con lo esperado "
+                        f"para dataset_type='{dataset_type}'."
+                    ),
+                    "validation": validation.to_dict(),
+                    "expected_columns": sorted(expected.keys()),
+                    "hint": "Si necesitas omitir esta validacion, usa skip_schema_validation=true.",
+                },
+            )
+        if validation.type_mismatches:
+            schema_warnings = [
+                f"{m['col']}: esperado {m['expected']}, encontrado {m['actual']}"
+                for m in validation.type_mismatches
+            ]
+
     metadata = _parse_file_metadata(file.file_metadata)
     metadata.update(payload.extra_metadata or {})
     metadata.update({
@@ -126,6 +172,7 @@ def attach_file_to_dataset(
         "role": payload.role,
         "status": file.status,
         "archived_previous_active": archived_count,
+        "schema_warnings": schema_warnings,
     }
 
 
@@ -386,6 +433,28 @@ def merge_and_rollover_dataset(
 
                 conn = duckdb.connect(database=':memory:')
                 try:
+                    # Validate monthly delta schema before merge
+                    if not payload.skip_schema_validation:
+                        monthly_schema = _duckdb_schema(conn, monthly_path)
+                        validation = validate_parquet_schema(
+                            monthly_schema, dataset_cfg["dataset_type"]
+                        )
+                        if not validation.is_valid:
+                            raise HTTPException(
+                                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                detail={
+                                    "message": (
+                                        f"Schema del delta mensual no coincide con "
+                                        f"lo esperado para '{payload.dataset_key}'."
+                                    ),
+                                    "validation": validation.to_dict(),
+                                    "expected_columns": sorted(
+                                        EXPECTED_SCHEMAS.get(dataset_cfg["dataset_type"], {}).keys()
+                                    ),
+                                    "hint": "Si necesitas omitir esta validacion, usa skip_schema_validation=true.",
+                                },
+                            )
+
                     updates_cols = _duckdb_columns(conn, updates_path)
                     monthly_cols = _duckdb_columns(conn, monthly_path)
                     common_cols = sorted(set(updates_cols).intersection(set(monthly_cols)))
@@ -554,6 +623,28 @@ def merge_and_rollover_dataset(
 
         conn = duckdb.connect(database=':memory:')
         try:
+            # Validate monthly delta schema before merge
+            if not payload.skip_schema_validation:
+                monthly_schema = _duckdb_schema(conn, monthly_path)
+                validation = validate_parquet_schema(
+                    monthly_schema, dataset_cfg["dataset_type"]
+                )
+                if not validation.is_valid:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail={
+                            "message": (
+                                f"Schema del delta mensual no coincide con "
+                                f"lo esperado para '{payload.dataset_key}'."
+                            ),
+                            "validation": validation.to_dict(),
+                            "expected_columns": sorted(
+                                EXPECTED_SCHEMAS.get(dataset_cfg["dataset_type"], {}).keys()
+                            ),
+                            "hint": "Si necesitas omitir esta validacion, usa skip_schema_validation=true.",
+                        },
+                    )
+
             # Inspect schema and choose best dedup keys.
             snapshot_cols = _duckdb_columns(conn, snapshot_path)
             monthly_cols = _duckdb_columns(conn, monthly_path)
