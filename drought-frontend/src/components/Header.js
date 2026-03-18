@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Moon, Sun, Droplets, Activity } from 'lucide-react';
+import { Moon, Sun, Activity } from 'lucide-react';
 import { useTheme } from '@/contexts/ThemeContext';
 
 export default function Header() {
@@ -26,16 +26,27 @@ export default function Header() {
           <div className="flex items-center gap-3">
             <div className="relative group">
               <div className="absolute inset-0 bg-blue-400/40 dark:bg-blue-500/40 rounded-xl blur-lg group-hover:blur-xl transition-all duration-300" />
-              <div className="relative w-11 h-11 bg-linear-to-br from-white to-blue-50 dark:from-white/10 dark:to-blue-900/20 backdrop-blur-md rounded-xl flex items-center justify-center shadow-xl border border-white/20 group-hover:scale-105 transition-transform duration-300">
-                <Droplets className="w-6 h-6 text-blue-600 dark:text-blue-400" strokeWidth={2.5} />
+              <div className="relative w-14 h-14 bg-linear-to-br from-white to-blue-50 dark:from-white/10 dark:to-blue-900/20 backdrop-blur-md rounded-xl flex items-center justify-center shadow-xl border border-white/20 group-hover:scale-105 transition-transform duration-300">
+              {mounted && (
+                theme === 'light' ? (
+                  <img src="/logos/Logo_Dashboard_Diurno.png" alt="Logo Dashboard Diurno" className="w-11 h-11 object-contain" />
+                ) : (
+                  <img src="/logos/Logo_Dashboard_Nocturno.png" alt="Logo Dashboard Nocturno" className="w-11 h-11 object-contain" />
+                )
+              )}
                 <div className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-lg" />
               </div>
             </div>
 
-            <div className="animate-slide-down">
-              <h1 className="text-lg font-bold text-white drop-shadow-lg leading-tight">
-                Plataforma de Monitoreo y Predicción de Sequías
+            <div className="container mx-auto px-6 py-6 relative"> {/* Cambió de py-5 a py-6 */}
+            <div>
+              <h1 className="text-sm sm:text-base md:text-lg lg:text-xl font-bold text-white drop-shadow-lg">
+                SIPREH
               </h1>
+              <p className="text-xs sm:text-sm text-blue-100 font-medium drop-shadow">
+                Sistema Integrado de Predicción y Monitoreo de Sequías Hidrológicas y Meteorológicas
+              </p>
+            </div>
               <p className="text-xs text-blue-50 dark:text-blue-200 flex items-center gap-1.5 mt-0.5">
                 <Activity className="w-2.5 h-2.5 animate-pulse" />
                 <span className="font-medium">Bogotá, Colombia</span>
