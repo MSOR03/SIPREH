@@ -14,6 +14,7 @@ PERFORMANCE:
 - Ephemeral storage: 10 GB en Railway, 3 GB en Fly.io
 """
 import duckdb
+import logging
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Any, Optional, Tuple
@@ -601,7 +602,10 @@ class HistoricalDataService(TimeseriesMixin, SpatialMixin):
             self.cache.set(cache_key, result, expire=86400)
             return result
             
-        except Exception:
+        except Exception as e:
+            logging.getLogger("historical").warning(
+                f"_detect_parquet_format failed for {parquet_url}: {e}"
+            )
             return {'format': 'wide', 'date_column': 'date', 'columns': []}
     
     
@@ -620,21 +624,25 @@ class HistoricalDataService(TimeseriesMixin, SpatialMixin):
             conn = self._get_connection()
             source = self._resolve_parquet_source(parquet_url)
 
+            # Detectar columna de fecha real del parquet
+            fmt = self._detect_parquet_format(parquet_url, source_expr=source['source_expr'])
+            date_col = fmt.get('date_column', 'date')
+
             query = f"""
             SELECT
-                MIN(date) as min_date,
-                MAX(date) as max_date
+                MIN({date_col}) as min_date,
+                MAX({date_col}) as max_date
             FROM {source['source_expr']}
             """
-            
+
             result = conn.execute(query).fetchone()
             date_range = (result[0], result[1])
-            
+
             # Cache por 24 horas
             self.cache.set(cache_key, date_range, expire=86400)
-            
+
             return date_range
-            
+
         except Exception as e:
             raise Exception(f"Error obteniendo rango de fechas: {str(e)}")
     
@@ -681,6 +689,7 @@ class HistoricalDataService(TimeseriesMixin, SpatialMixin):
         """
         Obtiene los cell_ids unicos de un archivo parquet.
         Soporta multi-archivo (parquet_url con '|').
+        Si el parquet no tiene columna cell_id, la computa desde lon/lat.
         """
         cache_key = f"unique_cells:{hashlib.md5(parquet_url.encode()).hexdigest()}"
 
@@ -692,19 +701,36 @@ class HistoricalDataService(TimeseriesMixin, SpatialMixin):
             conn = self._get_connection()
             source = self._resolve_parquet_source(parquet_url)
 
-            query = f"""
-            SELECT DISTINCT cell_id
-            FROM {source['source_expr']}
-            ORDER BY cell_id
-            """
-            
+            # Detectar formato para saber las columnas reales
+            fmt = self._detect_parquet_format(parquet_url, source_expr=source['source_expr'])
+            columns = fmt.get('columns', [])
+
+            if 'cell_id' in columns:
+                query = f"""
+                SELECT DISTINCT cell_id
+                FROM {source['source_expr']}
+                ORDER BY cell_id
+                """
+            elif 'lon' in columns and 'lat' in columns:
+                query = f"""
+                SELECT DISTINCT
+                    CAST(PRINTF('%.6f', lon) || '_' || PRINTF('%.6f', lat) AS VARCHAR) as cell_id
+                FROM {source['source_expr']}
+                ORDER BY cell_id
+                """
+            else:
+                raise Exception(
+                    f"El parquet no tiene columnas cell_id ni lon/lat. "
+                    f"Columnas disponibles: {columns}"
+                )
+
             result = conn.execute(query).fetchall()
             cells = [row[0] for row in result]
-            
+
             # Cache por 24 horas (las celdas son fijas, no cambian)
             self.cache.set(cache_key, cells, expire=86400)
-            
+
             return cells
-            
+
         except Exception as e:
             raise Exception(f"Error obteniendo celdas únicas: {str(e)}")

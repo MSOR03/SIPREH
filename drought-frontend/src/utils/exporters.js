@@ -305,12 +305,26 @@ async function loadStudyAreaBoundary() {
 }
 
 function projectToMap(lon, lat, bounds, frame) {
-  const lonRange = bounds.maxLon - bounds.minLon || 1;
-  const latRange = bounds.maxLat - bounds.minLat || 1;
+const lonRange = bounds.maxLon - bounds.minLon || 1;
+const latRange = bounds.maxLat - bounds.minLat || 1;
 
-  const x = frame.x + frame.pad + ((lon - bounds.minLon) / lonRange) * (frame.w - frame.pad * 2);
-  const y = frame.y + frame.pad + (1 - (lat - bounds.minLat) / latRange) * (frame.h - frame.pad * 2);
-  return { x, y };
+const innerW = frame.w - frame.pad * 2;
+const innerH = frame.h - frame.pad * 2;
+
+const scaleX = innerW / lonRange;
+const scaleY = innerH / latRange;
+const scale = Math.min(scaleX, scaleY);
+
+const drawW = lonRange * scale;
+const drawH = latRange * scale;
+
+const offsetX = frame.x + frame.pad + (innerW - drawW) / 2;
+const offsetY = frame.y + frame.pad + (innerH - drawH) / 2;
+
+const x = offsetX + (lon - bounds.minLon) * scale;
+const y = offsetY + (bounds.maxLat - lat) * scale;
+
+return { x, y };
 }
 
 function lonToTileX(lon, zoom) {
@@ -460,7 +474,6 @@ function drawBasemapBackdrop(ctx, frame) {
   }
   ctx.restore();
 
-  ctx.restore();
 }
 
 function drawGraticule(ctx, bounds, frame) {
@@ -620,15 +633,17 @@ async function draw2DMap(ctx, plotData) {
   const boundaryLats = boundaryCoords.map((c) => c[1]);
 
   const bounds = {
-    minLon: Math.min(minLon, ...(boundaryLons.length ? boundaryLons : [minLon])),
-    maxLon: Math.max(maxLon, ...(boundaryLons.length ? boundaryLons : [maxLon])),
-    minLat: Math.min(minLat, ...(boundaryLats.length ? boundaryLats : [minLat])),
-    maxLat: Math.max(maxLat, ...(boundaryLats.length ? boundaryLats : [maxLat])),
+  minLon: Math.min(minLon, ...(boundaryLons.length ? boundaryLons : [minLon])),
+  maxLon: Math.max(maxLon, ...(boundaryLons.length ? boundaryLons : [maxLon])),
+  minLat: Math.min(minLat, ...(boundaryLats.length ? boundaryLats : [minLat])),
+  maxLat: Math.max(maxLat, ...(boundaryLats.length ? boundaryLats : [maxLat])),
   };
+
+
 
   const hasRealBasemap = await drawLeafletBasemapTiles(ctx, bounds, frame);
   if (!hasRealBasemap) {
-    drawBasemapBackdrop(ctx, frame);
+  drawBasemapBackdrop(ctx, frame);
   }
 
   drawGraticule(ctx, bounds, frame);
@@ -642,9 +657,12 @@ async function draw2DMap(ctx, plotData) {
   const lonStep = inferStep(uniqueLons, Number(plotData?.resolution) || lonRange / 20 || 0.1);
   const latStep = inferStep(uniqueLats, Number(plotData?.resolution) || latRange / 20 || 0.1);
 
-  const cellWidth = Math.max(5, ((lonStep / lonRange) * (mapW - 56)) * 0.92);
-  const cellHeight = Math.max(5, ((latStep / latRange) * (mapH - 56)) * 0.92);
+  const base = projectToMap(bounds.minLon, bounds.minLat, bounds, frame);
+  const stepLon = projectToMap(bounds.minLon + lonStep, bounds.minLat, bounds, frame);
+  const stepLat = projectToMap(bounds.minLon, bounds.minLat + latStep, bounds, frame);
 
+  const cellWidth = Math.max(5, Math.abs(stepLon.x - base.x) * 0.92);
+  const cellHeight = Math.max(5, Math.abs(stepLat.y - base.y) * 0.92);
   // Render as filled cells to resemble the true gridded map export.
   ctx.save();
   ctx.globalAlpha = 0.58;
