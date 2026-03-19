@@ -127,11 +127,24 @@ SCHEMA_HYDRO: Dict[str, str] = {
 }
 
 SCHEMA_PREDICTION: Dict[str, str] = {
-    **SCHEMA_HISTORICAL,
-    "q1":      "FLOAT",
-    "q3":      "FLOAT",
-    "iqr_min": "FLOAT",
-    "iqr_max": "FLOAT",
+    "ds":          "INTEGER",
+    "freq":        "STRING",
+    "date":        "TIMESTAMP",
+    "cell_id":     "STRING",
+    "lon":         "DOUBLE",
+    "lat":         "DOUBLE",
+    "var":         "STRING",
+    "scale":       "INTEGER",
+    "value":       "FLOAT",
+    "conf_interp": "INTEGER",
+    "conf_flag":   "INTEGER",
+    "n_used":      "INTEGER",
+    "neff":        "INTEGER",
+    "q1":          "FLOAT",
+    "q3":          "FLOAT",
+    "iqr_min":     "FLOAT",
+    "iqr_max":     "FLOAT",
+    "horizon":     "INTEGER",
 }
 
 EXPECTED_SCHEMAS: Dict[str, Dict[str, str]] = {

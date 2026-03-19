@@ -1,14 +1,16 @@
 'use client';
 
 import { memo, useState, useCallback, useMemo } from 'react';
-import { RotateCcw, Download, MapPin, ChevronLeft, ChevronRight, Home, Layers, Grid3x3, Navigation, Droplets, Database, Map as MapIcon } from 'lucide-react';
+import { RotateCcw, Download, Sparkles, MapPin, ChevronLeft, ChevronRight, Home, Layers, Grid3x3, Navigation, Droplets, Database, Map as MapIcon } from 'lucide-react';
 import Button from './ui/Button';
 import { useTheme } from '@/contexts/ThemeContext';
 import dynamic from 'next/dynamic';
 const TimeSeriesChart = dynamic(() => import('./TimeSeriesChart'), { ssr: false });
+const PredictionTimeSeriesChart = dynamic(() => import('./PredictionTimeSeriesChart'), { ssr: false });
 const DroughtEventTimeline = dynamic(() => import('./DroughtEventTimeline'), { ssr: false });
+const AiSummaryModal = dynamic(() => import('./AiSummaryModal'), { ssr: false });
 import { useGridNavigation } from '../hooks/useGridNavigation';
-import { formatLevelLabel } from '../utils/gridLevels';
+import { formatLevelLabel, parseCellIds } from '../utils/gridLevels';
 
 // Dynamic import for Leaflet to avoid SSR issues
 const LeafletMap = dynamic(
@@ -26,12 +28,17 @@ const LeafletMap = dynamic(
   }
 );
 
-export default function MapArea({ 
-  plotData, 
-  onReset, 
+export default function MapArea({
+  plotData,
+  onReset,
   onSaveData,
   onExportImage,
-  selectedStation, 
+  onAiSummary,
+  aiSummary,
+  setAiSummary,
+  predictionOpen,
+  predictionCells,
+  selectedStation,
   selectedCell,
   onStationSelect,
   onCellSelect,
@@ -55,6 +62,16 @@ export default function MapArea({
   // Usar el hook de navegación jerárquica
   const gridNav = useGridNavigation('LOW');
   const [layerMenuOpen, setLayerMenuOpen] = useState(false);
+
+  // When prediction section is open and cells are loaded, override grid with prediction CHIRPS cells
+  const predictionGridCells = useMemo(() => {
+    if (!predictionOpen || !predictionCells?.cells?.length) return null;
+    return parseCellIds(predictionCells.cells, predictionCells.resolution || 0.05);
+  }, [predictionOpen, predictionCells]);
+
+  // Decide which cells to show on the map: prediction cells or historical grid cells
+  const effectiveGridCells = predictionGridCells || gridNav.gridCells;
+  const effectiveLevel = predictionGridCells ? 'HIGH' : gridNav.currentLevel;
 
   const toggleLayer = useCallback((key) => {
     setMapLayers(prev => ({ ...prev, [key]: !prev[key] }));
@@ -81,6 +98,12 @@ export default function MapArea({
   }, [onCellSelect, onStationSelect]);
 
   const handleGridCellDoubleClick = useCallback((cell) => {
+    // When prediction cells are shown, double-click just selects (no drill-down)
+    if (predictionGridCells) {
+      onCellSelect(cell);
+      onStationSelect(null);
+      return;
+    }
     const didDrill = gridNav.handleCellClick(cell, 'double');
     if (didDrill) {
       onCellSelect(null);
@@ -89,7 +112,7 @@ export default function MapArea({
       onCellSelect(cell);
       onStationSelect(null);
     }
-  }, [gridNav, onCellSelect, onStationSelect]);
+  }, [predictionGridCells, gridNav, onCellSelect, onStationSelect]);
 
   const handleDrillUp = useCallback(() => {
     const success = gridNav.drillUp();
@@ -123,10 +146,10 @@ export default function MapArea({
               <div className="flex items-center gap-2 px-3 py-1 bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-900/30 dark:to-blue-800/30 rounded-lg border border-blue-200 dark:border-blue-700">
                 <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Nivel:</span>
                 <span className="text-sm font-bold text-blue-700 dark:text-blue-300">
-                  {formatLevelLabel(gridNav.currentLevel)}
+                  {predictionGridCells ? 'CHIRPS (Prediccion)' : formatLevelLabel(gridNav.currentLevel)}
                 </span>
                 <span className="text-xs text-gray-500 dark:text-gray-400">
-                  ({gridNav.gridCells.length} celdas)
+                  ({effectiveGridCells.length} celdas)
                 </span>
               </div>
 
@@ -262,11 +285,11 @@ export default function MapArea({
             onCellDoubleClick={handleGridCellDoubleClick}
             onCellMouseOver={gridNav.handleCellMouseOver}
             onCellMouseOut={gridNav.handleCellMouseOut}
-            gridCells={gridNav.gridCells}
-            currentLevel={gridNav.currentLevel}
+            gridCells={effectiveGridCells}
+            currentLevel={effectiveLevel}
             hoveredCell={gridNav.hoveredCell}
-            spatialDataCells={plotData?.type === '2D' ? plotData.gridCells : null}
-            spatialResolution={plotData?.type === '2D' ? (plotData.resolution || 0.05) : 0.05}
+            spatialDataCells={(plotData?.type === '2D' || plotData?.type === 'prediction-2d') ? plotData.gridCells : null}
+            spatialResolution={(plotData?.type === '2D' || plotData?.type === 'prediction-2d') ? (plotData.resolution || 0.05) : 0.05}
             showGrid={mapLayers?.grid ?? true}
             showStations={mapLayers?.stations ?? true}
             showBoundary={mapLayers?.boundary ?? true}
@@ -349,6 +372,17 @@ export default function MapArea({
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                {/* AI Summary button - only for predictions */}
+                {(plotData.type === 'prediction-1d' || plotData.type === 'prediction-2d') && (
+                  <Button
+                    variant="secondary"
+                    className="shadow-lg hover:shadow-xl bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border-green-300 dark:border-green-700 text-green-700 dark:text-green-300 hover:from-green-100 hover:to-emerald-100 dark:hover:from-green-900/30 dark:hover:to-emerald-900/30"
+                    onClick={onAiSummary}
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    Resumen IA
+                  </Button>
+                )}
                 <Button
                   variant="secondary"
                   className="shadow-lg hover:shadow-xl"
@@ -369,7 +403,95 @@ export default function MapArea({
             </div>
             
             {/* Chart area: show time series when available or 2D spatial info */}
-            {plotData.type === '2D' && plotData.gridCells ? (
+            {/* Prediction 2D: spatial grid */}
+            {plotData.type === 'prediction-2d' && plotData.gridCells ? (
+              <div className="relative">
+                {plotData.subtitle && (
+                  <div className="mb-4 px-4 py-2 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
+                    <p className="text-sm text-green-700 dark:text-green-300 font-medium">
+                      {plotData.subtitle}
+                    </p>
+                  </div>
+                )}
+                {plotData.statistics && (
+                  <div className="mb-4 grid grid-cols-6 gap-3">
+                    <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Media</p>
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.mean?.toFixed(2) || 'N/A'}</p>
+                    </div>
+                    <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Min</p>
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.min?.toFixed(2) || 'N/A'}</p>
+                    </div>
+                    <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Max</p>
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.max?.toFixed(2) || 'N/A'}</p>
+                    </div>
+                    <div className="px-3 py-2 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-700">
+                      <p className="text-xs text-red-500 dark:text-red-400">% Severo</p>
+                      <p className="text-sm font-bold text-red-700 dark:text-red-300">{plotData.statistics.pct_severe?.toFixed(1) || '0'}%</p>
+                    </div>
+                    <div className="px-3 py-2 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-700">
+                      <p className="text-xs text-amber-500 dark:text-amber-400">% Moderado</p>
+                      <p className="text-sm font-bold text-amber-700 dark:text-amber-300">{plotData.statistics.pct_moderate?.toFixed(1) || '0'}%</p>
+                    </div>
+                    <div className="px-3 py-2 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-700">
+                      <p className="text-xs text-green-500 dark:text-green-400">% Normal</p>
+                      <p className="text-sm font-bold text-green-700 dark:text-green-300">{plotData.statistics.pct_normal?.toFixed(1) || '0'}%</p>
+                    </div>
+                  </div>
+                )}
+                <div className="bg-white dark:bg-gray-900/50 rounded-xl p-6 shadow-inner">
+                  <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
+                    Prediccion Espacial 2D
+                  </h4>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 mb-4">
+                    Las 297 celdas CHIRPS muestran la prediccion de <strong>{plotData.variable}</strong> para el horizonte seleccionado.
+                    Los colores representan las categorias de sequia.
+                  </p>
+                  {hasCategorizedCells && <DroughtLegend gridCells={plotData.gridCells} />}
+                </div>
+              </div>
+            ) : plotData.type === 'prediction-1d' && plotData.data ? (
+              /* Prediction 1D: time series with IQR bands */
+              <div className="relative">
+                {plotData.subtitle && (
+                  <div className="mb-4 px-4 py-2 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
+                    <p className="text-sm text-green-700 dark:text-green-300 font-medium">
+                      {plotData.subtitle}
+                    </p>
+                  </div>
+                )}
+                {plotData.statistics && (
+                  <div className="mb-4 grid grid-cols-4 gap-3">
+                    <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Media</p>
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.mean?.toFixed(2) || 'N/A'}</p>
+                    </div>
+                    <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Minimo</p>
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.min?.toFixed(2) || 'N/A'}</p>
+                    </div>
+                    <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Maximo</p>
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.max?.toFixed(2) || 'N/A'}</p>
+                    </div>
+                    <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Horizontes</p>
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.data.length}</p>
+                    </div>
+                  </div>
+                )}
+                <div className="bg-white dark:bg-gray-900/50 rounded-xl p-4 shadow-inner">
+                  <PredictionTimeSeriesChart
+                    data={plotData.data}
+                    title={plotData.title}
+                    yLabel={plotData.variable || 'Valor'}
+                    height={340}
+                  />
+                </div>
+              </div>
+            ) : plotData.type === '2D' && plotData.gridCells ? (
               <div className="relative">
                 {plotData.subtitle && (
                   <div className="mb-4 px-4 py-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
@@ -500,6 +622,18 @@ Los colores representan {isDroughtIndex ? 'las categorías de sequía' : 'los va
             )}
           </div>
         </div>
+      )}
+
+      {/* AI Summary Modal */}
+      {aiSummary && (
+        <AiSummaryModal
+          open={aiSummary.open}
+          onClose={() => setAiSummary(prev => ({ ...prev, open: false }))}
+          loading={aiSummary.loading}
+          summary={aiSummary.summary}
+          index={aiSummary.index}
+          type={aiSummary.type}
+        />
       )}
     </main>
   );

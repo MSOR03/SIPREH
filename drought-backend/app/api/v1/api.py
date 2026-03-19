@@ -2,7 +2,7 @@
 API v1 router configuration.
 """
 from fastapi import APIRouter
-from app.api.v1.endpoints import auth, dashboard, dashboard_v2, admin, parquet, drought, historical, hydro
+from app.api.v1.endpoints import auth, dashboard, dashboard_v2, admin, parquet, drought, historical, hydro, prediction
 
 
 api_router = APIRouter()
@@ -61,4 +61,11 @@ api_router.include_router(
     hydro.router,
     prefix="/hydro",
     tags=["hydrological-stations"]
+)
+
+# Prediction endpoints (DuckDB queries on prediction parquet)
+api_router.include_router(
+    prediction.router,
+    prefix="/prediction",
+    tags=["prediction"]
 )
