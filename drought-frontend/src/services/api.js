@@ -437,6 +437,57 @@ export const hydroApi = {
 };
 
 /**
+ * Prediction Data API
+ */
+export const predictionApi = {
+  // Celdas unicas del parquet de prediccion (297 CHIRPS cells)
+  getCells: async (fileId) => {
+    return fetchApi(`/prediction/cells/${fileId}`);
+  },
+
+  // Serie temporal 1D por celda (12 horizontes)
+  getTimeSeries: async ({ fileId, cellId, var: varName, scale }) => {
+    return fetchApi('/prediction/timeseries', {
+      method: 'POST',
+      body: JSON.stringify({
+        parquet_file_id: fileId,
+        cell_id: cellId,
+        var: varName,
+        scale: scale,
+      }),
+    });
+  },
+
+  // Datos espaciales 2D (297 celdas)
+  getSpatialData: async ({ fileId, var: varName, scale, horizon }) => {
+    return fetchApi('/prediction/spatial', {
+      method: 'POST',
+      body: JSON.stringify({
+        parquet_file_id: fileId,
+        var: varName,
+        scale: scale,
+        horizon: horizon,
+      }),
+    });
+  },
+
+  // Resumen IA
+  getAiSummary: async ({ type, index, scale, values, gridSummary, horizon }) => {
+    return fetchApi('/prediction/ai-summary', {
+      method: 'POST',
+      body: JSON.stringify({
+        type: type,
+        index: index,
+        scale: scale,
+        values: values || null,
+        grid_summary: gridSummary || null,
+        horizon: horizon || null,
+      }),
+    });
+  },
+};
+
+/**
  * Helper functions
  */
 export const apiHelpers = {

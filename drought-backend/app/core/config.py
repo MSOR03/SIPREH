@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     # Cache Settings (Redis - optional, falls back to memory cache)
     REDIS_URL: Optional[str] = None  # e.g., "redis://localhost:6379/0"
     CACHE_DEFAULT_EXPIRE: int = 900  # 15 minutes
+
+    # AI Summary Settings (Groq API for Llama 3.1-8b-instant)
+    GROQ_API_KEY: Optional[str] = None
     
     class Config:
         env_file = ".env"
