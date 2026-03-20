@@ -42,6 +42,7 @@ export default function MapArea({
   selectedCell,
   onStationSelect,
   onCellSelect,
+  onSpatialCellClick,
   mapLayers,
   setMapLayers,
 }) {
@@ -96,6 +97,10 @@ export default function MapArea({
     onCellSelect(cell);
     onStationSelect(null);
   }, [onCellSelect, onStationSelect]);
+
+  const handleSpatialCellClick = useCallback((cell) => {
+    onSpatialCellClick?.(cell);
+  }, [onSpatialCellClick]);
 
   const handleGridCellDoubleClick = useCallback((cell) => {
     // When prediction cells are shown, double-click just selects (no drill-down)
@@ -290,6 +295,7 @@ export default function MapArea({
             hoveredCell={gridNav.hoveredCell}
             spatialDataCells={(plotData?.type === '2D' || plotData?.type === 'prediction-2d') ? plotData.gridCells : null}
             spatialResolution={(plotData?.type === '2D' || plotData?.type === 'prediction-2d') ? (plotData.resolution || 0.05) : 0.05}
+            onSpatialCellClick={handleSpatialCellClick}
             showGrid={mapLayers?.grid ?? true}
             showStations={mapLayers?.stations ?? true}
             showBoundary={mapLayers?.boundary ?? true}
@@ -448,6 +454,7 @@ export default function MapArea({
                   <p className="text-xs text-gray-600 dark:text-gray-400 mb-4">
                     Las 297 celdas CHIRPS muestran la prediccion de <strong>{plotData.variable}</strong> para el horizonte seleccionado.
                     Los colores representan las categorias de sequia.
+                    <span className="text-green-600 dark:text-green-400 font-medium"> Haz click en una celda para ver el detalle 1D.</span>
                   </p>
                   {hasCategorizedCells && <DroughtLegend gridCells={plotData.gridCells} />}
                 </div>
@@ -533,6 +540,7 @@ export default function MapArea({
                   <p className="text-xs text-gray-600 dark:text-gray-400 mb-4">
                     Las celdas en el mapa muestran los valores de <strong>{plotData.variable}</strong> para la fecha seleccionada.
 Los colores representan {isDroughtIndex ? 'las categorías de sequía' : 'los valores de la variable'}.
+                    <span className="text-blue-600 dark:text-blue-400 font-medium"> Haz click en una celda para ver el detalle 1D.</span>
                   </p>
                   
 {/* Leyenda de colores para índices de sequía — dinámica desde datos del backend */}

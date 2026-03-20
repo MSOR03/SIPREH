@@ -634,6 +634,210 @@ export default function Home() {
     console.log('Map and selections reset');
   }, []);
 
+  // Handle Spatial Cell Click from 2D view -> auto-query 1D detail
+  const handleSpatialCellClick = useCallback(async (cell) => {
+    if (!plotData) return;
+
+    try {
+      const { historicalApi, hydroApi, predictionApi } = await import('@/services/api');
+
+      // === Prediction 2D -> Prediction 1D ===
+      if (plotData.type === 'prediction-2d') {
+        const cellId = cell.cell_id || `${Number(cell.lon).toFixed(6)}_${Number(cell.lat).toFixed(6)}`;
+        const index = plotData.predictionMeta?.index || predictionState.droughtIndex;
+        const scale = plotData.predictionMeta?.scale || predictionState.scale;
+
+        // Use cached prediction file ID
+        let predFileId = predictionCells?.fileId;
+        if (!predFileId) {
+          const files = await historicalApi.getFiles();
+          const predFile = files.find(f => f.dataset_type === 'prediction');
+          if (!predFile) { showError('No se encontro archivo de prediccion', 'Error'); return; }
+          predFileId = predFile.file_id;
+        }
+
+        showInfo(`Consultando prediccion 1D para celda ${cellId}...`, 'Cargando');
+
+        const response = await predictionApi.getTimeSeries({
+          fileId: predFileId,
+          cellId: cellId,
+          var: index,
+          scale: scale,
+        });
+
+        // Update selected cell visually
+        const halfRes = 0.05 / 2;
+        setSelectedCell({
+          id: cellId,
+          cell_id: cellId,
+          center: [cell.lat, cell.lon],
+          bounds: [[cell.lat - halfRes, cell.lon - halfRes], [cell.lat + halfRes, cell.lon + halfRes]],
+          resolution: 0.05,
+          lat: cell.lat,
+          lon: cell.lon,
+        });
+        setSelectedStation(null);
+
+        // Switch prediction sidebar to 1D mode
+        setPredictionState(prev => ({ ...prev, visualizationType: '1D' }));
+
+        setPlotData({
+          type: 'prediction-1d',
+          title: `Prediccion ${index} (${scale}m)`,
+          subtitle: `Celda: ${cellId} | 12 horizontes`,
+          variable: index,
+          data: response.data,
+          statistics: response.statistics,
+          predictionMeta: { index, scale, cellId },
+        });
+
+        showSuccess(`Prediccion 1D generada para celda ${cellId}`, '!Listo!');
+        return;
+      }
+
+      // === Historical 2D (hydro stations) -> Historical 1D ===
+      if (plotData.type === '2D' && plotData.isHydro && cell.codigo) {
+        const { INDICES_WITHOUT_SCALE } = await import('@/utils/hydroStations');
+        const stationCode = cell.codigo;
+        const stationName = cell.station_name || cell.codigo;
+        const index = analysisState.droughtIndex;
+        if (!index) { showWarning('No hay indice de sequia seleccionado', 'Error'); return; }
+
+        const files = await historicalApi.getFiles();
+        const hydroFile = files.find(f => (f.filename || '').toLowerCase().includes('hydro'));
+        if (!hydroFile) { showError('No se encontro archivo hidrologico', 'Error'); return; }
+
+        const noScale = INDICES_WITHOUT_SCALE.has(index);
+        const scale = noScale ? null : (analysisState.indexScale || 1);
+
+        showInfo(`Consultando serie 1D para estacion ${stationName}...`, 'Cargando');
+
+        const response = await hydroApi.getTimeSeries({
+          fileId: hydroFile.file_id,
+          stationCode: stationCode,
+          indexName: index,
+          scale: scale,
+          startDate: analysisState.startDate,
+          endDate: analysisState.endDate,
+        });
+
+        // Find the station object for selection
+        const { HYDRO_STATIONS } = await import('@/utils/hydroStations');
+        const stationObj = HYDRO_STATIONS.find(s => String(s.codigo) === String(stationCode));
+        if (stationObj) {
+          setSelectedStation({
+            id: stationObj.codigo,
+            codigo: stationObj.codigo,
+            position: [stationObj.lat, stationObj.lon],
+            name: stationObj.name,
+            area: `Código: ${stationObj.codigo}`,
+            type: 'secundaria',
+          });
+          setSelectedCell(null);
+        }
+
+        // Switch to 1D mode
+        setAnalysisState(prev => ({ ...prev, visualizationType: '1D' }));
+
+        const scaleLabel = noScale ? '' : ` (Escala ${scale})`;
+
+        let chartData = response.data;
+        if (response.has_duration && response.data?.length > 0) {
+          const expanded = [];
+          for (const evt of response.data) {
+            if (evt.fecha_final && evt.fecha_final !== 'None' && evt.fecha_final !== 'NaT') {
+              expanded.push({ ...evt, date: evt.date });
+              expanded.push({ ...evt, date: evt.fecha_final });
+              const gapDate = new Date(new Date(evt.fecha_final).getTime() + 86400000);
+              expanded.push({ date: gapDate.toISOString().split('T')[0], value: null });
+            } else {
+              expanded.push(evt);
+            }
+          }
+          chartData = expanded;
+        }
+
+        setPlotData({
+          type: '1D',
+          title: `${response.index_display_name}${scaleLabel}`,
+          subtitle: `Estación: ${stationCode} - ${stationName}`,
+          variable: response.index_name,
+          variable_name: response.index_display_name,
+          unit: response.unit,
+          data: chartData,
+          rawData: response.data,
+          statistics: response.statistics,
+          location: response.station,
+          hasDuration: response.has_duration,
+        });
+
+        showSuccess(`Serie 1D generada para estacion ${stationName}`, '!Listo!');
+        return;
+      }
+
+      // === Historical 2D (meteorological grid) -> Historical 1D ===
+      if (plotData.type === '2D' && !plotData.isHydro) {
+        const cellId = cell.cell_id || `${Number(cell.lon).toFixed(6)}_${Number(cell.lat).toFixed(6)}`;
+        const variable = analysisState.droughtIndex || analysisState.variable;
+        if (!variable) { showWarning('No hay variable seleccionada', 'Error'); return; }
+
+        const resolution = plotData.resolution || 0.05;
+        const files = await historicalApi.getFiles();
+        const historicalOnly = files.filter(f => !f.dataset_type || f.dataset_type === 'historical');
+        const file = historicalOnly.find(f => Math.abs((f.resolution || 0.1) - resolution) < 0.01);
+        if (!file) { showError(`No se encontro archivo para resolucion ${resolution}°`, 'Error'); return; }
+
+        showInfo(`Consultando serie 1D para celda ${cellId}...`, 'Cargando');
+
+        const response = await historicalApi.getTimeSeries({
+          fileId: file.file_id,
+          variable: variable,
+          startDate: analysisState.startDate,
+          endDate: analysisState.endDate,
+          cellId: cellId,
+          scale: analysisState.droughtIndex ? analysisState.indexScale : null,
+          frequency: !analysisState.droughtIndex ? analysisState.frequency : null,
+        });
+
+        // Update selected cell visually
+        const halfRes = resolution / 2;
+        setSelectedCell({
+          id: cellId,
+          cell_id: cellId,
+          center: [cell.lat, cell.lon],
+          bounds: [[cell.lat - halfRes, cell.lon - halfRes], [cell.lat + halfRes, cell.lon + halfRes]],
+          resolution: resolution,
+          lat: cell.lat,
+          lon: cell.lon,
+        });
+        setSelectedStation(null);
+
+        // Switch to 1D mode
+        setAnalysisState(prev => ({ ...prev, visualizationType: '1D' }));
+
+        const freqLabel = response.frequency === 'M' ? 'Mensual' : 'Diaria';
+        setPlotData({
+          type: '1D',
+          title: `${response.variable_name} - Serie de Tiempo`,
+          subtitle: `Celda: ${cellId} | Frecuencia: ${freqLabel}`,
+          variable: String(response.variable || variable || '').trim().toUpperCase(),
+          unit: response.unit,
+          frequency: response.frequency,
+          data: response.data,
+          statistics: response.statistics,
+          location: response.location,
+        });
+
+        showSuccess(`Serie 1D generada para celda ${cellId}`, '!Listo!');
+        return;
+      }
+
+    } catch (error) {
+      console.error('Error in spatial cell click -> 1D:', error);
+      showError(error.message || 'Error al consultar datos 1D', 'Error');
+    }
+  }, [plotData, predictionState, predictionCells, analysisState, showError, showWarning, showInfo, showSuccess]);
+
   return (
     <div className="flex flex-col h-screen bg-gradient-to-br from-blue-50/30 via-blue-50/20 to-blue-50/20 dark:from-[#0f1419] dark:via-[#0a0e13] dark:to-[#0f1419] p-4">
       <Header />
@@ -669,6 +873,7 @@ export default function Home() {
           selectedCell={selectedCell}
           onStationSelect={setSelectedStation}
           onCellSelect={setSelectedCell}
+          onSpatialCellClick={handleSpatialCellClick}
           mapLayers={mapLayers}
           setMapLayers={setMapLayers}
         />
