@@ -29,6 +29,7 @@ export default function LeafletMap({
   onCellMouseOut,
   spatialDataCells = null, // Datos espaciales 2D para visualización
   spatialResolution = 0.05, // Resolución de las celdas espaciales
+  onSpatialCellClick,       // Callback when a 2D spatial cell is clicked (cell data)
   theme = 'light', // Tema para tiles del mapa
   showGrid = true,       // Visibilidad de celdas del grid
   showStations = true,   // Visibilidad de estaciones
@@ -45,6 +46,7 @@ export default function LeafletMap({
   const tileLayerRef = useRef(null);         // Referencia al tile layer para swap dark/light
   const canvasRendererRef = useRef(null);    // Renderer canvas compartido — 1 <canvas> en vez de miles de SVG
   const spatialTooltipRef = useRef(null);    // Tooltip compartido para celdas 2D
+  const onSpatialCellClickRef = useRef(onSpatialCellClick);
   const onStationSelectRef = useRef(onStationSelect);
   const onGridCellClickRef = useRef(onGridCellClick);
   const onCellDoubleClickRef = useRef(onCellDoubleClick);
@@ -63,6 +65,10 @@ export default function LeafletMap({
   useEffect(() => {
     onStationSelectRef.current = onStationSelect;
   }, [onStationSelect]);
+
+  useEffect(() => {
+    onSpatialCellClickRef.current = onSpatialCellClick;
+  }, [onSpatialCellClick]);
 
   useEffect(() => {
     onGridCellClickRef.current = onGridCellClick;
@@ -311,10 +317,10 @@ export default function LeafletMap({
 
           marker.bindPopup(`
             <div style="font-size:13px;min-width:180px;">
-              <div style="font-weight:bold;color:#1f2937;margin-bottom:4px;">${station.name}</div>
-              <div style="color:#6b7280;font-size:12px;">${station.area}</div>
-              <div style="margin-top:8px;padding-top:8px;border-top:1px solid #e5e7eb;">
-                <button onclick="window.__selectStation('${station.id}')" style="background:#2563eb;color:white;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:12px;width:100%;">
+              <div class="station-popup-name">${station.name}</div>
+              <div class="station-popup-code">${station.area}</div>
+              <div class="station-popup-divider">
+                <button onclick="window.__selectStation('${station.id}')" class="station-popup-btn">
                   Seleccionar estación
                 </button>
               </div>
@@ -353,6 +359,29 @@ export default function LeafletMap({
           const style = document.createElement('style');
           style.id = 'leaflet-pulse-style';
           style.textContent = `@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }`;
+          document.head.appendChild(style);
+        }
+
+        // Station popup CSS — light & dark mode
+        if (!document.getElementById('leaflet-popup-theme-style')) {
+          const style = document.createElement('style');
+          style.id = 'leaflet-popup-theme-style';
+          style.textContent = `
+            .station-popup-name { font-weight: bold; color: #1f2937; margin-bottom: 4px; }
+            .station-popup-code { color: #6b7280; font-size: 12px; }
+            .station-popup-divider { margin-top: 8px; padding-top: 8px; border-top: 1px solid #e5e7eb; }
+            .station-popup-btn { background: #2563eb; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; width: 100%; }
+            .station-popup-btn:hover { background: #1d4ed8; }
+
+            .dark .leaflet-popup-content-wrapper { background: #1f2937; color: #f9fafb; border: 1px solid #374151; box-shadow: 0 3px 14px rgba(0,0,0,0.6); }
+            .dark .leaflet-popup-tip { background: #1f2937; }
+            .dark .leaflet-popup-close-button { color: #9ca3af; }
+            .dark .leaflet-popup-close-button:hover { color: #f9fafb; }
+            .dark .station-popup-name { color: #f9fafb; !important; }
+            .dark .station-popup-code { color: #9ca3af; !important }
+            .dark .station-popup-divider { border-top-color: #374151; }
+          
+          `;
           document.head.appendChild(style);
         }
 
@@ -567,6 +596,11 @@ export default function LeafletMap({
               iconAnchor: [(size + 6) / 2, (size + 6) / 2],
             }));
             rect.unbindTooltip();
+            // Restore original station-select click handler
+            rect.off('click');
+            rect.on('click', () => {
+              onStationSelectRef.current?.(entry.station);
+            });
           }
         } else {
           rect.remove();
@@ -639,6 +673,12 @@ export default function LeafletMap({
 
             // Guardar referencia para restaurar cuando se limpien datos espaciales
             spatialCellsRef.current.push({ rect: entry.marker, cell, isStationOverride: true });
+
+            // Click on colored station to view 1D detail
+            entry.marker.off('click'); // remove previous station-select handler
+            entry.marker.on('click', () => {
+              onSpatialCellClickRef.current?.(cell);
+            });
           }
 
           if (cell.lat < minLat) minLat = cell.lat;
@@ -677,6 +717,7 @@ export default function LeafletMap({
           '<div style="font-size:12px;line-height:1.4">' +
           'Valor: <b>' + (!isNaN(cellValue) && cellValue !== null ? cellValue.toFixed(3) : 'N/A') + '</b><br/>' +
           (cell.category ? ('Categoría: ' + cell.category) : 'Categoría: N/A') +
+          '<br/><span style="font-size:10px;color:#6b7280">Click para detalle 1D</span>' +
           '</div>'
           );
           sharedTooltip.setLatLng(e.latlng);
@@ -687,6 +728,11 @@ export default function LeafletMap({
           if (mapRef.current && mapRef.current.hasLayer(sharedTooltip)) {
             sharedTooltip.removeFrom(mapRef.current);
           }
+        });
+
+        // Click to select this spatial cell for 1D detail
+        rect.on('click', () => {
+          onSpatialCellClickRef.current?.(cell);
         });
 
         spatialCellsRef.current.push({ rect, cell });
