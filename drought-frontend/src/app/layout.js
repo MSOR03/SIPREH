@@ -10,7 +10,7 @@ const inter = Inter({
 });
 
 export const metadata = {
-  title: "Plataforma de Monitoreo y Predicción de Sequías - Bogotá",
+  title: "SIPREH",
   description: "Sistema de monitoreo y predicción de sequías para Bogotá. Análisis histórico de variables hidrometeorológicas e índices de sequía.",
   keywords: "sequía, Bogotá, monitoreo, predicción, hidrometeorología, índices de sequía",
 };
