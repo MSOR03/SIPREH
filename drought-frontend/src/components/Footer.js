@@ -42,7 +42,7 @@ export default function Footer() {
           {/* Nav links */}
           <div className="flex items-center gap-8 text-sm animate-fade-in">
             {[
-              { icon: FileText, label: 'Condiciones de Uso', href: '#' },
+              { icon: FileText, label: 'Condiciones de Uso', href: '/condiciones-de-uso' },
               { icon: Users,    label: 'Créditos',           href: '#' },
               { icon: Book,     label: 'Documentación',      href: '#' },
               { icon: Shield,   label: 'Admin',              href: '/admin' },
