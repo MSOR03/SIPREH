@@ -407,9 +407,8 @@ export default function MapArea({
                 </Button>
               </div>
             </div>
-            
+
             {/* Chart area: show time series when available or 2D spatial info */}
-            {/* Prediction 2D: spatial grid */}
             {plotData.type === 'prediction-2d' && plotData.gridCells ? (
               <div className="relative">
                 {plotData.subtitle && (
@@ -507,7 +506,7 @@ export default function MapArea({
                     </p>
                   </div>
                 )}
-                
+
                 {/* Statistics summary */}
                 {plotData.statistics && (
                   <div className="mb-4 grid grid-cols-5 gap-3">
@@ -533,18 +532,18 @@ export default function MapArea({
                     </div>
                   </div>
                 )}
+
                 <div className="bg-white dark:bg-gray-900/50 rounded-xl p-6 shadow-inner">
                   <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
                     Visualización Espacial 2D
                   </h4>
                   <p className="text-xs text-gray-600 dark:text-gray-400 mb-4">
                     Las celdas en el mapa muestran los valores de <strong>{plotData.variable}</strong> para la fecha seleccionada.
-Los colores representan {isDroughtIndex ? 'las categorías de sequía' : 'los valores de la variable'}.
+                    Los colores representan {isDroughtIndex ? 'las categorías de sequía' : 'los valores de la variable'}.
                     <span className="text-blue-600 dark:text-blue-400 font-medium"> Haz click en una celda para ver el detalle 1D.</span>
                   </p>
-                  
-{/* Leyenda de colores para índices de sequía — dinámica desde datos del backend */}
-{isDroughtIndex && hasCategorizedCells && <DroughtLegend gridCells={plotData.gridCells} />}
+                  {/* Leyenda de colores para índices de sequía — dinámica desde datos del backend */}
+                  {isDroughtIndex && hasCategorizedCells && <DroughtLegend gridCells={plotData.gridCells} />}
                 </div>
               </div>
             ) : (plotData.type === 'Serie de Tiempo' || plotData.type === '1D') && plotData.data ? (
@@ -556,7 +555,7 @@ Los colores representan {isDroughtIndex ? 'las categorías de sequía' : 'los va
                     </p>
                   </div>
                 )}
-                
+
                 {/* Statistics summary */}
                 {plotData.statistics && (
                   <div className="mb-4 grid grid-cols-4 gap-3">
@@ -578,7 +577,7 @@ Los colores representan {isDroughtIndex ? 'las categorías de sequía' : 'los va
                     </div>
                   </div>
                 )}
-                
+
                 <div className="bg-white dark:bg-gray-900/50 rounded-xl p-4 shadow-inner">
                   <TimeSeriesChart
                     data={plotData.data}
@@ -588,7 +587,7 @@ Los colores representan {isDroughtIndex ? 'las categorías de sequía' : 'los va
                     stroke="#2563eb"
                     fill="#2563eb22"
                     type="area"
-                    yLabel={plotData.unit || "Valor"}
+                    yLabel={plotData.unit || 'Valor'}
                     title={plotData.variable_name || plotData.title}
                   />
                 </div>
@@ -600,12 +599,11 @@ Los colores representan {isDroughtIndex ? 'las categorías de sequía' : 'los va
               </div>
             ) : (
               <div className="relative h-80 bg-gradient-to-br from-blue-50/30 via-blue-50/20 to-blue-50/30 dark:from-[#1a1f2e] dark:via-[#141920] dark:to-blue-950/20 rounded-2xl flex items-center justify-center border-2 border-dashed border-gray-300 dark:border-gray-600 shadow-inner overflow-hidden">
-                {/* Animated background */}
                 <div className="absolute inset-0 opacity-10">
                   <div className="absolute top-0 left-0 w-40 h-40 bg-blue-500 rounded-full blur-3xl animate-pulse"></div>
                   <div className="absolute bottom-0 right-0 w-40 h-40 bg-purple-500 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }}></div>
                 </div>
-                
+
                 <div className="text-center text-gray-500 dark:text-gray-400 relative z-10">
                   <div className="relative inline-block">
                     <div className="absolute inset-0 bg-blue-500/20 rounded-full blur-2xl"></div>
@@ -628,20 +626,20 @@ Los colores representan {isDroughtIndex ? 'las categorías de sequía' : 'los va
                 </div>
               </div>
             )}
+
+            {/* AI Summary Modal */}
+            {aiSummary && (
+              <AiSummaryModal
+                open={aiSummary.open}
+                onClose={() => setAiSummary(prev => ({ ...prev, open: false }))}
+                loading={aiSummary.loading}
+                summary={aiSummary.summary}
+                index={aiSummary.index}
+                type={aiSummary.type}
+              />
+            )}
           </div>
         </div>
-      )}
-
-      {/* AI Summary Modal */}
-      {aiSummary && (
-        <AiSummaryModal
-          open={aiSummary.open}
-          onClose={() => setAiSummary(prev => ({ ...prev, open: false }))}
-          loading={aiSummary.loading}
-          summary={aiSummary.summary}
-          index={aiSummary.index}
-          type={aiSummary.type}
-        />
       )}
     </main>
   );
