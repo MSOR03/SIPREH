@@ -332,174 +332,167 @@ export default function MapArea({
         </div>
       </div>
 
-      {/* Plot/Chart Area (will show when data is available) */}
-      {plotData && (
-        <div className="bg-gradient-to-r from-white to-blue-50/50 dark:from-[#141920] dark:to-blue-950/20 border-t border-gray-200 dark:border-gray-700 shadow-2xl backdrop-blur-sm">
-          <div className="p-8 space-y-6 animate-slide-down">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-gradient-to-br from-purple-500 to-purple-600 rounded-lg shadow-lg">
-                  <BarChart3 className="w-6 h-6 text-white" />
-                </div>
-                <div>
-                  <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100">
-                    {plotData.title}
-                  </h3>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Análisis de datos</p>
-                </div>
+{/* Plot/Chart Area (will show when data is available) */}
+{plotData && (
+  <div className="bg-gradient-to-r from-white to-blue-50/50 dark:from-[#141920] dark:to-blue-950/20 border-t border-gray-200 dark:border-gray-700 shadow-2xl backdrop-blur-sm">
+    <div className="p-8 space-y-6 animate-slide-down">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-gradient-to-br from-purple-500 to-purple-600 rounded-lg shadow-lg">
+            <BarChart3 className="w-6 h-6 text-white" />
+          </div>
+          <div>
+            <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100">
+              {plotData.title}
+            </h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Análisis de datos</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            className="shadow-lg hover:shadow-xl"
+            onClick={onSaveData}
+          >
+            <Download className="w-4 h-4" />
+            Guardar JSON
+          </Button>
+          <Button
+            variant="secondary"
+            className="shadow-lg hover:shadow-xl"
+            onClick={onExportImage}
+          >
+            <Download className="w-4 h-4" />
+            Exportar Imagen
+          </Button>
+        </div>
+      </div>
+
+      {(plotData.type === '2D' && plotData.gridCells) ? (
+        <div className="relative">
+
+
+          {/* Statistics summary */}
+          {plotData.statistics && (
+            <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+              <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                <p className="text-xs text-gray-500 dark:text-gray-400">Media</p>
+                <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.mean?.toFixed(2) || 'N/A'}</p>
               </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="secondary"
-                  className="shadow-lg hover:shadow-xl"
-                  onClick={onSaveData}
-                >
-                  <Download className="w-4 h-4" />
-                  Guardar JSON
-                </Button>
-                <Button
-                  variant="secondary"
-                  className="shadow-lg hover:shadow-xl"
-                  onClick={onExportImage}
-                >
-                  <Download className="w-4 h-4" />
-                  Exportar Imagen
-                </Button>
+              <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                <p className="text-xs text-gray-500 dark:text-gray-400">Mínimo</p>
+                <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.min?.toFixed(2) || 'N/A'}</p>
+              </div>
+              <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                <p className="text-xs text-gray-500 dark:text-gray-400">Máximo</p>
+                <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.max?.toFixed(2) || 'N/A'}</p>
+              </div>
+              <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                <p className="text-xs text-gray-500 dark:text-gray-400">Celdas</p>
+                <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.gridCells.length}</p>
+              </div>
+              <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                <p className="text-xs text-gray-500 dark:text-gray-400">Datos válidos</p>
+                <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.count || 'N/A'}</p>
               </div>
             </div>
-            
-            {/* Chart area: show time series when available or 2D spatial info */}
-            {plotData.type === '2D' && plotData.gridCells ? (
-              <div className="relative">
-                {plotData.subtitle && (
-                  <div className="mb-4 px-4 py-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
-                    <p className="text-sm text-blue-700 dark:text-blue-300 font-medium">
-                      {plotData.subtitle}
-                    </p>
-                  </div>
-                )}
-                
-                {/* Statistics summary */}
-                {plotData.statistics && (
-                  <div className="mb-4 grid grid-cols-5 gap-3">
-                    <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
-                      <p className="text-xs text-gray-500 dark:text-gray-400">Media</p>
-                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.mean?.toFixed(2) || 'N/A'}</p>
-                    </div>
-                    <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
-                      <p className="text-xs text-gray-500 dark:text-gray-400">Mínimo</p>
-                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.min?.toFixed(2) || 'N/A'}</p>
-                    </div>
-                    <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
-                      <p className="text-xs text-gray-500 dark:text-gray-400">Máximo</p>
-                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.max?.toFixed(2) || 'N/A'}</p>
-                    </div>
-                    <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
-                      <p className="text-xs text-gray-500 dark:text-gray-400">Celdas</p>
-                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.gridCells.length}</p>
-                    </div>
-                    <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
-                      <p className="text-xs text-gray-500 dark:text-gray-400">Datos válidos</p>
-                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.count || 'N/A'}</p>
-                    </div>
-                  </div>
-                )}
-                <div className="bg-white dark:bg-gray-900/50 rounded-xl p-6 shadow-inner">
-                  <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
-                    Visualización Espacial 2D
-                  </h4>
-                  <p className="text-xs text-gray-600 dark:text-gray-400 mb-4">
-                    Las celdas en el mapa muestran los valores de <strong>{plotData.variable}</strong> para la fecha seleccionada.
-Los colores representan {isDroughtIndex ? 'las categorías de sequía' : 'los valores de la variable'}.
-                  </p>
-                  
-{/* Leyenda de colores para índices de sequía — dinámica desde datos del backend */}
-{isDroughtIndex && hasCategorizedCells && <DroughtLegend gridCells={plotData.gridCells} />}
-                </div>
-              </div>
-            ) : (plotData.type === 'Serie de Tiempo' || plotData.type === '1D') && plotData.data ? (
-              <div className="relative">
-                {plotData.subtitle && (
-                  <div className="mb-4 px-4 py-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
-                    <p className="text-sm text-blue-700 dark:text-blue-300 font-medium">
-                      {plotData.subtitle}
-                    </p>
-                  </div>
-                )}
-                
-                {/* Statistics summary */}
-                {plotData.statistics && (
-                  <div className="mb-4 grid grid-cols-4 gap-3">
-                    <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
-                      <p className="text-xs text-gray-500 dark:text-gray-400">Media</p>
-                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.mean?.toFixed(2) || 'N/A'}</p>
-                    </div>
-                    <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
-                      <p className="text-xs text-gray-500 dark:text-gray-400">Mínimo</p>
-                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.min?.toFixed(2) || 'N/A'}</p>
-                    </div>
-                    <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
-                      <p className="text-xs text-gray-500 dark:text-gray-400">Máximo</p>
-                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.max?.toFixed(2) || 'N/A'}</p>
-                    </div>
-                    <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
-                      <p className="text-xs text-gray-500 dark:text-gray-400">Registros</p>
-                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.count || 'N/A'}</p>
-                    </div>
-                  </div>
-                )}
-                
-                <div className="bg-white dark:bg-gray-900/50 rounded-xl p-4 shadow-inner">
-                  <TimeSeriesChart
-                    data={plotData.data}
-                    xKey="date"
-                    dataKey="value"
-                    height={320}
-                    stroke="#2563eb"
-                    fill="#2563eb22"
-                    type="area"
-                    yLabel={plotData.unit || "Valor"}
-                    title={plotData.variable_name || plotData.title}
-                  />
-                </div>
+          )}
 
-                {/* Timeline de eventos de sequía con duración */}
-                {plotData.hasDuration && (plotData.rawData || plotData.data) && (
-                  <DroughtEventTimeline data={plotData.rawData || plotData.data} />
-                )}
+          <div className="bg-white dark:bg-gray-900/50 rounded-xl p-6 shadow-inner">
+            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
+              Visualización Espacial 2D
+            </h4>
+            <p className="text-xs text-gray-600 dark:text-gray-400 mb-4">
+              Las celdas en el mapa muestran los valores de <strong>{plotData.variable}</strong> para la fecha seleccionada.
+              Los colores representan {isDroughtIndex ? 'las categorías de sequía' : 'los valores de la variable'}.
+            </p>
+
+            {/* Leyenda de colores para índices de sequía - dinámica desde backend */}
+            {isDroughtIndex && hasCategorizedCells && <DroughtLegend gridCells={plotData.gridCells} />}
+          </div>
+        </div>
+      ) : (plotData.type === 'Serie de Tiempo' || plotData.type === '1D') && plotData.data ? (
+        <div className="relative">
+          {plotData.subtitle && (
+            <div className="mb-4 px-4 py-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+              <p className="text-sm text-blue-700 dark:text-blue-300 font-medium">
+                {plotData.subtitle}
+              </p>
+            </div>
+          )}
+
+          {/* Statistics summary */}
+          {plotData.statistics && (
+            <div className="mb-4 grid grid-cols-4 gap-3">
+              <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                <p className="text-xs text-gray-500 dark:text-gray-400">Media</p>
+                <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.mean?.toFixed(2) || 'N/A'}</p>
               </div>
-            ) : (
-              <div className="relative h-80 bg-gradient-to-br from-blue-50/30 via-blue-50/20 to-blue-50/30 dark:from-[#1a1f2e] dark:via-[#141920] dark:to-blue-950/20 rounded-2xl flex items-center justify-center border-2 border-dashed border-gray-300 dark:border-gray-600 shadow-inner overflow-hidden">
-                {/* Animated background */}
-                <div className="absolute inset-0 opacity-10">
-                  <div className="absolute top-0 left-0 w-40 h-40 bg-blue-500 rounded-full blur-3xl animate-pulse"></div>
-                  <div className="absolute bottom-0 right-0 w-40 h-40 bg-purple-500 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }}></div>
-                </div>
-                
-                <div className="text-center text-gray-500 dark:text-gray-400 relative z-10">
-                  <div className="relative inline-block">
-                    <div className="absolute inset-0 bg-blue-500/20 rounded-full blur-2xl"></div>
-                    <BarChart3 className="relative w-20 h-20 mx-auto mb-4 text-blue-600 dark:text-blue-400" strokeWidth={1.5} />
-                  </div>
-                  <p className="font-bold text-xl text-gray-900 dark:text-gray-100">Gráfico: {plotData.type}</p>
-                  <p className="text-sm mt-3 max-w-md mx-auto text-gray-600 dark:text-gray-400">Los datos se visualizarán aquí una vez conectado al backend</p>
-                  {selectedStation && (
-                    <div className="inline-flex items-center gap-2 mt-4 px-4 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full text-sm font-medium shadow-md">
-                      <span className="inline-block w-2 h-2 bg-blue-600 dark:bg-blue-400 rounded-full animate-pulse"></span>
-                      Mostrando datos para: {selectedStation.name}
-                    </div>
-                  )}
-                  {selectedCell && (
-                    <div className="inline-flex items-center gap-2 mt-2 px-4 py-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-sm font-medium shadow-md">
-                      <span className="inline-block w-2 h-2 bg-green-600 dark:bg-green-400 rounded-full animate-pulse"></span>
-                      Celda: {selectedCell.center[0].toFixed(3)}, {selectedCell.center[1].toFixed(3)}
-                    </div>
-                  )}
-                </div>
+              <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                <p className="text-xs text-gray-500 dark:text-gray-400">Mínimo</p>
+                <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.min?.toFixed(2) || 'N/A'}</p>
+              </div>
+              <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                <p className="text-xs text-gray-500 dark:text-gray-400">Máximo</p>
+                <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.max?.toFixed(2) || 'N/A'}</p>
+              </div>
+              <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                <p className="text-xs text-gray-500 dark:text-gray-400">Registros</p>
+                <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.count || 'N/A'}</p>
+              </div>
+            </div>
+          )}
+
+          <div className="bg-white dark:bg-gray-900/50 rounded-xl p-4 shadow-inner">
+            <TimeSeriesChart
+              data={plotData.data}
+              xKey="date"
+              dataKey="value"
+              height={320}
+              stroke="#2563eb"
+              fill="#2563eb22"
+              type="area"
+              yLabel={plotData.unit || 'Valor'}
+              title={plotData.variable_name || plotData.title}
+            />
+          </div>
+
+          {/* Timeline de eventos de sequía con duración */}
+          {plotData.hasDuration && (plotData.rawData || plotData.data) && (
+            <DroughtEventTimeline data={plotData.rawData || plotData.data} />
+          )}
+        </div>
+      ) : (
+        <div className="relative h-80 bg-gradient-to-br from-blue-50/30 via-blue-50/20 to-blue-50/30 dark:from-[#1a1f2e] dark:via-[#141920] dark:to-blue-950/20 rounded-2xl flex items-center justify-center border-2 border-dashed border-gray-300 dark:border-gray-600 shadow-inner overflow-hidden">
+          <div className="absolute inset-0 opacity-10">
+            <div className="absolute top-0 left-0 w-40 h-40 bg-blue-500 rounded-full blur-3xl animate-pulse"></div>
+            <div className="absolute bottom-0 right-0 w-40 h-40 bg-purple-500 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }}></div>
+          </div>
+
+          <div className="text-center text-gray-500 dark:text-gray-400 relative z-10">
+            <div className="relative inline-block">
+              <div className="absolute inset-0 bg-blue-500/20 rounded-full blur-2xl"></div>
+              <BarChart3 className="relative w-20 h-20 mx-auto mb-4 text-blue-600 dark:text-blue-400" strokeWidth={1.5} />
+            </div>
+            <p className="font-bold text-xl text-gray-900 dark:text-gray-100">Gráfico: {plotData.type}</p>
+            <p className="text-sm mt-3 max-w-md mx-auto text-gray-600 dark:text-gray-400">Los datos se visualizarán aquí una vez conectado al backend</p>
+            {selectedStation && (
+              <div className="inline-flex items-center gap-2 mt-4 px-4 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full text-sm font-medium shadow-md">
+                <span className="inline-block w-2 h-2 bg-blue-600 dark:bg-blue-400 rounded-full animate-pulse"></span>
+                Mostrando datos para: {selectedStation.name}
+              </div>
+            )}
+            {selectedCell && (
+              <div className="inline-flex items-center gap-2 mt-2 px-4 py-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-sm font-medium shadow-md">
+                <span className="inline-block w-2 h-2 bg-green-600 dark:bg-green-400 rounded-full animate-pulse"></span>
+                Celda: {selectedCell.center[0].toFixed(3)}, {selectedCell.center[1].toFixed(3)}
               </div>
             )}
           </div>
         </div>
+      )}
+    </div>
+  </div>
       )}
     </main>
   );

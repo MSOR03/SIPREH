@@ -1,5 +1,5 @@
-const DEFAULT_IMAGE_WIDTH = 1400;
-const DEFAULT_IMAGE_HEIGHT = 900;
+const DEFAULT_IMAGE_WIDTH = 1800;
+const DEFAULT_IMAGE_HEIGHT = 1100;
 const LEAFLET_BASEMAP_TILE_URL = 'https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png';
 
 function sanitizeFilename(value) {
@@ -103,26 +103,44 @@ function build2DJson({ plotData, analysisState }) {
   };
 }
 
-export function downloadAnalysisJson({ plotData, analysisState, selectedCell }) {
-  if (!plotData) {
-    throw new Error('No hay datos de analisis para guardar.');
+export async function downloadAnalysisImage({ plotData, analysisState }) {
+  const canvas = document.createElement('canvas');
+  canvas.width = DEFAULT_IMAGE_WIDTH;
+  canvas.height = DEFAULT_IMAGE_HEIGHT;
+  const ctx = canvas.getContext('2d');
+
+  ctx.save();
+ctx.globalAlpha = 1.0;
+ctx.fillStyle = '#fff';
+ctx.fillRect(0, 0, canvas.width, canvas.height);
+ctx.restore();
+
+  // Dibuja el contenido según el tipo de datos
+  if (plotData.type === '2D') {
+    // Dibuja el mapa 2D completo
+    await draw2DMap(ctx, plotData, analysisState);
+  } else {
+    // Dibuja el encabezado y el gráfico 1D
+    drawHeader(ctx, plotData);
+    draw1DChart(ctx, plotData);
   }
 
-  const is2D = plotData.type === '2D';
-  const payload = is2D
-    ? build2DJson({ plotData, analysisState })
-    : build1DJson({ plotData, analysisState, selectedCell });
-
-  const fileBase = sanitizeFilename(`${payload.tipo}_${resolveSelectedVariable(plotData, analysisState)}_${new Date().toISOString().slice(0, 10)}`);
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
-  triggerFileDownload(blob, `${fileBase}.json`);
-
-  return {
-    fileName: `${fileBase}.json`,
-    rows: payload.datos.length,
-    type: payload.tipo,
-  };
+  // Convierte el canvas a blob PNG y descarga
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => {
+      const fileName = 'export.png';
+      triggerFileDownload(blob, fileName);
+      resolve({
+        fileName,
+        rows: plotData.type === '2D'
+          ? (Array.isArray(plotData?.gridCells) ? plotData.gridCells.length : 0)
+          : (Array.isArray(plotData?.data) ? plotData.data.length : 0),
+        type: 'image',
+      });
+    }, 'image/png');
+  });
 }
+
 
 function drawCard(ctx, x, y, w, h, radius = 12) {
   ctx.beginPath();
@@ -141,19 +159,118 @@ function drawCard(ctx, x, y, w, h, radius = 12) {
 }
 
 function drawHeader(ctx, plotData) {
+  if (plotData?.type === '2D') {
+    return;
+  }
+
   ctx.fillStyle = '#0f172a';
   ctx.font = 'bold 34px Arial';
   ctx.fillText(plotData?.title || 'Exportacion de grafico', 56, 68);
+} // <-- Cierra aquí la función
 
-  const subtitleParts = [];
-  if (plotData?.variable) subtitleParts.push(`Variable: ${plotData.variable}`);
-  if (plotData?.type) subtitleParts.push(`Modo: ${plotData.type}`);
-  if (plotData?.unit) subtitleParts.push(`Unidad: ${plotData.unit}`);
+// Ahora define draw2DInstitutionalPanel fuera
+async function draw2DInstitutionalPanel(ctx, plotData)  {
+  const x = 56;
+  const y = 8;
+  const w = DEFAULT_IMAGE_WIDTH - 112;
+  const h = 96;
 
-  ctx.fillStyle = '#475569';
-  ctx.font = '20px Arial';
-  ctx.fillText(subtitleParts.join(' | '), 56, 102);
+  const grad = ctx.createLinearGradient(x, y, x + w, y + h);
+  grad.addColorStop(0, '#1d4ed8');
+  grad.addColorStop(0.55, '#1e40af');
+  grad.addColorStop(1, '#1e3a8a');
+
+  ctx.save();
+  ctx.fillStyle = grad;
+  ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+  drawCard(ctx, x, y, w, h, 14);
+
+  const primaryLogo = '/logos/Logo_Dashboard_Diurno.png';
+  const entityLogos = ['/logos/entidad1.png', '/logos/entidad2.png', '/logos/entidad3.png'];
+
+  // Área grande para el logo a la izquierda
+  const logoAreaX = x + 6; // pequeño margen izquierdo
+  const logoAreaY = y + 8;
+  const logoAreaW = Math.floor(w * 0.33);
+  const logoAreaH = h - 16;
+
+  // Variables para textos
+  const textX = logoAreaX + logoAreaW + 16;
+  const textMaxW = w - (logoAreaW + 32 + 180);
+
+  // --- Cargar el logo y calcular el área exacta ---
+  let mainW = 0, mainH = 0, mainX = 0, mainY = 0;
+  try {
+    const mainImg = await loadImage(primaryLogo);
+    const fit = Math.min((logoAreaW - 16) / mainImg.width, (logoAreaH - 16) / mainImg.height);
+    mainW = mainImg.width * fit;
+    mainH = mainImg.height * fit;
+    mainX = logoAreaX + (logoAreaW - mainW) / 2;
+    mainY = logoAreaY + (logoAreaH - mainH) / 2;
+    // Dibuja el recuadro blanco ajustado al logo (+margen)
+    const margin = 12;
+    ctx.fillStyle = 'rgba(255,255,255,0.96)';
+    ctx.strokeStyle = 'rgba(15,23,42,0.14)';
+    drawCard(ctx, logoAreaX, mainY - margin, mainW + margin * 2, mainH + margin * 2, 10);
+    ctx.drawImage(mainImg, logoAreaX + margin, mainY, mainW, mainH);
+
+    // Calcula el borde derecho del fondo blanco
+    const logoRight = logoAreaX + margin + mainW + margin;
+    const textX = logoRight + 12; // 12px de espacio extra
+
+    // Ahora el texto nunca se sobrepone al logo
+    ctx.fillStyle = '#dbeafe';
+    ctx.font = 'bold 44px Arial';
+    ctx.fillText('SIPREH', textX, y + 44, textMaxW);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 20px Arial';
+    ctx.fillText('Sistema Integrado de Prediccion y Monitoreo de Sequias', textX, y + 65, textMaxW);
+
+    ctx.fillStyle = '#dbeafe';
+    ctx.font = 'bold 16px Arial';
+    ctx.fillText('Bogota, Colombia', textX, y + 85, textMaxW);
+
+  } catch (e) {
+    // Manejo de error si el logo principal no carga
+  }
+
+  // --- Logos de entidades alineados a la derecha, ocupando el alto disponible ---
+  const logoGap = 16;
+  const logoMaxHeight = h - 24; // Alto máximo disponible para los logos (ajusta el margen si lo deseas)
+
+  // Carga y escala los logos
+  let loadedEntityLogos = await Promise.all(entityLogos.map(async (src) => {
+    try {
+      const img = await loadImage(src);
+      const scale = logoMaxHeight / img.height;
+      return {
+        img,
+        width: img.width * scale,
+        height: logoMaxHeight,
+      };
+    } catch {
+      return null;
+    }
+  }));
+
+  loadedEntityLogos = loadedEntityLogos.filter(Boolean);
+
+  // Calcula el ancho total ocupado por los logos y los gaps
+  const totalLogosWidth = loadedEntityLogos.reduce((sum, logo) => sum + logo.width, 0) + logoGap * (loadedEntityLogos.length - 1);
+  const iconsStartX = x + w - 12 - totalLogosWidth; // margen derecho de 12px
+  const iconsY = y + (h - logoMaxHeight) / 2;
+
+  // Dibuja los logos alineados a la derecha, ocupando el alto disponible y manteniendo su proporción
+  let iconX = iconsStartX;
+  for (const logo of loadedEntityLogos) {
+    ctx.drawImage(logo.img, iconX, iconsY, logo.width, logo.height);
+    iconX += logo.width + logoGap;
+  }
+
+  ctx.restore();
 }
+
 
 function draw1DChart(ctx, plotData) {
   const rows = Array.isArray(plotData?.data) ? plotData.data : [];
@@ -305,6 +422,28 @@ async function loadStudyAreaBoundary() {
 }
 
 function projectToMap(lon, lat, bounds, frame) {
+  const lonRange = bounds.maxLon - bounds.minLon || 1;
+  const latRange = bounds.maxLat - bounds.minLat || 1;
+
+  const innerW = frame.w - frame.pad * 2;
+  const innerH = frame.h - frame.pad * 2;
+
+  const scaleX = innerW / lonRange;
+  const scaleY = innerH / latRange;
+  const scale = Math.min(scaleX, scaleY);
+
+  const drawW = lonRange * scale;
+  const drawH = latRange * scale;
+
+  const offsetX = frame.x + frame.pad + (innerW - drawW) / 2;
+  const offsetY = frame.y + frame.pad + (innerH - drawH) / 2;
+
+  return {
+    x: offsetX + (lon - bounds.minLon) * scale,
+    y: offsetY + (bounds.maxLat - lat) * scale,
+  };
+}
+function projectToMapCover(lon, lat, bounds, frame) {
 const lonRange = bounds.maxLon - bounds.minLon || 1;
 const latRange = bounds.maxLat - bounds.minLat || 1;
 
@@ -313,7 +452,7 @@ const innerH = frame.h - frame.pad * 2;
 
 const scaleX = innerW / lonRange;
 const scaleY = innerH / latRange;
-const scale = Math.min(scaleX, scaleY);
+const scale = Math.max(scaleX, scaleY);
 
 const drawW = lonRange * scale;
 const drawH = latRange * scale;
@@ -321,10 +460,10 @@ const drawH = latRange * scale;
 const offsetX = frame.x + frame.pad + (innerW - drawW) / 2;
 const offsetY = frame.y + frame.pad + (innerH - drawH) / 2;
 
-const x = offsetX + (lon - bounds.minLon) * scale;
-const y = offsetY + (bounds.maxLat - lat) * scale;
-
-return { x, y };
+return {
+x: offsetX + (lon - bounds.minLon) * scale,
+y: offsetY + (bounds.maxLat - lat) * scale,
+};
 }
 
 function lonToTileX(lon, zoom) {
@@ -425,8 +564,8 @@ async function drawLeafletBasemapTiles(ctx, bounds, frame) {
     const latTop = tileYToLat(y, z);
     const latBottom = tileYToLat(y + 1, z);
 
-    const pTL = projectToMap(lonLeft, latTop, bounds, frame);
-    const pBR = projectToMap(lonRight, latBottom, bounds, frame);
+    const pTL = projectToMapCover(lonLeft, latTop, bounds, frame);
+    const pBR = projectToMapCover(lonRight, latBottom, bounds, frame);
 
     const drawX = Math.min(pTL.x, pBR.x);
     const drawY = Math.min(pTL.y, pBR.y);
@@ -442,22 +581,30 @@ async function drawLeafletBasemapTiles(ctx, bounds, frame) {
   return true;
 }
 
-function drawBasemapBackdrop(ctx, frame) {
-  const gradient = ctx.createLinearGradient(frame.x, frame.y, frame.x + frame.w, frame.y + frame.h);
+function drawBasemapBackdrop(ctx, frame, bounds) {
+  const insetX = 0;  // margen horizontal interno (ajusta este valor)
+  const insetY = 0;  // margen vertical interno
+
+  const x = frame.x + insetX;
+  const y = frame.y + insetY;
+  const w = Math.max(0, frame.w - insetX * 2);
+  const h = Math.max(0, frame.h - insetY * 2);
+
+  const gradient = ctx.createLinearGradient(x, y, x + w, y + h);
   gradient.addColorStop(0, '#eef4f2');
   gradient.addColorStop(1, '#e4eef6');
   ctx.fillStyle = gradient;
-  ctx.fillRect(frame.x + 1, frame.y + 1, frame.w - 2, frame.h - 2);
+  ctx.fillRect(x, y, w, h);
 
   // Fallback background if web tiles are unavailable.
   ctx.save();
   ctx.fillStyle = 'rgba(168, 198, 134, 0.12)';
   ctx.beginPath();
-  ctx.moveTo(frame.x + 25, frame.y + frame.h - 80);
-  ctx.bezierCurveTo(frame.x + 220, frame.y + frame.h - 170, frame.x + 420, frame.y + frame.h - 110, frame.x + 560, frame.y + frame.h - 220);
-  ctx.bezierCurveTo(frame.x + 660, frame.y + frame.h - 290, frame.x + 820, frame.y + frame.h - 270, frame.x + frame.w - 20, frame.y + frame.h - 340);
-  ctx.lineTo(frame.x + frame.w - 20, frame.y + frame.h - 5);
-  ctx.lineTo(frame.x + 25, frame.y + frame.h - 5);
+  ctx.moveTo(x + 25, y + h - 80);
+  ctx.bezierCurveTo(x + 220, y + h - 170, x + 420, y + h - 110, x + 560, y + h - 220);
+  ctx.bezierCurveTo(x + 660, y + h - 290, x + 820, y + h - 270, x + w - 20, y + h - 340);
+  ctx.lineTo(x + w - 20, y + h - 5);
+  ctx.lineTo(x + 25, y + h - 5);
   ctx.closePath();
   ctx.fill();
 
@@ -465,141 +612,193 @@ function drawBasemapBackdrop(ctx, frame) {
   ctx.strokeStyle = 'rgba(56, 189, 248, 0.3)';
   ctx.lineWidth = 1.6;
   for (let i = 0; i < 3; i += 1) {
-    const y = frame.y + 70 + i * 90;
+    const yy = y + 70 + i * 90;
     ctx.beginPath();
-    ctx.moveTo(frame.x + 15, y);
-    ctx.bezierCurveTo(frame.x + 220, y + 24, frame.x + 420, y - 18, frame.x + 640, y + 18);
-    ctx.bezierCurveTo(frame.x + 760, y + 36, frame.x + 860, y + 14, frame.x + frame.w - 12, y + 28);
+    ctx.moveTo(x + 15, yy);
+    ctx.bezierCurveTo(x + 220, yy + 24, x + 420, yy - 18, x + 640, yy + 18);
+    ctx.bezierCurveTo(x + 760, yy + 36, x + 860, yy + 14, x + w - 12, yy + 28);
     ctx.stroke();
   }
   ctx.restore();
 
+  // Dibuja la grilla sobre el fondo
+  if (bounds) {
+    drawGraticule(ctx, bounds, frame);
+  }
 }
 
 function drawGraticule(ctx, bounds, frame) {
   const latLines = 5;
   const lonLines = 6;
+  const margin = 20; // píxeles para sobresalir fuera del frame
+
+  const formatLon = (lon) => `${Math.abs(lon).toFixed(2)}°${lon >= 0 ? 'E' : 'W'}`;
+  const formatLat = (lat) => `${Math.abs(lat).toFixed(2)}°${lat >= 0 ? 'N' : 'S'}`;
 
   ctx.save();
-  ctx.strokeStyle = 'rgba(100, 116, 139, 0.22)';
+  ctx.strokeStyle = 'rgba(51, 65, 85, 0.55)';
   ctx.lineWidth = 1;
   ctx.setLineDash([5, 4]);
+  ctx.fillStyle = '#64748b';
+  ctx.font = '14px Arial';
 
+  // Líneas de longitud (verticales)
   for (let i = 0; i <= lonLines; i += 1) {
     const lon = bounds.minLon + ((bounds.maxLon - bounds.minLon) * i) / lonLines;
     const pTop = projectToMap(lon, bounds.maxLat, bounds, frame);
     const pBottom = projectToMap(lon, bounds.minLat, bounds, frame);
+
     ctx.beginPath();
-    ctx.moveTo(pTop.x, pTop.y);
-    ctx.lineTo(pBottom.x, pBottom.y);
+    ctx.moveTo(pTop.x, pTop.y - margin);
+    ctx.lineTo(pBottom.x, pBottom.y + margin);
     ctx.stroke();
+
+    // Etiqueta SOLO fuera del mapa (abajo, horizontal)
+    ctx.fillText(formatLon(lon), pBottom.x - 18, frame.y + frame.h + margin + 12);
   }
 
+  // Líneas de latitud (horizontales)
   for (let i = 0; i <= latLines; i += 1) {
     const lat = bounds.minLat + ((bounds.maxLat - bounds.minLat) * i) / latLines;
     const pLeft = projectToMap(bounds.minLon, lat, bounds, frame);
     const pRight = projectToMap(bounds.maxLon, lat, bounds, frame);
+
     ctx.beginPath();
-    ctx.moveTo(pLeft.x, pLeft.y);
-    ctx.lineTo(pRight.x, pRight.y);
+    ctx.moveTo(pLeft.x - margin, pLeft.y);
+    ctx.lineTo(pRight.x + margin, pRight.y);
     ctx.stroke();
+
+    // Etiqueta SOLO fuera del mapa (izquierda, rotada 90°)
+    ctx.save();
+    ctx.font = '14px Arial'; // Opcional, para mejor visibilidad
+    ctx.translate(frame.x - 8, pLeft.y + 4); // Ajusta -8 según necesidad
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText(formatLat(lat), 0, 0);
+    ctx.restore();
   }
 
   ctx.setLineDash([]);
-  ctx.fillStyle = '#64748b';
-  ctx.font = '11px Arial';
-  ctx.fillText('Basemap simplificado', frame.x + 14, frame.y + 18);
   ctx.restore();
 }
 
 function drawProjectBoundary(ctx, boundaryCoords, bounds, frame) {
-  if (!boundaryCoords.length) return;
+if (!boundaryCoords.length) return;
 
-  ctx.save();
-  ctx.beginPath();
-  boundaryCoords.forEach(([lon, lat], index) => {
-    const { x, y } = projectToMap(lon, lat, bounds, frame);
-    if (index === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-  ctx.closePath();
+ctx.save();
+ctx.beginPath();
+boundaryCoords.forEach(([lon, lat], index) => {
+const { x, y } = projectToMap(lon, lat, bounds, frame);
+if (index === 0) ctx.moveTo(x, y);
+else ctx.lineTo(x, y);
+});
+ctx.closePath();
 
-  ctx.fillStyle = 'rgba(37, 99, 235, 0.08)';
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(30, 64, 175, 0.9)';
-  ctx.lineWidth = 2;
-  ctx.stroke();
+ctx.fillStyle = 'rgba(37, 99, 235, 0.08)';
+ctx.fill();
+ctx.strokeStyle = 'rgba(30, 64, 175, 0.9)';
+ctx.lineWidth = 2;
+ctx.stroke();
 
-  ctx.fillStyle = '#1e3a8a';
-  ctx.font = 'bold 12px Arial';
-  ctx.fillText('Limite del proyecto', frame.x + 14, frame.y + 36);
-  ctx.restore();
+ctx.fillStyle = '#1e3a8a';
+ctx.font = 'bold 12px Arial';
+ctx.restore();
 }
 
 function drawNorthArrow(ctx, x, y) {
   ctx.save();
   ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 14px Arial';
-  ctx.fillText('N', x - 5, y - 14);
+  const scale = 0.7;
+  ctx.font = `bold ${Math.round(14 * scale)}px Arial`;
+  ctx.fillText('N', x - 5 * scale, y - 14 * scale);
 
   ctx.beginPath();
-  ctx.moveTo(x, y - 10);
-  ctx.lineTo(x - 8, y + 12);
-  ctx.lineTo(x + 8, y + 12);
+  ctx.moveTo(x, y - 10 * scale);
+  ctx.lineTo(x - 8 * scale, y + 12 * scale);
+  ctx.lineTo(x + 8 * scale, y + 12 * scale);
   ctx.closePath();
   ctx.fillStyle = '#0f172a';
   ctx.fill();
 
   ctx.beginPath();
-  ctx.moveTo(x, y + 12);
-  ctx.lineTo(x, y + 36);
+  ctx.moveTo(x, y + 12 * scale);
+  ctx.lineTo(x, y + 36 * scale);
   ctx.strokeStyle = '#0f172a';
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 2 * scale;
   ctx.stroke();
-  ctx.restore();
-}
+  }
 
 function drawScaleBar(ctx, bounds, frame) {
+  // Fija la escala a 25 km, con divisiones en 0, 5, 10 y 25 km
+  const maxKm = 25;
+  const divisions = [0, 5, 10, 25];
+
+  // Calcula la longitud de la barra en píxeles
   const midLat = (bounds.minLat + bounds.maxLat) / 2;
   const lonKm = Math.abs((bounds.maxLon - bounds.minLon) * 111.32 * Math.cos((midLat * Math.PI) / 180));
   if (!Number.isFinite(lonKm) || lonKm <= 0) return;
-
   const pxPerKm = (frame.w - frame.pad * 2) / lonKm;
-  const candidatesKm = [5, 10, 20, 25, 50, 75, 100, 150, 200, 300];
-  const targetPx = 140;
-  let chosen = candidatesKm[0];
-  for (let i = 0; i < candidatesKm.length; i += 1) {
-    if (candidatesKm[i] * pxPerKm <= targetPx) {
-      chosen = candidatesKm[i];
-    }
-  }
+  const barPx = maxKm * pxPerKm;
 
-  const barPx = Math.max(45, chosen * pxPerKm);
+  // Posición de la barra
   const x = frame.x + frame.w - barPx - 54;
-  const y = frame.y + frame.h - 22;
+  const y = frame.y + frame.h - 22 - frame.h * 0.025;
 
   ctx.save();
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-  ctx.strokeStyle = 'rgba(148, 163, 184, 0.9)';
-  ctx.lineWidth = 1;
-  drawCard(ctx, x - 12, y - 20, barPx + 48, 30, 6);
 
-  ctx.fillStyle = '#0f172a';
-  ctx.fillRect(x, y - 6, barPx / 2, 6);
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(x + barPx / 2, y - 6, barPx / 2, 6);
-  ctx.strokeStyle = '#0f172a';
-  ctx.strokeRect(x, y - 6, barPx, 6);
+  // Barra sólida
+  ctx.strokeStyle = '#232f3e';
+  ctx.lineWidth = 8;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + barPx, y);
+  ctx.stroke();
 
-  ctx.fillStyle = '#334155';
-  ctx.font = '11px Arial';
-  ctx.fillText(`0`, x - 2, y + 10);
-  ctx.fillText(`${Math.round(chosen / 2)} km`, x + barPx / 2 - 14, y + 10);
-  ctx.fillText(`${chosen} km`, x + barPx - 10, y + 10);
+  // Marcas y etiquetas
+  ctx.strokeStyle = '#232f3e';
+  ctx.lineWidth = 2;
+  ctx.fillStyle = '#232f3e';
+  ctx.font = '14px Arial';
+
+  divisions.forEach((km) => {
+    const tickX = x + (barPx * km) / maxKm;
+    // Marca principal
+    ctx.beginPath();
+    ctx.moveTo(tickX, y - 12);
+    ctx.lineTo(tickX, y + 12);
+    ctx.stroke();
+
+    // Etiqueta solo en 5, 10 y 25 km
+    if (km !== 0) {
+      const label = `${km} km`;
+      const textWidth = ctx.measureText(label).width;
+      ctx.fillText(label, tickX - textWidth / 2, y + 28);
+    }
+  });
+
   ctx.restore();
 }
 
-async function draw2DMap(ctx, plotData) {
+// Dibuja texto multilínea ajustando el ancho máximo y devuelve la siguiente coordenada Y
+function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+  const words = text.split(' ');
+  let line = '';
+  for (let n = 0; n < words.length; n++) {
+    const testLine = line + words[n] + ' ';
+    const metrics = ctx.measureText(testLine);
+    const testWidth = metrics.width;
+    if (testWidth > maxWidth && n > 0) {
+      ctx.fillText(line, x, y, maxWidth);
+      line = words[n] + ' ';
+      y += lineHeight;
+    } else {
+      line = testLine;
+    }
+  }
+  ctx.fillText(line, x, y, maxWidth);
+  return y + lineHeight;
+}
+
+async function draw2DMap(ctx, plotData, analysisState) {
   const cells = Array.isArray(plotData?.gridCells) ? plotData.gridCells : [];
   if (!cells.length) return;
 
@@ -610,15 +809,84 @@ async function draw2DMap(ctx, plotData) {
       return { ...coords, cell };
     })
     .filter(Boolean);
-
   if (!points.length) return;
+
+  await draw2DInstitutionalPanel(ctx, plotData);
 
   const mapX = 56;
   const mapY = 150;
-  const mapW = 980;
-  const mapH = 560;
-  const frame = { x: mapX, y: mapY, w: mapW, h: mapH, pad: 28 };
+  const mapW = 1300;
 
+  const footerReserve = 90;
+  const mapBottom = DEFAULT_IMAGE_HEIGHT - footerReserve;
+  const mapH = mapBottom - mapY;
+
+  const droughtSeverityScale = [
+    { label: 'Extremadamente húmedo', color: '#000080' },
+    { label: 'Muy húmedo', color: '#0000FF' },
+    { label: 'Moderadamente húmedo', color: '#00FFFF' },
+    { label: 'Normal', color: '#00FF00' },
+    { label: 'Moderadamente seco', color: '#FFFF00' },
+    { label: 'Severamente seco', color: '#FFA500' },
+    { label: 'Extremadamente seco', color: '#FF0000' },
+  ];
+
+  // Leyenda a la derecha del mapa
+  const legendW = 370;
+  const legendH = Math.floor((mapH - 24) / 2);
+  const legendX = DEFAULT_IMAGE_WIDTH - legendW - 56;
+  const legendY = DEFAULT_IMAGE_HEIGHT - legendH - 40;
+
+  // --- Cuadro informativo sobre la leyenda ---
+  const infoBoxW = legendW;
+  const infoBoxX = DEFAULT_IMAGE_WIDTH - infoBoxW - 56;
+  const infoBoxY = Math.round(DEFAULT_IMAGE_HEIGHT * 0.135);
+  const infoBoxH = legendY - infoBoxY - 16;
+
+  ctx.save();
+  ctx.fillStyle = '#f1f5f9';
+  ctx.strokeStyle = '#cbd5e1';
+  drawCard(ctx, infoBoxX, infoBoxY, infoBoxW, infoBoxH, 10);
+
+  // Título
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 18px Arial';
+  ctx.fillText('Información de consulta', infoBoxX + 22, infoBoxY + 32);
+
+  // Mapeo de siglas a descripciones
+  const indexDescriptions = {
+    SPI: 'Índice de Precipitación Estandarizado',
+    SPEI: 'Índice de Precipitación-Evapotranspiración Estandarizado',
+    RAI: 'Índice de Anomalía de Lluvia',
+    EDDI: 'Índice de Demanda de Evaporación por Sequía',
+    PDSI: 'Índice de Severidad de Sequía de Palmer'
+  };
+
+  // Texto secundario
+  ctx.font = '15px Arial';
+  ctx.fillStyle = '#334155';
+  let infoY = infoBoxY + 60;
+  const infoBoxMaxWidth = infoBoxW - 44; // 22px de margen a cada lado
+
+  infoY = wrapText(ctx, 'Fecha de consulta: ' + new Date().toLocaleString(), infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
+  infoY = wrapText(
+    ctx,
+    'Visualización: ' +
+      (plotData?.isInterval && plotData?.period?.start_date && plotData?.period?.end_date
+        ? plotData.period.start_date + ' a ' + plotData.period.end_date
+        : (plotData?.date || 'N/A')),
+    infoBoxX + 22,
+    infoY,
+    infoBoxMaxWidth,
+    22
+  );
+  infoY = wrapText(ctx, 'Tipo de índice: Meteorológico', infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
+  const sigla = plotData?.variable_name || plotData?.variable || 'N/A';
+  const descripcion = indexDescriptions[sigla] ? ` (${indexDescriptions[sigla]})` : '';
+  wrapText(ctx, 'Índice ' + sigla + descripcion, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
+  // --- Fin cuadro informativo ---
+
+  const frame = { x: mapX, y: mapY, w: mapW, h: mapH, pad: 12 };
   ctx.fillStyle = '#f8fafc';
   ctx.strokeStyle = '#cbd5e1';
   drawCard(ctx, mapX, mapY, mapW, mapH, 14);
@@ -633,22 +901,24 @@ async function draw2DMap(ctx, plotData) {
   const boundaryLats = boundaryCoords.map((c) => c[1]);
 
   const bounds = {
-  minLon: Math.min(minLon, ...(boundaryLons.length ? boundaryLons : [minLon])),
-  maxLon: Math.max(maxLon, ...(boundaryLons.length ? boundaryLons : [maxLon])),
-  minLat: Math.min(minLat, ...(boundaryLats.length ? boundaryLats : [minLat])),
-  maxLat: Math.max(maxLat, ...(boundaryLats.length ? boundaryLats : [maxLat])),
+    minLon: Math.min(minLon, ...(boundaryLons.length ? boundaryLons : [minLon])),
+    maxLon: Math.max(maxLon, ...(boundaryLons.length ? boundaryLons : [maxLon])),
+    minLat: Math.min(minLat, ...(boundaryLats.length ? boundaryLats : [minLat])),
+    maxLat: Math.max(maxLat, ...(boundaryLats.length ? boundaryLats : [maxLat])),
   };
 
-
-
-  const hasRealBasemap = await drawLeafletBasemapTiles(ctx, bounds, frame);
-  if (!hasRealBasemap) {
   drawBasemapBackdrop(ctx, frame);
-  }
-
-  drawGraticule(ctx, bounds, frame);
+  await drawLeafletBasemapTiles(ctx, bounds, frame);
   drawProjectBoundary(ctx, boundaryCoords, bounds, frame);
 
+  // --- DIBUJA LA GRILLA SIEMPRE AQUÍ, después del fondo y el contorno ---
+  drawGraticule(ctx, bounds, frame);
+
+  // --- DIBUJA LA LEYENDA DE LA GRILLA FUERA DEL MAPA ---
+  ctx.fillStyle = '#64748b';
+  ctx.font = '14px Arial';
+
+  // --- Continúa con el renderizado de celdas ---
   const lonRange = bounds.maxLon - bounds.minLon || 1;
   const latRange = bounds.maxLat - bounds.minLat || 1;
 
@@ -663,12 +933,11 @@ async function draw2DMap(ctx, plotData) {
 
   const cellWidth = Math.max(5, Math.abs(stepLon.x - base.x) * 0.92);
   const cellHeight = Math.max(5, Math.abs(stepLat.y - base.y) * 0.92);
-  // Render as filled cells to resemble the true gridded map export.
+
   ctx.save();
   ctx.globalAlpha = 0.58;
   points.forEach((point) => {
     const { x, y } = projectToMap(point.lon, point.lat, bounds, frame);
-
     const left = x - cellWidth / 2;
     const top = y - cellHeight / 2;
 
@@ -681,12 +950,32 @@ async function draw2DMap(ctx, plotData) {
   });
   ctx.restore();
 
-  drawNorthArrow(ctx, mapX + mapW - 36, mapY + 42);
-  drawScaleBar(ctx, bounds, frame);
+function drawNorthArrow(ctx, x, y) {
+  ctx.save();
+  const scale = 2.0; // 200% del tamaño original
+  const yOffset = 20; // Desplazamiento hacia el sur (ahora el doble que antes)
+  // Letra N
+  ctx.fillStyle = '#222';
+  ctx.font = `bold ${Math.round(20 * scale)}px Arial`;
+  ctx.textAlign = 'center';
+  ctx.fillText('N', x, y - 18 * scale + yOffset);
+
+  // Flecha (triángulo)
+  ctx.beginPath();
+  ctx.moveTo(x, y - 10 * scale + yOffset);      // Punta de la flecha
+  ctx.lineTo(x - 8 * scale, y + 10 * scale + yOffset);  // Esquina izquierda
+  ctx.lineTo(x + 8 * scale, y + 10 * scale + yOffset);  // Esquina derecha
+  ctx.closePath();
+  ctx.fillStyle = '#222';
+  ctx.fill();
+  ctx.restore();
+}
+
+drawNorthArrow(ctx, mapX + 36, mapY + 36 + 40);
+drawScaleBar(ctx, bounds, frame);
 
   ctx.fillStyle = '#334155';
   ctx.font = '15px Arial';
-  ctx.fillText(`Celdas renderizadas: ${points.length}`, mapX + 24, mapY + mapH - 20);
 
   const legendEntries = [];
   const seen = new Set();
@@ -705,11 +994,11 @@ async function draw2DMap(ctx, plotData) {
 
   ctx.fillStyle = '#ffffff';
   ctx.strokeStyle = '#cbd5e1';
-  drawCard(ctx, 1060, 170, 290, 380, 12);
+  drawCard(ctx, legendX, legendY, legendW, legendH, 12);
 
   ctx.fillStyle = '#0f172a';
   ctx.font = 'bold 18px Arial';
-  ctx.fillText('Leyenda', 1082, 202);
+  ctx.fillText('Leyenda', legendX + 22, legendY + 32);
 
   if (!legendEntries.length) {
     const values = cells
@@ -721,69 +1010,68 @@ async function draw2DMap(ctx, plotData) {
 
     ctx.fillStyle = '#334155';
     ctx.font = '15px Arial';
-    ctx.fillText('Escala continua', 1082, 236);
-    ctx.fillText(`Min: ${minVal?.toFixed(2) ?? 'N/A'}`, 1082, 262);
-    ctx.fillText(`Max: ${maxVal?.toFixed(2) ?? 'N/A'}`, 1082, 286);
-    ctx.fillText(`Res: ${plotData?.resolution || 'N/A'}°`, 1082, 320);
+    ctx.fillText('Escala continua', legendX + 22, legendY + 66);
+    ctx.fillText('Min: ' + (minVal?.toFixed(2) ?? 'N/A'), legendX + 22, legendY + 92);
+    ctx.fillText('Max: ' + (maxVal?.toFixed(2) ?? 'N/A'), legendX + 22, legendY + 116);
     return;
   }
 
-  let offsetY = 230;
-  legendEntries.slice(0, 12).forEach((entry) => {
+  let offsetY = legendY + 60;
+  droughtSeverityScale.forEach((entry) => {
     ctx.fillStyle = entry.color;
-    ctx.fillRect(1082, offsetY, 14, 14);
+    ctx.fillRect(legendX + 22, offsetY, 32, 18);
     ctx.fillStyle = '#334155';
-    ctx.font = '14px Arial';
-    ctx.fillText(entry.label, 1104, offsetY + 12);
-    offsetY += 24;
+    ctx.font = '15px Arial';
+    ctx.fillText(entry.label, legendX + 62, offsetY + 15);
+    offsetY += 32;
   });
+
+  // Entrada para el área de interés (contorno azul)
+  ctx.save();
+  ctx.strokeStyle = 'rgba(30, 64, 175, 0.9)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.rect(legendX + 22, offsetY, 32, 18);
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.fillStyle = '#334155';
+  ctx.font = '15px Arial';
+  ctx.fillText('Área de interés', legendX + 64, offsetY + 14);
+
+  offsetY += 32;
 
   ctx.fillStyle = '#64748b';
   ctx.font = '14px Arial';
-  ctx.fillText(`Res: ${plotData?.resolution || 'N/A'}°`, 1082, 528);
-}
 
-export async function downloadAnalysisImage({ plotData, analysisState }) {
-  if (!plotData) {
-    throw new Error('No hay datos de analisis para exportar imagen.');
-  }
+  // --- Metadatos cartográficos en la esquina inferior izquierda ---
+  ctx.save();
+  ctx.fillStyle = '#334155';
+  ctx.font = 'bold 15px Arial';
 
-  const canvas = document.createElement('canvas');
-  canvas.width = DEFAULT_IMAGE_WIDTH;
-  canvas.height = DEFAULT_IMAGE_HEIGHT;
+  const metaX = 56;
+const metaY = DEFAULT_IMAGE_HEIGHT - 54;
+  ctx.fillText('Metadatos', metaX, metaY);
 
-  const ctx = canvas.getContext('2d');
-  if (!ctx) {
-    throw new Error('No se pudo inicializar el contexto del canvas.');
-  }
-
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  drawHeader(ctx, plotData);
-
-  if (plotData.type === '2D') {
-    await draw2DMap(ctx, plotData);
-  } else {
-    draw1DChart(ctx, plotData);
-  }
-
-  const footer = `Generado: ${new Date().toLocaleString()} | ${resolveTimeFooterLabel(plotData)}: ${resolveTimeInterval(plotData, analysisState)}`;
-  ctx.fillStyle = '#94a3b8';
   ctx.font = '14px Arial';
-  ctx.fillText(footer, 56, 860);
+  const resolucion = plotData?.resolution || analysisState?.spatialResolution || 'N/A';
+  const sistemaCoord = 'WGS84 (EPSG:4326)';
 
-  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
-  if (!blob) {
-    throw new Error('No se pudo generar la imagen PNG.');
-  }
-
-  const variable = resolveSelectedVariable(plotData, analysisState);
-  const fileBase = sanitizeFilename(`grafico_${plotData.type || 'analysis'}_${variable}_${new Date().toISOString().slice(0, 10)}`);
-  triggerFileDownload(blob, `${fileBase}.png`);
-
+  ctx.fillText(`Resolución: ${resolucion}°`, metaX, metaY + 22);
+  ctx.fillText(`Sistema de coordenadas: ${sistemaCoord}`, metaX, metaY + 42);
+  ctx.restore();
+}
+export function downloadAnalysisJson({ plotData, analysisState, selectedCell }) {
+  const data = plotData.type === '2D'
+    ? build2DJson({ plotData, analysisState })
+    : build1DJson({ plotData, analysisState, selectedCell });
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  triggerFileDownload(blob, sanitizeFilename(plotData?.title) + '.json');
   return {
-    fileName: `${fileBase}.png`,
-    type: plotData.type || 'analysis',
+    fileName: sanitizeFilename(plotData?.title) + '.json',
+    rows: plotData.type === '2D'
+      ? (Array.isArray(plotData?.gridCells) ? plotData.gridCells.length : 0)
+      : (Array.isArray(plotData?.data) ? plotData.data.length : 0),
+    type: 'json',
   };
 }
