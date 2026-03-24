@@ -38,15 +38,13 @@ export default function Header() {
               </div>
             </div>
 
-            <div className="container mx-auto px-6 py-6 relative"> {/* Cambió de py-5 a py-6 */}
-            <div>
+            <div className="animate-slide-down">
               <h1 className="text-sm sm:text-base md:text-lg lg:text-xl font-bold text-white drop-shadow-lg">
                 SIPREH
               </h1>
-              <p className="text-xs sm:text-sm text-blue-100 font-medium drop-shadow">
-                Sistema Integrado de Predicción y Monitoreo de Sequías Hidrológicas y Meteorológicas
+              <p className="text-xs sm:text-sm text-blue-100 font-medium drop-shadow mt-0.5">
+               Sistema Integrado de Predicción y Monitoreo de Sequías Hidrometeorológicas
               </p>
-            </div>
               <p className="text-xs text-blue-50 dark:text-blue-200 flex items-center gap-1.5 mt-0.5">
                 <Activity className="w-2.5 h-2.5 animate-pulse" />
                 <span className="font-medium">Bogotá, Colombia</span>
@@ -54,6 +52,7 @@ export default function Header() {
                 <span className="text-xs">En línea</span>
               </p>
             </div>
+            
           </div>
 
           {/* Right side - Logos de entidades + Theme toggle */}
