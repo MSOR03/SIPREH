@@ -361,52 +361,21 @@ export default function MapArea({
         </div>
       </div>
 
-{/* Plot/Chart Area (will show when data is available) */}
-{plotData && (
-  <div className="bg-gradient-to-r from-white to-blue-50/50 dark:from-[#141920] dark:to-blue-950/20 border-t border-gray-200 dark:border-gray-700 shadow-2xl backdrop-blur-sm">
-    <div className="p-8 space-y-6 animate-slide-down">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-gradient-to-br from-purple-500 to-purple-600 rounded-lg shadow-lg">
-            <BarChart3 className="w-6 h-6 text-white" />
-          </div>
-          <div>
-            <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100">
-              {plotData.title}
-            </h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400">Análisis de datos</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="secondary"
-            className="shadow-lg hover:shadow-xl"
-            onClick={onSaveData}
-          >
-            <Download className="w-4 h-4" />
-            Guardar JSON
-          </Button>
-          <Button
-            variant="secondary"
-            className="shadow-lg hover:shadow-xl"
-            onClick={onExportImage}
-          >
-            <Download className="w-4 h-4" />
-            Exportar Imagen
-          </Button>
-        </div>
-      </div>
-
-      {(plotData.type === '2D' && plotData.gridCells) ? (
-        <div className="relative">
-
-
-          {/* Statistics summary */}
-          {plotData.statistics && (
-            <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-              <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
-                <p className="text-xs text-gray-500 dark:text-gray-400">Media</p>
-                <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.mean?.toFixed(2) || 'N/A'}</p>
+      {/* Plot/Chart Area (will show when data is available) */}
+      {plotData && (
+        <div className="bg-gradient-to-r from-white to-blue-50/50 dark:from-[#141920] dark:to-blue-950/20 border-t border-gray-200 dark:border-gray-700 shadow-2xl backdrop-blur-sm">
+          <div className="p-8 space-y-6 animate-slide-down">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-gradient-to-br from-purple-500 to-purple-600 rounded-lg shadow-lg">
+                  <BarChart3 className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100">
+                    {plotData.title}
+                  </h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Análisis de datos</p>
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 {/* AI Summary button - only for predictions */}
@@ -623,35 +592,10 @@ export default function MapArea({
                   />
                 </div>
 
-          <div className="bg-white dark:bg-gray-900/50 rounded-xl p-6 shadow-inner">
-            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
-              Visualización Espacial 2D
-            </h4>
-            <p className="text-xs text-gray-600 dark:text-gray-400 mb-4">
-              Las celdas en el mapa muestran los valores de <strong>{plotData.variable}</strong> para la fecha seleccionada.
-              Los colores representan {isDroughtIndex ? 'las categorías de sequía' : 'los valores de la variable'}.
-            </p>
-
-            {/* Leyenda de colores para índices de sequía - dinámica desde backend */}
-            {isDroughtIndex && hasCategorizedCells && <DroughtLegend gridCells={plotData.gridCells} />}
-          </div>
-        </div>
-      ) : (plotData.type === 'Serie de Tiempo' || plotData.type === '1D') && plotData.data ? (
-        <div className="relative">
-          {plotData.subtitle && (
-            <div className="mb-4 px-4 py-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
-              <p className="text-sm text-blue-700 dark:text-blue-300 font-medium">
-                {plotData.subtitle}
-              </p>
-            </div>
-          )}
-
-          {/* Statistics summary */}
-          {plotData.statistics && (
-            <div className="mb-4 grid grid-cols-4 gap-3">
-              <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
-                <p className="text-xs text-gray-500 dark:text-gray-400">Media</p>
-                <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.mean?.toFixed(2) || 'N/A'}</p>
+                {/* Timeline de eventos de sequía con duración */}
+                {plotData.hasDuration && (plotData.rawData || plotData.data) && (
+                  <DroughtEventTimeline data={plotData.rawData || plotData.data} />
+                )}
               </div>
             ) : (
               <div className="relative h-80 bg-gradient-to-br from-blue-50/30 via-blue-50/20 to-blue-50/30 dark:from-[#1a1f2e] dark:via-[#141920] dark:to-blue-950/20 rounded-2xl flex items-center justify-center border-2 border-dashed border-gray-300 dark:border-gray-600 shadow-inner overflow-hidden">
@@ -696,9 +640,6 @@ export default function MapArea({
             )}
           </div>
         </div>
-      )}
-    </div>
-  </div>
       )}
     </main>
   );
