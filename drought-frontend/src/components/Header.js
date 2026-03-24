@@ -43,15 +43,16 @@ export default function Header() {
                 SIPREH
               </h1>
               <p className="text-xs sm:text-sm text-blue-100 font-medium drop-shadow mt-0.5">
-                Sistema Integrado de Predicción y Monitoreo de Sequías Hidrológicas y Meteorológicas
+               Sistema Integrado de Predicción y Monitoreo de Sequías Hidrometeorológicas
+              </p>
+              <p className="text-xs text-blue-50 dark:text-blue-200 flex items-center gap-1.5 mt-0.5">
+                <Activity className="w-2.5 h-2.5 animate-pulse" />
+                <span className="font-medium">Bogotá, Colombia</span>
+                <span className="text-blue-200 dark:text-blue-300">•</span>
+                <span className="text-xs">En línea</span>
               </p>
             </div>
-            <p className="text-xs text-blue-50 dark:text-blue-200 flex items-center gap-1.5 mt-1">
-              <Activity className="w-2.5 h-2.5 animate-pulse" />
-              <span className="font-medium">Bogotá, Colombia</span>
-              <span className="text-blue-200 dark:text-blue-300">•</span>
-              <span className="text-xs">En línea</span>
-            </p>
+            
           </div>
 
           {/* Right side - Logos de entidades + Theme toggle */}

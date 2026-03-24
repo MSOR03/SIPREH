@@ -1,14 +1,23 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import {
-  Droplets, LogOut, Users, FileText, Shield, Cloud, ArrowLeft
-} from 'lucide-react';
-import { authApi } from '@/services/adminApi';
-import FilesSection from '@/components/admin/dashboard/FilesSection';
-import UsersSection from '@/components/admin/dashboard/UsersSection';
-import CloudSection from '@/components/admin/dashboard/CloudSection';
+  Droplets,
+  LogOut,
+  Users,
+  FileText,
+  Shield,
+  Cloud,
+  ArrowLeft,
+  Sun,
+  Moon,
+} from "lucide-react";
+import { authApi } from "@/services/adminApi";
+import FilesSection from "@/components/admin/dashboard/FilesSection";
+import UsersSection from "@/components/admin/dashboard/UsersSection";
+import CloudSection from "@/components/admin/dashboard/CloudSection";
+import { useTheme } from "@/contexts/ThemeContext";
 
 // ── Shared styles ────────────────────────────────────────────
 const DS = `
@@ -276,7 +285,8 @@ const DS = `
     margin: 0 0 0.125rem;
     letter-spacing: -0.01em;
   }
-  .dark .ds-card-title { color: #f1f5f9; }
+    
+  .dark .ds-card-title { color: #f1f5f9 !important; }
 
   .ds-card-subtitle {
     font-size: 0.75rem;
@@ -284,6 +294,8 @@ const DS = `
     margin: 0;
     font-weight: 400;
   }
+  
+  .dark .ds-card-subtitle { color: #94a3b8 !important; }
 
   /* ── Badge ── */
   .ds-badge {
@@ -732,32 +744,50 @@ const DS = `
 // ═══════════════════════════════════════════════════════════════
 export default function AdminDashboard() {
   const router = useRouter();
+  const { theme, toggleTheme } = useTheme();
   const [currentUser, setCurrentUser] = useState(null);
-  const [activeTab, setActiveTab] = useState('files');
+  const [activeTab, setActiveTab] = useState("files");
   const [loading, setLoading] = useState(true);
+  const [mounted, setMounted] = useState(true);
+
 
   useEffect(() => {
-    authApi.me()
+    authApi
+      .me()
       .then(setCurrentUser)
-      .catch(() => { authApi.logout(); router.replace('/admin'); })
+      .catch(() => {
+        authApi.logout();
+        router.replace("/admin");
+      })
       .finally(() => setLoading(false));
   }, [router]);
 
-  const handleLogout = () => { authApi.logout(); router.replace('/admin'); };
+  const handleLogout = () => {
+    authApi.logout();
+    router.replace("/admin");
+  };
 
-  if (loading) return (
-    <div className="ds-root" style={{ display:'flex', alignItems:'center', justifyContent:'center' }}>
-      <style>{DS}</style>
-      <div className="ds-spinner" />
-    </div>
-  );
+  if (loading)
+    return (
+      <div
+        className="ds-root"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <style>{DS}</style>
+        <div className="ds-spinner" />
+      </div>
+    );
 
   if (!currentUser) return null;
 
   const tabs = [
-    { key: 'files',  label: 'Archivos', icon: FileText },
-    { key: 'users',  label: 'Usuarios', icon: Users },
-    { key: 'cloud',  label: 'Nube',     icon: Cloud },
+    { key: "files", label: "Archivos", icon: FileText },
+    { key: "users", label: "Usuarios", icon: Users },
+    { key: "cloud", label: "Nube", icon: Cloud },
   ];
 
   return (
@@ -768,7 +798,11 @@ export default function AdminDashboard() {
       <header className="ds-header">
         <div className="ds-header-inner">
           <div className="ds-header-left">
-            <button className="ds-back-btn" onClick={() => router.push('/')} title="Volver al mapa">
+            <button
+              className="ds-back-btn"
+              onClick={() => router.push("/")}
+              title="Volver al mapa"
+            >
               <ArrowLeft size={18} />
             </button>
             <div className="ds-logo">
@@ -788,6 +822,32 @@ export default function AdminDashboard() {
               <LogOut size={14} />
               Cerrar sesión
             </button>
+
+            <button
+              onClick={toggleTheme}
+              className="group relative p-2.5 rounded-lg bg-white/10 hover:bg-white/20 dark:bg-white/5 dark:hover:bg-white/15 backdrop-blur-md transition-all duration-300 shadow-lg hover:shadow-xl hover:scale-105 border border-white/20"
+              aria-label="Toggle theme"
+              title={
+                mounted
+                  ? theme === "light"
+                    ? "Cambiar a modo oscuro"
+                    : "Cambiar a modo claro"
+                  : "Toggle theme"
+              }
+            >
+              <div className="absolute inset-0 rounded-xl bg-linear-to-br from-white/0 to-white/10 opacity-0 group-hover:opacity-100 transition-opacity" />
+
+              {!mounted ? (
+                <span className="block w-6 h-6" />
+              ) : theme === "dark" ? (
+                <Sun
+                  className="w-6 h-6 text-yellow-300 relative z-10 animate-spin"
+                  style={{ animationDuration: "20s" }}
+                />
+              ) : (
+                <Moon className="w-6 h-6 text-blue-500 relative z-10" />
+              )}
+            </button>
           </div>
         </div>
       </header>
@@ -798,7 +858,7 @@ export default function AdminDashboard() {
           {tabs.map(({ key, label, icon: Icon }) => (
             <button
               key={key}
-              className={`ds-tab${activeTab === key ? ' ds-tab--active' : ''}`}
+              className={`ds-tab${activeTab === key ? " ds-tab--active" : ""}`}
               onClick={() => setActiveTab(key)}
             >
               <Icon size={15} />
@@ -810,9 +870,9 @@ export default function AdminDashboard() {
 
       {/* Content */}
       <div className="ds-content">
-        {activeTab === 'files' && <FilesSection />}
-        {activeTab === 'users' && <UsersSection />}
-        {activeTab === 'cloud' && <CloudSection />}
+        {activeTab === "files" && <FilesSection />}
+        {activeTab === "users" && <UsersSection />}
+        {activeTab === "cloud" && <CloudSection />}
       </div>
     </div>
   );

@@ -1,42 +1,56 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { Droplets, Lock, Mail, Eye, EyeOff, ArrowLeft } from 'lucide-react';
-import { authApi } from '@/services/adminApi';
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import {
+  Droplets,
+  Lock,
+  Mail,
+  Eye,
+  EyeOff,
+  ArrowLeft,
+  Moon,
+  Sun,
+} from "lucide-react";
+import { authApi } from "@/services/adminApi";
+import { useTheme } from "@/contexts/ThemeContext";
 
 export default function AdminLoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const { theme, toggleTheme } = useTheme();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
     if (authApi.isAuthenticated()) {
-      authApi.me().then(() => {
-        router.replace('/admin/dashboard');
-      }).catch(() => {
-        authApi.logout();
-      });
+      authApi
+        .me()
+        .then(() => {
+          router.replace("/admin/dashboard");
+        })
+        .catch(() => {
+          authApi.logout();
+        });
     }
   }, [router]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
+    setError("");
     setLoading(true);
     try {
       await authApi.login(email, password);
-      router.push('/admin/dashboard');
+      router.push("/admin/dashboard");
     } catch (err) {
       setError(
         err.status === 401
-          ? 'Correo o contraseña incorrectos'
-          : err.message || 'Error al iniciar sesión'
+          ? "Correo o contraseña incorrectos"
+          : err.message || "Error al iniciar sesión",
       );
     } finally {
       setLoading(false);
@@ -415,10 +429,38 @@ export default function AdminLoginPage() {
 
       <div className="login-root">
         <div className="login-wrapper">
-          <button className="back-btn" onClick={() => router.push('/')}>
-            <ArrowLeft size={16} />
-            Volver al mapa
-          </button>
+          <div className="flex items-center justify-between w-full">
+            <button className="back-btn" onClick={() => router.push("/")}>
+              <ArrowLeft size={16} />
+              Volver al mapa
+            </button>
+
+            <button
+              onClick={toggleTheme}
+              className="group relative p-2.5 rounded-lg bg-white/10 hover:bg-white/20 dark:bg-white/5 dark:hover:bg-white/15 backdrop-blur-md transition-all duration-300 shadow-lg hover:shadow-xl hover:scale-105 border border-white/20"
+              aria-label="Toggle theme"
+              title={
+                mounted
+                  ? theme === "light"
+                    ? "Cambiar a modo oscuro"
+                    : "Cambiar a modo claro"
+                  : "Toggle theme"
+              }
+            >
+              <div className="absolute inset-0 rounded-xl bg-linear-to-br from-white/0 to-white/10 opacity-0 group-hover:opacity-100 transition-opacity" />
+
+              {!mounted ? (
+                <span className="block w-6 h-6" />
+              ) : theme === "dark" ? (
+                <Sun
+                  className="w-6 h-6 text-yellow-300 relative z-10 animate-spin"
+                  style={{ animationDuration: "20s" }}
+                />
+              ) : (
+                <Moon className="w-6 h-6 text-blue-500 relative z-10" />
+              )}
+            </button>
+          </div>
 
           <div className="login-card">
             <div className="login-header">
@@ -439,8 +481,19 @@ export default function AdminLoginPage() {
             {error && (
               <div className="error-box">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                  <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5"/>
-                  <path d="M8 5v3.5M8 10.5v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  <circle
+                    cx="8"
+                    cy="8"
+                    r="7"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                  />
+                  <path
+                    d="M8 5v3.5M8 10.5v.5"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                  />
                 </svg>
                 {error}
               </div>
@@ -473,7 +526,7 @@ export default function AdminLoginPage() {
                 <div className="input-wrap">
                   <input
                     className="field-input has-toggle"
-                    type={showPassword ? 'text' : 'password'}
+                    type={showPassword ? "text" : "password"}
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}

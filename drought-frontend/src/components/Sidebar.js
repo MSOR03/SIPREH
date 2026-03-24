@@ -48,6 +48,8 @@ export default function Sidebar({
   setAnalysisState,
   predictionState,
   setPredictionState,
+  predictionOpen,
+  setPredictionOpen,
   predictionHistoryState,
   setPredictionHistoryState,
   onAnalysisPlot,
@@ -57,7 +59,6 @@ export default function Sidebar({
   selectedCell,
 }) {
   const [historicalOpen, setHistoricalOpen] = useState(true);
-  const [predictionOpen, setPredictionOpen] = useState(true);
   const [predictionHistoryOpen, setPredictionHistoryOpen] = useState(false);
   const [showCategoryPicker, setShowCategoryPicker] = useState(true);
 
@@ -147,14 +148,14 @@ export default function Sidebar({
 
   const predictionSummary = useMemo(
     () => [
-      predictionState.droughtIndex
-        ? (ALL_INDICES.find((i) => i.value === predictionState.droughtIndex)?.label || predictionState.droughtIndex)
-        : null,
-      predictionState.timeHorizon
-        ? (timeHorizons.find((h) => h.value === predictionState.timeHorizon)?.label || predictionState.timeHorizon)
+      predictionState.visualizationType === '2D' ? '2D Mapa' : '1D Serie',
+      predictionState.droughtIndex || null,
+      predictionState.scale ? `${predictionState.scale}m` : null,
+      predictionState.visualizationType === '2D' && predictionState.horizon
+        ? `H${predictionState.horizon}`
         : null,
     ].filter(Boolean).join(' • ') || null,
-    [predictionState.droughtIndex, predictionState.timeHorizon]
+    [predictionState.visualizationType, predictionState.droughtIndex, predictionState.scale, predictionState.horizon]
   );
 
   const predictionHistorySummary = useMemo(
@@ -257,8 +258,6 @@ export default function Sidebar({
           predictionSummary={predictionSummary}
           predictionState={predictionState}
           setPredictionState={setPredictionState}
-          allIndices={ALL_INDICES}
-          timeHorizons={timeHorizons}
           hasSelection={hasSelection}
           onPredictionPlot={onPredictionPlot}
         />

@@ -33,9 +33,14 @@ export default function Home() {
 
   // Prediction State
   const [predictionState, setPredictionState] = useState({
+    visualizationType: '1D',  // '1D' | '2D'
     droughtIndex: '',
-    timeHorizon: '',
+    scale: 1,
+    horizon: 1,
   });
+
+  // AI Summary state
+  const [aiSummary, setAiSummary] = useState({ open: false, loading: false, summary: null, index: '', type: '1d' });
 
   // Prediction History State
   const [predictionHistoryState, setPredictionHistoryState] = useState({
@@ -46,6 +51,12 @@ export default function Home() {
 
   // Plot data state
   const [plotData, setPlotData] = useState(null);
+
+  // Prediction section open state (lifted from Sidebar so MapArea can react)
+  const [predictionOpen, setPredictionOpen] = useState(true);
+
+  // Prediction cells (loaded from backend when prediction section opens)
+  const [predictionCells, setPredictionCells] = useState(null);
 
   // Map layer visibility state
   const [mapLayers, setMapLayers] = useState({
@@ -65,6 +76,32 @@ export default function Home() {
       setMapLayers(prev => ({ ...prev, grid: false, stations: true }));
     }
   }, [analysisState.dataCategory]);
+
+  // Load prediction cells when prediction section opens
+  useEffect(() => {
+    if (!predictionOpen || predictionCells) return;
+    let cancelled = false;
+    async function loadPredictionCells() {
+      try {
+        const { historicalApi, predictionApi } = await import('@/services/api');
+        const files = await historicalApi.getFiles();
+        const predFile = files.find(f => f.dataset_type === 'prediction');
+        if (!predFile || cancelled) return;
+        const result = await predictionApi.getCells(predFile.file_id);
+        if (!cancelled && result?.cells) {
+          setPredictionCells({
+            fileId: predFile.file_id,
+            cells: result.cells,
+            resolution: result.resolution || 0.05,
+          });
+        }
+      } catch (err) {
+        console.error('Error loading prediction cells:', err);
+      }
+    }
+    loadPredictionCells();
+    return () => { cancelled = true; };
+  }, [predictionOpen, predictionCells]);
 
   // Handle Analysis Plot
   const handleAnalysisPlot = useCallback(async () => {
@@ -177,9 +214,10 @@ export default function Home() {
           );
 
         } else {
-        // Usar la resolución seleccionada por el usuario
+        // Usar la resolución seleccionada por el usuario (solo archivos historicos)
         const targetResolution = analysisState.spatialResolution || 0.05;
-        const file = files.find(f => Math.abs((f.resolution || 0.1) - targetResolution) < 0.01);
+        const historicalFiles = files.filter(f => !f.dataset_type || f.dataset_type === 'historical');
+        const file = historicalFiles.find(f => Math.abs((f.resolution || 0.1) - targetResolution) < 0.01);
         
         if (!file) {
           showError(`No se encontró archivo para resolución ${targetResolution}°`, 'Error');
@@ -247,7 +285,8 @@ export default function Home() {
         if (selectedCell) {
           // Si hay celda seleccionada, buscar archivo con la resolución de la celda
           const resolution = selectedCell.resolution || 0.1;
-          const file = files.find(f => Math.abs((f.resolution || 0.1) - resolution) < 0.01);
+          const historicalOnly = files.filter(f => !f.dataset_type || f.dataset_type === 'historical');
+          const file = historicalOnly.find(f => Math.abs((f.resolution || 0.1) - resolution) < 0.01);
           
           if (!file) {
             showError(`No se encontró archivo para resolución ${resolution}°`, 'Error');
@@ -372,47 +411,143 @@ export default function Home() {
 
   // Handle Prediction Plot
   const handlePredictionPlot = useCallback(async () => {
-    // Validate selection first
-    if (!selectedStation && !selectedCell) {
-      showError(
-        'Debes seleccionar una estación o celda del mapa antes de graficar',
-        'Selección Requerida'
-      );
-      return;
-    }
-    
+    const is2D = predictionState.visualizationType === '2D';
+
+    // Validations
     if (!predictionState.droughtIndex) {
-      showWarning('Por favor selecciona un índice de sequía', 'Datos incompletos');
+      showWarning('Por favor selecciona un indice de sequia', 'Datos incompletos');
       return;
     }
-    
-    if (!predictionState.timeHorizon) {
-      showWarning('Por favor selecciona un horizonte de predicción', 'Horizonte requerido');
+    if (!predictionState.scale) {
+      showWarning('Por favor selecciona una escala temporal', 'Escala requerida');
+      return;
+    }
+    if (!is2D && !selectedCell) {
+      showError('Selecciona una celda del mapa para la prediccion 1D', 'Seleccion Requerida');
+      return;
+    }
+    if (is2D && !predictionState.horizon) {
+      showWarning('Por favor selecciona un horizonte de prediccion', 'Horizonte requerido');
       return;
     }
 
-    // TODO: Call backend API with selected station/cell
-    const location = selectedStation 
-      ? `Estación: ${selectedStation.name}` 
-      : `Celda: [${selectedCell.center[0].toFixed(3)}, ${selectedCell.center[1].toFixed(3)}]`;
-    
-    console.log('Plotting prediction:', {
-      ...predictionState,
-      location: selectedStation || selectedCell
-    });
-    
-    showSuccess(
-      `Predicción generada para ${location}`,
-      '¡Listo!'
-    );
-    
-    // Set plot data for display
-    setPlotData({
-      title: `Predicción: ${predictionState.droughtIndex} - ${predictionState.timeHorizon}`,
-      type: 'Mapa de Predicción',
-      data: predictionState,
-    });
-  }, [predictionState, selectedStation, selectedCell, showError, showWarning, showSuccess]);
+    try {
+      showInfo(is2D ? 'Consultando prediccion espacial...' : 'Consultando prediccion temporal...', 'Cargando');
+
+      const { historicalApi, predictionApi } = await import('@/services/api');
+
+      // Use cached prediction file ID if available, otherwise find it
+      let predFileId;
+      if (predictionCells?.fileId) {
+        predFileId = predictionCells.fileId;
+      } else {
+        const files = await historicalApi.getFiles();
+        const predFile = files.find(f => f.dataset_type === 'prediction');
+        if (!predFile) {
+          showError('No se encontro archivo de prediccion. Sube uno desde el panel admin con dataset_key "prediction_main".', 'Error');
+          return;
+        }
+        predFileId = predFile.file_id;
+      }
+
+      if (is2D) {
+        // === 2D: Spatial grid ===
+        const response = await predictionApi.getSpatialData({
+          fileId: predFileId,
+          var: predictionState.droughtIndex,
+          scale: predictionState.scale,
+          horizon: predictionState.horizon,
+        });
+
+        setPlotData({
+          type: 'prediction-2d',
+          title: `Prediccion ${predictionState.droughtIndex} (${predictionState.scale}m) - Horizonte ${predictionState.horizon}`,
+          subtitle: `${response.statistics?.unique_cells || 0} celdas | Escala: ${predictionState.scale} meses`,
+          variable: predictionState.droughtIndex,
+          gridCells: response.grid_cells,
+          statistics: response.statistics,
+          bounds: response.bounds,
+          resolution: 0.05,
+          predictionMeta: { index: predictionState.droughtIndex, scale: predictionState.scale, horizon: predictionState.horizon },
+        });
+
+        showSuccess(
+          `Mapa de prediccion generado: ${response.statistics?.unique_cells || 0} celdas`,
+          '!Listo!'
+        );
+      } else {
+        // === 1D: Time series for cell ===
+        const response = await predictionApi.getTimeSeries({
+          fileId: predFileId,
+          cellId: selectedCell.cell_id,
+          var: predictionState.droughtIndex,
+          scale: predictionState.scale,
+        });
+
+        setPlotData({
+          type: 'prediction-1d',
+          title: `Prediccion ${predictionState.droughtIndex} (${predictionState.scale}m)`,
+          subtitle: `Celda: ${selectedCell.cell_id} | 12 horizontes`,
+          variable: predictionState.droughtIndex,
+          data: response.data,
+          statistics: response.statistics,
+          predictionMeta: { index: predictionState.droughtIndex, scale: predictionState.scale, cellId: selectedCell.cell_id },
+        });
+
+        showSuccess(
+          `Prediccion generada para celda ${selectedCell.cell_id} (${response.data?.length || 0} horizontes)`,
+          '!Listo!'
+        );
+      }
+    } catch (error) {
+      console.error('Error plotting prediction:', error);
+      showError(error.message || 'Error al consultar prediccion', 'Error en la consulta');
+    }
+  }, [predictionState, predictionCells, selectedCell, showError, showWarning, showInfo, showSuccess]);
+
+  // Handle AI Summary
+  const handleAiSummary = useCallback(async () => {
+    if (!plotData) return;
+
+    const isPred1d = plotData.type === 'prediction-1d';
+    const isPred2d = plotData.type === 'prediction-2d';
+    if (!isPred1d && !isPred2d) {
+      showWarning('El resumen IA solo esta disponible para predicciones', 'No disponible');
+      return;
+    }
+
+    const summaryType = isPred1d ? '1d' : '2d';
+    const index = plotData.predictionMeta?.index || plotData.variable;
+    const scale = plotData.predictionMeta?.scale || 1;
+
+    setAiSummary({ open: true, loading: true, summary: null, index, type: summaryType });
+
+    try {
+      const { predictionApi } = await import('@/services/api');
+
+      let result;
+      if (isPred1d) {
+        const values = (plotData.data || []).map(d => d.value).filter(v => v != null);
+        result = await predictionApi.getAiSummary({ type: '1d', index, scale, values });
+      } else {
+        const gridSummary = {
+          mean: plotData.statistics?.mean,
+          min: plotData.statistics?.min,
+          max: plotData.statistics?.max,
+          pct_severe: plotData.statistics?.pct_severe || 0,
+          pct_moderate: plotData.statistics?.pct_moderate || 0,
+          pct_normal: plotData.statistics?.pct_normal || 0,
+        };
+        const horizon = plotData.predictionMeta?.horizon || 1;
+        result = await predictionApi.getAiSummary({ type: '2d', index, scale, gridSummary, horizon });
+      }
+
+      setAiSummary(prev => ({ ...prev, loading: false, summary: result.summary }));
+    } catch (error) {
+      console.error('Error getting AI summary:', error);
+      setAiSummary(prev => ({ ...prev, loading: false, summary: 'Error al generar resumen: ' + (error.message || 'intenta de nuevo') }));
+    }
+  }, [plotData, showWarning]);
 
   // Handle Save functions
   const handleAnalysisSave = useCallback(() => {
@@ -499,6 +634,210 @@ export default function Home() {
     console.log('Map and selections reset');
   }, []);
 
+  // Handle Spatial Cell Click from 2D view -> auto-query 1D detail
+  const handleSpatialCellClick = useCallback(async (cell) => {
+    if (!plotData) return;
+
+    try {
+      const { historicalApi, hydroApi, predictionApi } = await import('@/services/api');
+
+      // === Prediction 2D -> Prediction 1D ===
+      if (plotData.type === 'prediction-2d') {
+        const cellId = cell.cell_id || `${Number(cell.lon).toFixed(6)}_${Number(cell.lat).toFixed(6)}`;
+        const index = plotData.predictionMeta?.index || predictionState.droughtIndex;
+        const scale = plotData.predictionMeta?.scale || predictionState.scale;
+
+        // Use cached prediction file ID
+        let predFileId = predictionCells?.fileId;
+        if (!predFileId) {
+          const files = await historicalApi.getFiles();
+          const predFile = files.find(f => f.dataset_type === 'prediction');
+          if (!predFile) { showError('No se encontro archivo de prediccion', 'Error'); return; }
+          predFileId = predFile.file_id;
+        }
+
+        showInfo(`Consultando prediccion 1D para celda ${cellId}...`, 'Cargando');
+
+        const response = await predictionApi.getTimeSeries({
+          fileId: predFileId,
+          cellId: cellId,
+          var: index,
+          scale: scale,
+        });
+
+        // Update selected cell visually
+        const halfRes = 0.05 / 2;
+        setSelectedCell({
+          id: cellId,
+          cell_id: cellId,
+          center: [cell.lat, cell.lon],
+          bounds: [[cell.lat - halfRes, cell.lon - halfRes], [cell.lat + halfRes, cell.lon + halfRes]],
+          resolution: 0.05,
+          lat: cell.lat,
+          lon: cell.lon,
+        });
+        setSelectedStation(null);
+
+        // Switch prediction sidebar to 1D mode
+        setPredictionState(prev => ({ ...prev, visualizationType: '1D' }));
+
+        setPlotData({
+          type: 'prediction-1d',
+          title: `Prediccion ${index} (${scale}m)`,
+          subtitle: `Celda: ${cellId} | 12 horizontes`,
+          variable: index,
+          data: response.data,
+          statistics: response.statistics,
+          predictionMeta: { index, scale, cellId },
+        });
+
+        showSuccess(`Prediccion 1D generada para celda ${cellId}`, '!Listo!');
+        return;
+      }
+
+      // === Historical 2D (hydro stations) -> Historical 1D ===
+      if (plotData.type === '2D' && plotData.isHydro && cell.codigo) {
+        const { INDICES_WITHOUT_SCALE } = await import('@/utils/hydroStations');
+        const stationCode = cell.codigo;
+        const stationName = cell.station_name || cell.codigo;
+        const index = analysisState.droughtIndex;
+        if (!index) { showWarning('No hay indice de sequia seleccionado', 'Error'); return; }
+
+        const files = await historicalApi.getFiles();
+        const hydroFile = files.find(f => (f.filename || '').toLowerCase().includes('hydro'));
+        if (!hydroFile) { showError('No se encontro archivo hidrologico', 'Error'); return; }
+
+        const noScale = INDICES_WITHOUT_SCALE.has(index);
+        const scale = noScale ? null : (analysisState.indexScale || 1);
+
+        showInfo(`Consultando serie 1D para estacion ${stationName}...`, 'Cargando');
+
+        const response = await hydroApi.getTimeSeries({
+          fileId: hydroFile.file_id,
+          stationCode: stationCode,
+          indexName: index,
+          scale: scale,
+          startDate: analysisState.startDate,
+          endDate: analysisState.endDate,
+        });
+
+        // Find the station object for selection
+        const { HYDRO_STATIONS } = await import('@/utils/hydroStations');
+        const stationObj = HYDRO_STATIONS.find(s => String(s.codigo) === String(stationCode));
+        if (stationObj) {
+          setSelectedStation({
+            id: stationObj.codigo,
+            codigo: stationObj.codigo,
+            position: [stationObj.lat, stationObj.lon],
+            name: stationObj.name,
+            area: `Código: ${stationObj.codigo}`,
+            type: 'secundaria',
+          });
+          setSelectedCell(null);
+        }
+
+        // Switch to 1D mode
+        setAnalysisState(prev => ({ ...prev, visualizationType: '1D' }));
+
+        const scaleLabel = noScale ? '' : ` (Escala ${scale})`;
+
+        let chartData = response.data;
+        if (response.has_duration && response.data?.length > 0) {
+          const expanded = [];
+          for (const evt of response.data) {
+            if (evt.fecha_final && evt.fecha_final !== 'None' && evt.fecha_final !== 'NaT') {
+              expanded.push({ ...evt, date: evt.date });
+              expanded.push({ ...evt, date: evt.fecha_final });
+              const gapDate = new Date(new Date(evt.fecha_final).getTime() + 86400000);
+              expanded.push({ date: gapDate.toISOString().split('T')[0], value: null });
+            } else {
+              expanded.push(evt);
+            }
+          }
+          chartData = expanded;
+        }
+
+        setPlotData({
+          type: '1D',
+          title: `${response.index_display_name}${scaleLabel}`,
+          subtitle: `Estación: ${stationCode} - ${stationName}`,
+          variable: response.index_name,
+          variable_name: response.index_display_name,
+          unit: response.unit,
+          data: chartData,
+          rawData: response.data,
+          statistics: response.statistics,
+          location: response.station,
+          hasDuration: response.has_duration,
+        });
+
+        showSuccess(`Serie 1D generada para estacion ${stationName}`, '!Listo!');
+        return;
+      }
+
+      // === Historical 2D (meteorological grid) -> Historical 1D ===
+      if (plotData.type === '2D' && !plotData.isHydro) {
+        const cellId = cell.cell_id || `${Number(cell.lon).toFixed(6)}_${Number(cell.lat).toFixed(6)}`;
+        const variable = analysisState.droughtIndex || analysisState.variable;
+        if (!variable) { showWarning('No hay variable seleccionada', 'Error'); return; }
+
+        const resolution = plotData.resolution || 0.05;
+        const files = await historicalApi.getFiles();
+        const historicalOnly = files.filter(f => !f.dataset_type || f.dataset_type === 'historical');
+        const file = historicalOnly.find(f => Math.abs((f.resolution || 0.1) - resolution) < 0.01);
+        if (!file) { showError(`No se encontro archivo para resolucion ${resolution}°`, 'Error'); return; }
+
+        showInfo(`Consultando serie 1D para celda ${cellId}...`, 'Cargando');
+
+        const response = await historicalApi.getTimeSeries({
+          fileId: file.file_id,
+          variable: variable,
+          startDate: analysisState.startDate,
+          endDate: analysisState.endDate,
+          cellId: cellId,
+          scale: analysisState.droughtIndex ? analysisState.indexScale : null,
+          frequency: !analysisState.droughtIndex ? analysisState.frequency : null,
+        });
+
+        // Update selected cell visually
+        const halfRes = resolution / 2;
+        setSelectedCell({
+          id: cellId,
+          cell_id: cellId,
+          center: [cell.lat, cell.lon],
+          bounds: [[cell.lat - halfRes, cell.lon - halfRes], [cell.lat + halfRes, cell.lon + halfRes]],
+          resolution: resolution,
+          lat: cell.lat,
+          lon: cell.lon,
+        });
+        setSelectedStation(null);
+
+        // Switch to 1D mode
+        setAnalysisState(prev => ({ ...prev, visualizationType: '1D' }));
+
+        const freqLabel = response.frequency === 'M' ? 'Mensual' : 'Diaria';
+        setPlotData({
+          type: '1D',
+          title: `${response.variable_name} - Serie de Tiempo`,
+          subtitle: `Celda: ${cellId} | Frecuencia: ${freqLabel}`,
+          variable: String(response.variable || variable || '').trim().toUpperCase(),
+          unit: response.unit,
+          frequency: response.frequency,
+          data: response.data,
+          statistics: response.statistics,
+          location: response.location,
+        });
+
+        showSuccess(`Serie 1D generada para celda ${cellId}`, '!Listo!');
+        return;
+      }
+
+    } catch (error) {
+      console.error('Error in spatial cell click -> 1D:', error);
+      showError(error.message || 'Error al consultar datos 1D', 'Error');
+    }
+  }, [plotData, predictionState, predictionCells, analysisState, showError, showWarning, showInfo, showSuccess]);
+
   return (
     <div className="flex flex-col h-screen bg-gradient-to-br from-blue-50/30 via-blue-50/20 to-blue-50/20 dark:from-[#0f1419] dark:via-[#0a0e13] dark:to-[#0f1419] p-4">
       <Header />
@@ -509,6 +848,8 @@ export default function Home() {
           setAnalysisState={setAnalysisState}
           predictionState={predictionState}
           setPredictionState={setPredictionState}
+          predictionOpen={predictionOpen}
+          setPredictionOpen={setPredictionOpen}
           predictionHistoryState={predictionHistoryState}
           setPredictionHistoryState={setPredictionHistoryState}
           onAnalysisPlot={handleAnalysisPlot}
@@ -517,16 +858,22 @@ export default function Home() {
           selectedStation={selectedStation}
           selectedCell={selectedCell}
         />
-        
+
         <MapArea
           plotData={plotData}
           onReset={handleReset}
           onSaveData={handleAnalysisSave}
           onExportImage={handleAnalysisImageExport}
+          onAiSummary={handleAiSummary}
+          aiSummary={aiSummary}
+          setAiSummary={setAiSummary}
+          predictionOpen={predictionOpen}
+          predictionCells={predictionCells}
           selectedStation={selectedStation}
           selectedCell={selectedCell}
           onStationSelect={setSelectedStation}
           onCellSelect={setSelectedCell}
+          onSpatialCellClick={handleSpatialCellClick}
           mapLayers={mapLayers}
           setMapLayers={setMapLayers}
         />

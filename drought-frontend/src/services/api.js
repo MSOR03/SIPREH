@@ -111,17 +111,18 @@ export const droughtApi = {
   },
 
   // Obtener archivos disponibles
-  getFiles: async () => {
-    return fetchApi('/historical/files');
+  getFiles: async (datasetType) => {
+    const params = datasetType ? `?dataset_type=${datasetType}` : '';
+    return fetchApi(`/historical/files${params}`);
   },
 
-  // Obtener archivo por resolución específica
+  // Obtener archivo por resolución específica (solo archivos históricos)
   getFileByResolution: async (resolution) => {
-    const files = await fetchApi('/historical/files');
+    const files = await fetchApi('/historical/files?dataset_type=historical');
     // Buscar archivo que coincida con la resolución
     const file = files.find(f => {
       const metadata = f.metadata || {};
-      const fileResolution = metadata.resolution || 0.1;
+      const fileResolution = f.resolution || metadata.resolution || 0.1;
       return Math.abs(fileResolution - resolution) < 0.01;
     });
     return file || files[0]; // Fallback al primero si no encuentra
@@ -258,8 +259,9 @@ export const historicalApi = {
   },
 
   // Archivos disponibles
-  getFiles: async () => {
-    return fetchApi('/historical/files');
+  getFiles: async (datasetType) => {
+    const params = datasetType ? `?dataset_type=${datasetType}` : '';
+    return fetchApi(`/historical/files${params}`);
   },
 
   // Información de un archivo específico
@@ -374,9 +376,9 @@ export const historicalApi = {
     return fetchApi(`/historical/files/${fileId}/cells`);
   },
 
-  // Obtener archivo por resolución
+  // Obtener archivo por resolución (solo históricos)
   getFileByResolution: async (resolution) => {
-    const files = await fetchApi('/historical/files');
+    const files = await fetchApi('/historical/files?dataset_type=historical');
     const file = files.find(f => {
       const fileResolution = f.resolution || f.metadata?.resolution || 0.1;
       return Math.abs(fileResolution - resolution) < 0.01;
@@ -429,6 +431,57 @@ export const hydroApi = {
         start_date: startDate,
         end_date: endDate,
         use_interval: useInterval,
+      }),
+    });
+  },
+};
+
+/**
+ * Prediction Data API
+ */
+export const predictionApi = {
+  // Celdas unicas del parquet de prediccion (297 CHIRPS cells)
+  getCells: async (fileId) => {
+    return fetchApi(`/prediction/cells/${fileId}`);
+  },
+
+  // Serie temporal 1D por celda (12 horizontes)
+  getTimeSeries: async ({ fileId, cellId, var: varName, scale }) => {
+    return fetchApi('/prediction/timeseries', {
+      method: 'POST',
+      body: JSON.stringify({
+        parquet_file_id: fileId,
+        cell_id: cellId,
+        var: varName,
+        scale: scale,
+      }),
+    });
+  },
+
+  // Datos espaciales 2D (297 celdas)
+  getSpatialData: async ({ fileId, var: varName, scale, horizon }) => {
+    return fetchApi('/prediction/spatial', {
+      method: 'POST',
+      body: JSON.stringify({
+        parquet_file_id: fileId,
+        var: varName,
+        scale: scale,
+        horizon: horizon,
+      }),
+    });
+  },
+
+  // Resumen IA
+  getAiSummary: async ({ type, index, scale, values, gridSummary, horizon }) => {
+    return fetchApi('/prediction/ai-summary', {
+      method: 'POST',
+      body: JSON.stringify({
+        type: type,
+        index: index,
+        scale: scale,
+        values: values || null,
+        grid_summary: gridSummary || null,
+        horizon: horizon || null,
       }),
     });
   },

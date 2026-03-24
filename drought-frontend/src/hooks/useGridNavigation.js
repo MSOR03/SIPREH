@@ -40,8 +40,8 @@ export function useGridNavigation(initialLevel = 'LOW') {
         setIsLoading(true);
         setError(null);
         
-        // Cargar archivos y obtener celdas de cada nivel
-        const files = await historicalApi.getFiles();
+        // Cargar archivos y obtener celdas de cada nivel (solo historicos)
+        const files = await historicalApi.getFiles('historical');
         
         const cellsData = {
           LOW: [],

@@ -265,10 +265,15 @@ def validate_file_structure(
 
 @router.get("/files", response_model=List[FileInfoResponse])
 def list_available_files(
+    dataset_type: str = None,
     db: Session = Depends(get_db)
 ):
     """
     Lista todos los archivos parquet disponibles.
+
+    Args:
+        dataset_type: Filtro opcional (historical, hydrological, prediction).
+                      Si no se pasa, retorna todos.
 
     NOTA: No ejecuta queries remotas a Cloudflare para cada archivo.
     Solo retorna metadata local (DB + cache). Los datos de date_range
@@ -282,6 +287,13 @@ def list_available_files(
     result = []
     for file in files:
         metadata = get_file_metadata(file)
+
+        # Filtrar por dataset_type si se especificó
+        if dataset_type:
+            file_dataset_type = metadata.get("dataset_type")
+            if file_dataset_type and file_dataset_type != dataset_type:
+                continue
+
         resolution = metadata.get("resolution")
         if resolution is None:
             resolution = infer_resolution_from_filename(file.original_filename) or infer_resolution_from_filename(file.filename)
@@ -290,6 +302,7 @@ def list_available_files(
             "file_id": file.id,
             "filename": file.filename,
             "resolution": resolution,
+            "dataset_type": metadata.get("dataset_type"),
             "date_range": {"start": None, "end": None},
             "spatial_bounds": {},
             "size_mb": file.file_size / (1024 * 1024) if file.file_size else None,
