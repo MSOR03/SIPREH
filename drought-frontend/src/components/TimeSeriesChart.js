@@ -38,7 +38,20 @@ export default function TimeSeriesChart({
   showLegend = false,
   title = '',
   yLabel = '',
+  variable = '', // <--- NUEVO: recibe la variable climática
+  frequency = '', // <--- NUEVO: frecuencia para el step
 }) {
+
+    // Aquí coloca la función:
+  const getYLabel = () => {
+    if (variable === "precipitacion") return "Precip. (mm)";
+    if (variable === "temperatura") return "Temp. (°C)";
+    if (variable === "evapotranspiracion") return "Evapot. pot. (mm)";
+    return yLabel || "Valor (mm)";
+  };
+
+  console.log('variable:', variable, 'getYLabel:', getYLabel());
+
   const chartRef = useRef(null);
   const plotInstance = useRef(null);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -82,32 +95,63 @@ export default function TimeSeriesChart({
         x: { time: true },
         y: { auto: true },
       },
-      axes: [
-        {
-          label: 'Tiempo',
-          stroke: '#9ca3af',
-          grid: { show: true, stroke: '#e5e7eb', width: 1 },
-          ticks: { show: true, stroke: '#e5e7eb', width: 1 },
-          font: '12px system-ui, -apple-system, sans-serif',
-          values: (self, ticks) => ticks.map(val => {
+    axes: [
+      {
+        label: 'Tiempo',
+        stroke: '#9ca3af',
+        grid: { show: true, stroke: '#e5e7eb', width: 1 },
+        ticks: { show: true, stroke: '#e5e7eb', width: 1 },
+        font: '12px system-ui, -apple-system, sans-serif',
+        // Forzar a mostrar el primer y último tick
+        splits: (u) => {
+          const data = u.data[0];
+          const first = data[0];
+          const last = data[data.length - 1];
+          const n = 8; // número de ticks intermedios (ajusta según tu preferencia)
+          const step = (last - first) / (n - 1);
+          const ticks = Array.from({ length: n }, (_, i) => Math.round(first + i * step));
+          // Asegura que el primero y el último estén incluidos exactamente
+          if (ticks[0] !== first) ticks.unshift(first);
+          if (ticks[ticks.length - 1] !== last) ticks.push(last);
+          return ticks;
+        },
+        values: (self, ticks) =>
+          ticks.map(val => {
             const date = new Date(val * 1000);
-            return date.toLocaleDateString(undefined, {
-              month: 'short',
-              day: 'numeric',
-              year: data.length > 365 ? 'numeric' : undefined,
-            });
+            const day = String(date.getDate()).padStart(2, '0');
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const year = String(date.getFullYear()).slice(-2);
+            return `${day}/${month}/${year}`;
           }),
-        },
-        {
-          stroke: '#9ca3af',
-          label: yLabel,
-          labelFont: '14px system-ui, -apple-system, sans-serif',
-          space: 180,
-          grid: { show: true, stroke: '#e5e7eb', width: 1 },
-          ticks: { show: true, stroke: '#e5e7eb', width: 1 },
-          font: '12px system-ui, -apple-system, sans-serif',
-        },
-      ],
+      },
+{
+  stroke: '#9ca3af',
+  label: getYLabel(), // <--- AQUÍ el label dinámico
+  labelFont: '14px system-ui, -apple-system, sans-serif',
+  space: 220,
+  grid: { show: true, stroke: '#e5e7eb', width: 1 },
+  ticks: { show: true, stroke: '#e5e7eb', width: 1 },
+  font: '9px system-ui, -apple-system, sans-serif',
+  splits: (u, axisIdx, scaleMin, scaleMax) => {
+    const step = (typeof frequency !== "undefined" && frequency === "mensual") ? 30 : 10;
+    const maxY = Math.ceil(Math.max(...u.data[1]) / step) * step;
+    const start = 0;
+    const end = maxY;
+    const ticks = [];
+    for (let v = start; v <= end; v += step) {
+      ticks.push(v);
+    }
+    const maxTicks = 12;
+    if (ticks.length > maxTicks) {
+      const skip = Math.ceil(ticks.length / maxTicks);
+      return ticks.filter((_, i) => i % skip === 0);
+    }
+    return ticks;
+  },
+  values: (self, ticks) => ticks.map(val => val.toFixed(1)),
+},
+  ],
+
       series: [
         {
           // X values (time)
@@ -115,7 +159,7 @@ export default function TimeSeriesChart({
         },
         {
           // Y values
-          label: yLabel || dataKey,
+          label: getYLabel(), // <--- usa el mismo label dinámico aquí
           stroke: stroke,
           width: 2,
           fill: type === 'area' ? fill : undefined,
@@ -211,6 +255,7 @@ export default function TimeSeriesChart({
         className="w-full"
         style={{
           width: typeof width === 'number' ? `${width}px` : width,
+          overflow: 'visible', // <-- AÑADE ESTO
         }}
       />
 
