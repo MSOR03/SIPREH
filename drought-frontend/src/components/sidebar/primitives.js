@@ -95,7 +95,7 @@ export function StepSection({ step, title, children, color = 'blue', collapsible
   );
 }
 
-export function RadioOption({ name, value, checked, onChange, label, description, icon: Icon, disabled }) {
+export function RadioOption({ name, value, checked, onChange, label, description, icon: Icon }) {
   return (
     <label className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all border-2 ${
       checked
@@ -109,7 +109,6 @@ export function RadioOption({ name, value, checked, onChange, label, description
         checked={checked}
         onChange={() => onChange(value)}
         className="sr-only"
-        disabled={disabled}
       />
       {Icon && (
         <div className={`p-1.5 rounded-lg shrink-0 ${

@@ -5,7 +5,7 @@ import uPlot from 'uplot';
 import 'uplot/dist/uPlot.min.css';
 import './TimeSeriesChart.css';
 import { prepareTimeSeriesData, getOptimalThreshold } from '@/utils/downsampling';
-import { ZoomIn, ZoomOut, Maximize2, Move } from 'lucide-react';
+import { ZoomIn, Maximize2, Move } from 'lucide-react';
 
 /**
  * High-performance time series chart using uPlot
@@ -65,9 +65,9 @@ export default function TimeSeriesChart({
     // Prepare data with optimal downsampling
     const threshold = getOptimalThreshold(data.length, containerWidth);
     const [timestamps, values] = prepareTimeSeriesData(
-      data, 
-      xKey, 
-      dataKey, 
+      data,
+      xKey,
+      dataKey,
       Math.min(maxPoints, threshold)
     );
 
@@ -79,29 +79,15 @@ export default function TimeSeriesChart({
       tzDate: ts => new Date(ts * 1000),
       plugins: [],
       scales: {
-        x: {
-          time: true,
-        },
-        y: {
-          auto: true,
-        },
+        x: { time: true },
+        y: { auto: true },
       },
-      // ...
       axes: [
         {
-          // Eje X (tiempo)
           label: 'Tiempo',
           stroke: '#9ca3af',
-          grid: {
-            show: true,
-            stroke: '#e5e7eb',
-            width: 1,
-          },
-          ticks: {
-            show: true,
-            stroke: '#e5e7eb',
-            width: 1,
-          },
+          grid: { show: true, stroke: '#e5e7eb', width: 1 },
+          ticks: { show: true, stroke: '#e5e7eb', width: 1 },
           font: '12px system-ui, -apple-system, sans-serif',
           values: (self, ticks) => ticks.map(val => {
             const date = new Date(val * 1000);
@@ -113,21 +99,12 @@ export default function TimeSeriesChart({
           }),
         },
         {
-          // Eje Y
           stroke: '#9ca3af',
           label: yLabel,
           labelFont: '14px system-ui, -apple-system, sans-serif',
-          space: 140, // <-- Añade o aumenta este valor (prueba 90 o 100)
-          grid: {
-            show: true,
-            stroke: '#e5e7eb',
-            width: 1,
-          },
-          ticks: {
-            show: true,
-            stroke: '#e5e7eb',
-            width: 1,
-          },
+          space: 180,
+          grid: { show: true, stroke: '#e5e7eb', width: 1 },
+          ticks: { show: true, stroke: '#e5e7eb', width: 1 },
           font: '12px system-ui, -apple-system, sans-serif',
         },
       ],
@@ -143,7 +120,7 @@ export default function TimeSeriesChart({
           width: 2,
           fill: type === 'area' ? fill : undefined,
           points: {
-            show: data.length < 100, // Only show points if dataset is small
+            show: data.length < 100,
             size: 4,
           },
           spanGaps: false,
@@ -166,10 +143,8 @@ export default function TimeSeriesChart({
         },
       },
       hooks: {
-        // Detect zoom changes
         setScale: [
           (u) => {
-            // Check if zoomed (comparing current range to data range)
             const xMin = u.scales.x.min;
             const xMax = u.scales.x.max;
             const dataMin = Math.min(...timestamps);
@@ -223,7 +198,7 @@ export default function TimeSeriesChart({
             <span className="text-xs font-semibold text-blue-600 dark:text-blue-400">Vista Completa</span>
           </button>
         )}
-        
+
         <div className="flex items-center gap-1 px-2 py-1 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm rounded-lg shadow-md border border-gray-200 dark:border-gray-600">
           <Move className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
           <span className="text-xs text-gray-600 dark:text-gray-400 font-medium">Arrastra para zoom</span>
@@ -231,10 +206,10 @@ export default function TimeSeriesChart({
       </div>
 
       {/* Chart Container */}
-      <div 
-        ref={chartRef} 
+      <div
+        ref={chartRef}
         className="w-full"
-        style={{ 
+        style={{
           width: typeof width === 'number' ? `${width}px` : width,
         }}
       />

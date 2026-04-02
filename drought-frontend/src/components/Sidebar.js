@@ -177,8 +177,7 @@ export default function Sidebar({
 
   const analysisDisabled = useMemo(
     () =>
-      (is2DMode && !analysisState.droughtIndex) || // Solo deshabilita en 2D si no hay índice
-      !analysisState.variable ||
+      (is2DMode && !(analysisState.droughtIndex || analysisState.variable)) ||
       !analysisState.startDate ||
       !analysisState.endDate,
     [
@@ -188,7 +187,7 @@ export default function Sidebar({
       analysisState.startDate,
       analysisState.endDate,
     ]
-  ); 
+  );
 
   const showDataSource = is2DMode && isHydromet && (analysisState.spatialUnit || 'grid') === 'grid';
   const showSpatialUnit = is2DMode;

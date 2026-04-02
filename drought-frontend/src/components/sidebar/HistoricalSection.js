@@ -239,16 +239,16 @@ export default function HistoricalSection({
                   description="Evolución temporal en un punto"
                   icon={BarChart3}
                 />
-                <RadioOption
-                  name="vizType"
-                  value="2D"
-                  checked={analysisState.visualizationType === '2D'}
-                  onChange={(v) => setAnalysisState((prev) => ({ ...prev, visualizationType: v }))}
-                  label="Mapa Espacial"
-                  description="Distribución espacial"
-                  icon={Grid3x3}
-                  disabled={isHydromet && !analysisState.droughtIndex}
-                />
+              <RadioOption
+                name="vizType"
+                value="2D"
+                checked={analysisState.visualizationType === '2D'}
+                onChange={(v) => setAnalysisState((prev) => ({ ...prev, visualizationType: v }))}
+                label="Mapa Espacial"
+                description="Distribución espacial"
+                icon={Grid3x3}
+                disabled={false}
+              />
               </div>
             </StepSection>
 

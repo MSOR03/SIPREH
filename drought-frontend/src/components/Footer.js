@@ -17,27 +17,8 @@ export default function Footer() {
         <div className="absolute bottom-0 right-1/4 w-64 h-64 bg-indigo-400 dark:bg-purple-500 rounded-full blur-3xl" />
       </div>
 
-      <div className="container mx-auto px-6 py-7 relative">
-        <div className="flex flex-col md:flex-row items-center justify-between gap-8">
-
-          {/* Brand */}
-          <div className="flex items-center gap-5 animate-slide-down">
-            <div className="relative group">
-              <div className="absolute inset-0 bg-blue-400/30 dark:bg-blue-500/40 rounded-xl blur-lg group-hover:blur-xl transition-all" />
-              <div className="relative p-3 bg-linear-to-br from-blue-500 to-blue-700 dark:from-blue-600 dark:to-blue-800 rounded-xl shadow-xl border border-blue-300/50 dark:border-blue-400/30">
-                <Cloud className="w-7 h-7 text-white" strokeWidth={2.5} />
-              </div>
-            </div>
-            <div className="text-center md:text-left">
-              <p className="font-bold text-gray-800 dark:text-white text-base tracking-wide">
-                Plataforma de Monitoreo y Predicción de Sequías
-              </p>
-              <p className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2 mt-1">
-                <span className="inline-block w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                Bogotá, Colombia © 2026
-              </p>
-            </div>
-          </div>
+      <div className="container mx-auto px-6 py-32 relative">
+        <div className="flex flex-col md:flex-row items-center justify-end gap-8">
 
           {/* Nav links */}
           <div className="flex items-center gap-8 text-sm animate-fade-in">
