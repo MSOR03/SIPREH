@@ -338,7 +338,7 @@ export default function Home() {
           }
 
           if (!analysisState.droughtIndex) {
-            showWarning('Selecciona un índice hidrológico (SDI, SRI, MFI, DDI, HDI)', 'Índice requerido');
+            showWarning('Selecciona un índice de sequía (SDI, SRI, MFI, DDI, HDI)', 'Índice requerido');
             return;
           }
 

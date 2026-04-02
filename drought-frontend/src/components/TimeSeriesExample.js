@@ -12,31 +12,26 @@ export default function TimeSeriesExample() {
   const [simpleData, setSimpleData] = useState([]);
   const [complexData, setComplexData] = useState([]);
   const [dataSize, setDataSize] = useState(10000);
+  const [variableSeleccionada, setVariableSeleccionada] = useState('temperatura'); // Nuevo estado
 
-  // Generate sample data
+  // Generar datos de ejemplo
   useEffect(() => {
     generateData(dataSize);
   }, [dataSize]);
 
   const generateData = (size) => {
     const startDate = new Date('2023-01-01');
-    
-    // Simple single-series data
     const simple = Array.from({ length: size }, (_, i) => {
       const date = new Date(startDate);
       date.setHours(date.getHours() + i);
-      
       return {
         date: date.toISOString(),
         value: 50 + Math.sin(i / 100) * 20 + Math.random() * 10,
       };
     });
-    
-    // Complex multi-series data
     const complex = Array.from({ length: size }, (_, i) => {
       const date = new Date(startDate);
       date.setHours(date.getHours() + i);
-      
       return {
         timestamp: date.toISOString(),
         temperature: 20 + Math.sin(i / 100) * 10 + Math.random() * 5,
@@ -44,87 +39,45 @@ export default function TimeSeriesExample() {
         pressure: 1013 + Math.sin(i / 150) * 15 + Math.random() * 3,
       };
     });
-
     setSimpleData(simple);
     setComplexData(complex);
   };
 
+// Etiqueta dinámica para el eje Y
+const yLabel =
+  variableSeleccionada === 'precipitacion'
+    ? 'Precipitación (mm)'
+    : variableSeleccionada === 'evaporacion' || variableSeleccionada === 'pet' || variableSeleccionada === 'evapotranspiracion'
+    ? 'PET (mm)'
+    : 'Temperatura (°C)'; // Por defecto, para cualquier temperatura (máxima, mínima, promedio)
+
   return (
     <div className="max-w-7xl mx-auto p-8 space-y-8">
-      <div className="text-center mb-8">
-        <h1 className="text-4xl font-bold mb-4">
-          📊 TimeSeriesChart - Performance Demo
-        </h1>
-        <p className="text-gray-600 mb-6">
-          Demostración de gráficas optimizadas con uPlot para grandes volúmenes de datos
-        </p>
-
-        {/* Data size selector */}
-        <div className="inline-flex items-center gap-4 bg-white rounded-lg shadow px-6 py-3">
-          <label className="font-medium">Tamaño del dataset:</label>
-          <select 
-            value={dataSize} 
-            onChange={(e) => setDataSize(Number(e.target.value))}
-            className="border rounded px-3 py-2"
-          >
-            <option value={1000}>1,000 puntos</option>
-            <option value={5000}>5,000 puntos</option>
-            <option value={10000}>10,000 puntos</option>
-            <option value={25000}>25,000 puntos</option>
-            <option value={50000}>50,000 puntos</option>
-            <option value={100000}>100,000 puntos</option>
-          </select>
-          <span className="text-sm text-gray-500">
-            ({simpleData.length.toLocaleString()} cargados)
-          </span>
-        </div>
+      {/* Selector de variable */}
+      <div className="mb-6">
+        <label className="mr-2 font-medium">Variable:</label>
+        <select
+          value={variableSeleccionada}
+          onChange={e => setVariableSeleccionada(e.target.value)}
+          className="border rounded px-3 py-2"
+        >
+          <option value="temperatura">Temperatura</option>
+          <option value="precipitacion">Precipitación</option>
+          <option value="evaporacion">Evaporación</option>
+        </select>
       </div>
 
-      {/* Example 1: Simple Line Chart */}
-      <div className="bg-white rounded-xl shadow-lg p-6">
-        <h2 className="text-2xl font-bold mb-4">
-          1️⃣ Gráfica Simple de Línea
-        </h2>
-        <p className="text-gray-600 mb-4">
-          Gráfica básica con una sola serie de datos. Downsampling automático activado.
-        </p>
-        
-        <TimeSeriesChart
-          data={simpleData}
-          xKey="date"
-          dataKey="value"
-          height={300}
-          stroke="#2563eb"
-          type="line"
-          title="Simple Time Series"
-          yLabel="Value"
-        />
-        
-        <div className="mt-4 text-sm text-gray-500">
-          ⚡ Renderizando {simpleData.length.toLocaleString()} puntos con alto rendimiento
-        </div>
-      </div>
-
-      {/* Example 2: Area Chart */}
-      <div className="bg-white rounded-xl shadow-lg p-6">
-        <h2 className="text-2xl font-bold mb-4">
-          2️⃣ Gráfica de Área
-        </h2>
-        <p className="text-gray-600 mb-4">
-          Mismos datos con relleno de área para resaltar tendencias.
-        </p>
-        
-        <TimeSeriesChart
-          data={simpleData}
-          xKey="date"
-          dataKey="value"
-          height={300}
-          stroke="#10b981"
-          fill="#10b98133"
-          type="area"
-          title="Area Chart Example"
-          yLabel="Value"
-        />
+      {/* Ejemplo de gráfica usando yLabel dinámico */}
+      <TimeSeriesChart
+        data={simpleData}
+        xKey="date"
+        dataKey="value"
+        height={300}
+        stroke="#2563eb"
+        type="line"
+        title="Serie Temporal"
+        yLabel={yLabel}
+      />
       </div>
 
       {/* Example 3: Multi-Series Advanced */}

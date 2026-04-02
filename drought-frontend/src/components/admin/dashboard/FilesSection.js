@@ -343,7 +343,7 @@ export default function FilesSection() {
       />
 
       <FileCategory
-        title="Datos Hidrometeorológicos"
+        title="Sequías Meteorológicas"
         subtitle="ERA5, IMERG, CHIRPS — archivos .parquet"
         icon={CloudRain}
         accentColor="#3b82f6"
@@ -362,7 +362,7 @@ export default function FilesSection() {
       />
 
       <FileCategory
-        title="Datos Hidrológicos"
+        title="Sequías Hidrológicas"
         subtitle="Caudales, niveles — estaciones hidrológicas"
         icon={Waves}
         accentColor="#14b8a6"

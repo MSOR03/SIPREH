@@ -84,7 +84,7 @@ export default function HistoricalSection({
               </div>
               <div className="flex-1">
                 <span className={`text-sm font-bold block ${isHydromet ? 'text-blue-800 dark:text-blue-200' : 'text-gray-800 dark:text-gray-200'}`}>
-                  Datos Hidrometeorológicos
+                  Sequías Meteorológicas
                 </span>
                 <span className={`text-[11px] block mt-0.5 ${isHydromet ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}>
                   Precipitación, temperatura, evapotranspiración - ERA5, IMERG, CHIRPS
@@ -110,7 +110,7 @@ export default function HistoricalSection({
               </div>
               <div className="flex-1">
                 <span className={`text-sm font-bold block ${isHydrological ? 'text-teal-800 dark:text-teal-200' : 'text-gray-800 dark:text-gray-200'}`}>
-                  Datos Hidrológicos
+                  Sequías Hidrológicas
                 </span>
                 <span className={`text-[11px] block mt-0.5 ${isHydrological ? 'text-teal-600 dark:text-teal-400' : 'text-gray-500 dark:text-gray-400'}`}>
                   Caudales, niveles - Estaciones hidrológicas (SDI, SRI, MFI, DDI, HDI)
@@ -139,7 +139,7 @@ export default function HistoricalSection({
                   : <Waves className="w-4 h-4 text-teal-600 dark:text-teal-400 shrink-0" />
                 }
                 <span className={`text-xs font-bold ${isHydromet ? 'text-blue-700 dark:text-blue-300' : 'text-teal-700 dark:text-teal-300'}`}>
-                  {isHydromet ? 'Hidrometeorológico' : 'Hidrológico'}
+                  {isHydromet ? 'Sequías Meteorológicas' : 'Sequías Hidrológicas'}
                 </span>
               </div>
             </div>
@@ -164,7 +164,7 @@ export default function HistoricalSection({
                 </div>
               ) : (
                 <Select
-                  label="Índice hidrológico"
+                  label="Índice de sequía"
                   options={currentIndices}
                   value={analysisState.droughtIndex}
                   onChange={(value) => setAnalysisState((prev) => ({ ...prev, droughtIndex: value }))}
@@ -228,7 +228,7 @@ export default function HistoricalSection({
               )}
             </StepSection>
 
-            <StepSection step={stepNumbers.visualizationType} title="Tipo de visualización" collapsible defaultOpen>
+<StepSection step={stepNumbers.visualizationType} title="Tipo de visualización" collapsible defaultOpen>
               <div className="grid grid-cols-2 gap-2">
                 <RadioOption
                   name="vizType"
@@ -247,6 +247,7 @@ export default function HistoricalSection({
                   label="Mapa Espacial"
                   description="Distribución espacial"
                   icon={Grid3x3}
+                  disabled={isHydromet && !analysisState.droughtIndex}
                 />
               </div>
             </StepSection>

@@ -123,7 +123,7 @@ export default function Sidebar({
       : null;
 
     return [
-      isHydromet ? 'Hidrometeorológico' : 'Hidrológico',
+      isHydromet ? 'Sequías Meteorológicas' : 'Sequías Hidrológicas',
       variableLabel,
       analysisState.droughtIndex || null,
       is2DMode && analysisState.spatialUnit ? SPATIAL_UNIT_LABELS[analysisState.spatialUnit] || null : null,
@@ -176,21 +176,19 @@ export default function Sidebar({
   );
 
   const analysisDisabled = useMemo(
-    () => (needsSelection && !hasSelection)
-      || (!analysisState.variable && !analysisState.droughtIndex)
-      || !analysisState.startDate
-      || ((needsSelection || (is2DMode && analysisState.useSpatialInterval)) && !analysisState.endDate),
+    () =>
+      (is2DMode && !analysisState.droughtIndex) || // Solo deshabilita en 2D si no hay índice
+      !analysisState.variable ||
+      !analysisState.startDate ||
+      !analysisState.endDate,
     [
-      needsSelection,
-      hasSelection,
-      analysisState.variable,
+      is2DMode,
       analysisState.droughtIndex,
+      analysisState.variable,
       analysisState.startDate,
       analysisState.endDate,
-      is2DMode,
-      analysisState.useSpatialInterval,
     ]
-  );
+  ); 
 
   const showDataSource = is2DMode && isHydromet && (analysisState.spatialUnit || 'grid') === 'grid';
   const showSpatialUnit = is2DMode;

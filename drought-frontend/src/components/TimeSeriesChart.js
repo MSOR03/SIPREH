@@ -86,9 +86,11 @@ export default function TimeSeriesChart({
           auto: true,
         },
       },
+      // ...
       axes: [
         {
-          // X-axis (time)
+          // Eje X (tiempo)
+          label: 'Tiempo',
           stroke: '#9ca3af',
           grid: {
             show: true,
@@ -111,10 +113,11 @@ export default function TimeSeriesChart({
           }),
         },
         {
-          // Y-axis
+          // Eje Y
           stroke: '#9ca3af',
           label: yLabel,
           labelFont: '14px system-ui, -apple-system, sans-serif',
+          space: 140, // <-- Añade o aumenta este valor (prueba 90 o 100)
           grid: {
             show: true,
             stroke: '#e5e7eb',
