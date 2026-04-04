@@ -2,10 +2,12 @@
 Endpoints para prediccion de sequia.
 Consulta datos del parquet prediction_main via DuckDB.
 """
+import json
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 
 from app.db.session import get_db
 from app.models.parquet_file import ParquetFile
@@ -32,14 +34,14 @@ _prediction_service = PredictionDataService(
 
 
 def _resolve_prediction_cloud_key(file_id: int, db) -> str:
-    """Resuelve file_id a cloud_key para archivo de prediccion."""
+    """Resuelve file_id a cloud_key para archivo de prediccion (active o archived)."""
     cached = cache_service.get(f"pred_cloud_key:{file_id}")
     if cached:
         return cached
 
     file = db.query(ParquetFile).filter(
         ParquetFile.id == file_id,
-        ParquetFile.status == "active",
+        ParquetFile.status.in_(["active", "archived"]),
     ).first()
 
     if not file or not file.cloud_key:
@@ -47,6 +49,65 @@ def _resolve_prediction_cloud_key(file_id: int, db) -> str:
 
     cache_service.set(f"pred_cloud_key:{file_id}", file.cloud_key, expire=3600)
     return file.cloud_key
+
+
+# ============================================================================
+# HISTORICO DE PREDICCIONES: listar archivos con fecha de emision
+# ============================================================================
+
+@router.get("/history/list", response_class=JSONResponse)
+def list_prediction_history(
+    db: Session = Depends(get_db),
+):
+    """
+    Lista todas las predicciones disponibles (activas + archivadas)
+    con su fecha de emision (issued_at).
+    Usado para el selector de historico de predicciones en el frontend.
+    """
+    logger.info("GET /prediction/history/list")
+
+    files = db.query(ParquetFile).filter(
+        ParquetFile.status.in_(["active", "archived"]),
+    ).all()
+
+    predictions = []
+    for f in files:
+        meta = {}
+        if f.file_metadata:
+            try:
+                meta = json.loads(f.file_metadata)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        if meta.get("dataset_key") != "prediction_main":
+            continue
+
+        issued_at = meta.get("issued_at")
+        if not issued_at:
+            # Fallback: use year_month or activated_at or created_at
+            issued_at = meta.get("year_month") or meta.get("activated_at")
+            if not issued_at and f.created_at:
+                issued_at = f.created_at.strftime("%Y-%m-%d")
+
+        predictions.append({
+            "file_id": f.id,
+            "filename": f.original_filename or f.filename,
+            "status": f.status,
+            "issued_at": issued_at,
+            "created_at": f.created_at.isoformat() if f.created_at else None,
+            "is_current": f.status == "active",
+        })
+
+    # Sort by issued_at descending (most recent first)
+    predictions.sort(
+        key=lambda p: p["issued_at"] or "",
+        reverse=True,
+    )
+
+    return orjson_response({
+        "total": len(predictions),
+        "predictions": predictions,
+    })
 
 
 # ============================================================================

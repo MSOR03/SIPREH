@@ -9,7 +9,7 @@ export default function Footer() {
       bg-linear-to-r from-slate-100 via-blue-50 to-slate-100
       dark:from-gray-900 dark:via-blue-950 dark:to-gray-900
       border border-blue-200 dark:border-gray-700
-      shadow-2xl overflow-hidden rounded-xl"
+      shadow-2xl overflow-hidden rounded-xl min-h-[25px]"
     >
       {/* Background accents */}
       <div className="absolute inset-0 opacity-15 dark:opacity-8 pointer-events-none">
@@ -17,7 +17,7 @@ export default function Footer() {
         <div className="absolute bottom-0 right-1/4 w-64 h-64 bg-indigo-400 dark:bg-purple-500 rounded-full blur-3xl" />
       </div>
 
-      <div className="container mx-auto px-6 py-32 relative">
+      <div className="container mx-auto px-6 py-48 relative">
         <div className="flex flex-col md:flex-row items-center justify-end gap-8">
 
           {/* Nav links */}

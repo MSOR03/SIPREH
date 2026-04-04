@@ -215,67 +215,53 @@ src/
 
 ---
 
-## 🔌 Preparación para Backend
+## 🔌 Integracion con Backend
 
-### Endpoints Configurados
+### Endpoints Integrados
 ```javascript
-API_ENDPOINTS = {
-  getHistoricalData: '/api/historical/data',
-  getHydrometeorologicalVariable: '/api/historical/variable',
-  getDroughtIndex: '/api/historical/drought-index',
-  getPrediction: '/api/prediction/drought-index',
-  getMacroclimaticCorrelation: '/api/prediction/macroclimatic',
-  exportCSV: '/api/export/csv',
-  exportChart: '/api/export/chart',
-  getStations: '/api/stations',
-  getGridCells: '/api/grid-cells',
-}
+// Historico
+POST /api/v1/historical/timeseries    // Serie temporal 1D
+POST /api/v1/historical/spatial        // Mapa espacial 2D
+GET  /api/v1/historical/catalog/all    // Catalogo variables + indices
+GET  /api/v1/historical/files          // Archivos disponibles
+
+// Prediccion
+GET  /api/v1/prediction/cells/{id}     // Celdas CHIRPS
+POST /api/v1/prediction/timeseries     // Prediccion 1D (12 horizontes)
+POST /api/v1/prediction/spatial        // Prediccion 2D (297 celdas)
+POST /api/v1/prediction/ai-summary     // Resumen IA
+GET  /api/v1/prediction/history/list   // Historico de predicciones
+
+// Hidrologico
+GET  /api/v1/hydro/stations            // Estaciones
+POST /api/v1/hydro/timeseries          // Series hidrologicas
 ```
 
-### Variables de Entorno Necesarias
+### Variables de Entorno
 ```env
 NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
 
 ---
 
-## ✅ Cumplimiento de Requerimientos
+## Estado del Proyecto
 
-| Requisito | Cumplido | Notas |
-|-----------|----------|-------|
-| Variables hidrometeorológicas | ✅ | 4 variables disponibles |
-| Índices de sequía | ✅ | 5 índices con categorías |
-| Selector de fechas | ✅ | Fecha inicial y final |
-| Fenómenos macroclimáticos | ✅ | 3 índices disponibles |
-| Horizontes temporales | ✅ | 1m, 3m, 6m |
-| Mapa con estaciones | ✅ | 5 estaciones clickeables |
-| Norte y escala | ✅ | Implementados con controles Leaflet |
-| Malla de discretización | ✅ | Grid de ~5km por celda |
-| Click en estaciones | ✅ | Con feedback visual |
-| Botón Graficar | ✅ | Para ambos paneles |
-| Botón Guardar | ✅ | Preparado para CSV/PNG/JPEG |
-| Botón Reset | ✅ | Limpia visualizaciones |
-| Gráficas 1D | ✅ | Área preparada |
-| Gráficas 2D | ✅ | Área preparada |
-| Modo oscuro | ✅ | Adicional, no requerido |
-| Responsive | ✅ | Adicional, no requerido |
+**Estado Actual:** FRONTEND + BACKEND INTEGRADOS Y FUNCIONALES
+
+**Funcionalidades Completadas:**
+1. Analisis historico 1D/2D con DuckDB
+2. Prediccion actual con graficos IQR
+3. Historico de predicciones por fecha de emision
+4. Panel de administracion completo
+5. Resumen IA con Groq
+6. Mapa interactivo multi-nivel
+7. Modo claro/oscuro
+
+**Pendiente:**
+- Exportacion a CSV
+- Correlaciones macroclimaticas
+- Reportes PDF
 
 ---
 
-## 🚀 Estado del Proyecto
-
-**Estado Actual:** ✅ FRONTEND COMPLETO Y LISTO PARA INTEGRACIÓN
-
-**Próximos Pasos:**
-1. Desarrollar backend con FastAPI
-2. Implementar endpoints para archivos Parquet
-3. Conectar visualizaciones con datos reales
-4. Integrar librería de gráficos (ej: Recharts)
-5. Implementar funcionalidad de exportación
-6. Agregar carga de modelos predictivos
-
-**Score de Completitud:** 100% de requerimientos base + mejoras estéticas
-
----
-
-*Documento generado el 24 de febrero de 2026*
+*Documento actualizado en Abril 2026*
