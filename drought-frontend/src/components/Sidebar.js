@@ -50,6 +50,8 @@ export default function Sidebar({
   setPredictionState,
   predictionOpen,
   setPredictionOpen,
+  predictionHistoryOpen,
+  setPredictionHistoryOpen,
   predictionHistoryState,
   setPredictionHistoryState,
   onAnalysisPlot,
@@ -58,8 +60,7 @@ export default function Sidebar({
   selectedStation,
   selectedCell,
 }) {
-  const [historicalOpen, setHistoricalOpen] = useState(true);
-  const [predictionHistoryOpen, setPredictionHistoryOpen] = useState(false);
+  const [historicalOpen, setHistoricalOpen] = useState(false);
   const [showCategoryPicker, setShowCategoryPicker] = useState(true);
 
   const isHydromet = (analysisState.dataCategory || 'hydromet') === 'hydromet';
@@ -123,7 +124,7 @@ export default function Sidebar({
       : null;
 
     return [
-      isHydromet ? 'Hidrometeorológico' : 'Hidrológico',
+      isHydromet ? 'Sequías Meteorológicas' : 'Sequías Hidrológicas',
       variableLabel,
       analysisState.droughtIndex || null,
       is2DMode && analysisState.spatialUnit ? SPATIAL_UNIT_LABELS[analysisState.spatialUnit] || null : null,
@@ -160,35 +161,34 @@ export default function Sidebar({
 
   const predictionHistorySummary = useMemo(
     () => [
-      predictionHistoryState.droughtIndex
-        ? (ALL_INDICES.find((i) => i.value === predictionHistoryState.droughtIndex)?.label || predictionHistoryState.droughtIndex)
+      predictionHistoryState.selectedFileId ? `Emision: ${predictionHistoryState.selectedFileId}` : null,
+      predictionHistoryState.visualizationType === '2D' ? '2D Mapa' : '1D Serie',
+      predictionHistoryState.droughtIndex || null,
+      predictionHistoryState.scale ? `${predictionHistoryState.scale}m` : null,
+      predictionHistoryState.visualizationType === '2D' && predictionHistoryState.horizon
+        ? `H${predictionHistoryState.horizon}`
         : null,
-      predictionHistoryState.timeHorizon
-        ? (timeHorizons.find((h) => h.value === predictionHistoryState.timeHorizon)?.label || predictionHistoryState.timeHorizon)
-        : null,
-      predictionHistoryState.predictionDate || null,
     ].filter(Boolean).join(' • ') || null,
     [
+      predictionHistoryState.selectedFileId,
+      predictionHistoryState.visualizationType,
       predictionHistoryState.droughtIndex,
-      predictionHistoryState.timeHorizon,
-      predictionHistoryState.predictionDate,
+      predictionHistoryState.scale,
+      predictionHistoryState.horizon,
     ]
   );
 
   const analysisDisabled = useMemo(
-    () => (needsSelection && !hasSelection)
-      || (!analysisState.variable && !analysisState.droughtIndex)
-      || !analysisState.startDate
-      || ((needsSelection || (is2DMode && analysisState.useSpatialInterval)) && !analysisState.endDate),
+    () =>
+      (is2DMode && !(analysisState.droughtIndex || analysisState.variable)) ||
+      !analysisState.startDate ||
+      !analysisState.endDate,
     [
-      needsSelection,
-      hasSelection,
-      analysisState.variable,
+      is2DMode,
       analysisState.droughtIndex,
+      analysisState.variable,
       analysisState.startDate,
       analysisState.endDate,
-      is2DMode,
-      analysisState.useSpatialInterval,
     ]
   );
 
@@ -196,7 +196,7 @@ export default function Sidebar({
   const showSpatialUnit = is2DMode;
 
   return (
-    <aside className="w-[480px] min-w-[420px] bg-gradient-to-b from-gray-50 to-gray-100/50 dark:from-[#141920] dark:to-[#0f1419] border border-gray-200 dark:border-gray-700 overflow-y-auto shadow-2xl rounded-xl">
+    <aside data-tour="sidebar" className="w-[480px] min-w-[420px] bg-gradient-to-b from-gray-50 to-gray-100/50 dark:from-[#141920] dark:to-[#0f1419] border border-gray-200 dark:border-gray-700 overflow-y-auto shadow-2xl rounded-xl">
       <div className="px-6 py-5 space-y-6">
         <div className={`p-3 rounded-xl border-2 transition-all duration-300 ${
           !needsSelection || hasSelection
@@ -232,6 +232,7 @@ export default function Sidebar({
           </div>
         </div>
 
+        <div data-tour="historical">
         <HistoricalSection
           historicalOpen={historicalOpen}
           setHistoricalOpen={setHistoricalOpen}
@@ -251,7 +252,9 @@ export default function Sidebar({
           analysisDisabled={analysisDisabled}
           onAnalysisPlot={onAnalysisPlot}
         />
+        </div>
 
+        <div data-tour="prediction">
         <PredictionSection
           predictionOpen={predictionOpen}
           setPredictionOpen={setPredictionOpen}
@@ -261,18 +264,19 @@ export default function Sidebar({
           hasSelection={hasSelection}
           onPredictionPlot={onPredictionPlot}
         />
+        </div>
 
+        <div data-tour="prediction-history">
         <PredictionHistorySection
           predictionHistoryOpen={predictionHistoryOpen}
           setPredictionHistoryOpen={setPredictionHistoryOpen}
           predictionHistorySummary={predictionHistorySummary}
           predictionHistoryState={predictionHistoryState}
           setPredictionHistoryState={setPredictionHistoryState}
-          allIndices={ALL_INDICES}
-          timeHorizons={timeHorizons}
           hasSelection={hasSelection}
           onPredictionHistoryPlot={onPredictionHistoryPlot}
         />
+        </div>
 
         <div className="text-xs text-gray-600 dark:text-gray-400 p-3 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 rounded-xl border border-blue-200 dark:border-blue-800 shadow-sm">
           <div className="flex items-start gap-2">

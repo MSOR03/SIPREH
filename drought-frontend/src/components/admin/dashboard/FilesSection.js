@@ -22,10 +22,12 @@ import {
   X,
 } from 'lucide-react';
 import { filesApi } from '@/services/adminApi';
+import { useModal } from '@/contexts/ModalContext';
 import Badge from '@/components/admin/dashboard/Badge';
 import { classifyFile, formatBytes, formatDate } from '@/components/admin/dashboard/helpers';
 
 export default function FilesSection() {
+  const { showDangerConfirm } = useModal();
   const [files, setFiles] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -40,6 +42,7 @@ export default function FilesSection() {
   const [yearMonth, setYearMonth] = useState('');
   const [periodStart, setPeriodStart] = useState('');
   const [periodEnd, setPeriodEnd] = useState('');
+  const [issuedAt, setIssuedAt] = useState('');
   const [activateNow, setActivateNow] = useState(false);
   const [workflowBusy, setWorkflowBusy] = useState(false);
   const [datasetStatusLoading, setDatasetStatusLoading] = useState(false);
@@ -93,12 +96,12 @@ export default function FilesSection() {
     if (!selectedDatasetKey) return;
     const selected = datasetCatalog.find((d) => d.dataset_key === selectedDatasetKey);
     const allowedRoles = selected?.allowed_roles || [];
-    if (allowedRoles.length > 0 && !allowedRoles.includes(selectedRole)) {
-      setSelectedRole(allowedRoles[0]);
+    if (allowedRoles.length > 0) {
+      setSelectedRole((prev) => allowedRoles.includes(prev) ? prev : allowedRoles[0]);
     }
     setActivateNow(selected?.dataset_type === 'prediction');
     loadDatasetStatus(selectedDatasetKey);
-  }, [datasetCatalog, selectedDatasetKey, selectedRole, loadDatasetStatus]);
+  }, [datasetCatalog, selectedDatasetKey, loadDatasetStatus]);
 
   const handleUpload = async (fileList) => {
     setUploading(true);
@@ -132,18 +135,23 @@ export default function FilesSection() {
   };
 
   const handleDelete = async (fileId, filename) => {
-    if (!confirm(`¿Eliminar "${filename}"?`)) return;
-    try {
-      await filesApi.delete(fileId);
-      setSuccess(`"${filename}" eliminado`);
-      loadFiles();
-    } catch (err) {
-      setError('Error eliminando: ' + err.message);
-    }
-    setTimeout(() => {
-      setSuccess('');
-      setError('');
-    }, 4000);
+    showDangerConfirm(
+      `¿Eliminar "${filename}"? Esta acción no se puede deshacer.`,
+      'Eliminar archivo',
+      async () => {
+        try {
+          await filesApi.delete(fileId);
+          setSuccess(`"${filename}" eliminado`);
+          loadFiles();
+        } catch (err) {
+          setError('Error eliminando: ' + err.message);
+        }
+        setTimeout(() => {
+          setSuccess('');
+          setError('');
+        }, 4000);
+      }
+    );
   };
 
   const handleActivate = async (fileId, filename) => {
@@ -193,6 +201,7 @@ export default function FilesSection() {
         period_start: periodStart || null,
         period_end: periodEnd || null,
         activate_now: activateNow,
+        extra_metadata: issuedAt ? { issued_at: issuedAt } : {},
       });
 
       setSuccess('Archivo adjuntado al dataset correctamente.');
@@ -332,6 +341,8 @@ export default function FilesSection() {
         setPeriodStart={setPeriodStart}
         periodEnd={periodEnd}
         setPeriodEnd={setPeriodEnd}
+        issuedAt={issuedAt}
+        setIssuedAt={setIssuedAt}
         activateNow={activateNow}
         setActivateNow={setActivateNow}
         workflowBusy={workflowBusy}
@@ -343,7 +354,7 @@ export default function FilesSection() {
       />
 
       <FileCategory
-        title="Datos Hidrometeorológicos"
+        title="Sequías Meteorológicas"
         subtitle="ERA5, IMERG, CHIRPS — archivos .parquet"
         icon={CloudRain}
         accentColor="#3b82f6"
@@ -362,7 +373,7 @@ export default function FilesSection() {
       />
 
       <FileCategory
-        title="Datos Hidrológicos"
+        title="Sequías Hidrológicas"
         subtitle="Caudales, niveles — estaciones hidrológicas"
         icon={Waves}
         accentColor="#14b8a6"
@@ -440,6 +451,8 @@ function DatasetWorkflowCard({
   setPeriodStart,
   periodEnd,
   setPeriodEnd,
+  issuedAt,
+  setIssuedAt,
   activateNow,
   setActivateNow,
   workflowBusy,
@@ -536,6 +549,21 @@ function DatasetWorkflowCard({
               placeholder="2025-09-30"
             />
           </div>
+
+          {isPredictionDataset && (
+            <div>
+              <label className="ds-field-label">Fecha de emision (prediccion)</label>
+              <input
+                type="date"
+                className="ds-input"
+                value={issuedAt}
+                onChange={(e) => setIssuedAt(e.target.value)}
+              />
+              <p style={{ fontSize: '0.7rem', color: '#888', marginTop: '4px' }}>
+                Fecha que identifica esta prediccion en el historico
+              </p>
+            </div>
+          )}
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginTop: '1rem', flexWrap: 'wrap' }}>

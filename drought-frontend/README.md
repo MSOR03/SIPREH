@@ -1,164 +1,159 @@
-# Drought Monitoring Platform - Frontend
+# DroughtMonitor - Frontend
 
-Plataforma web de monitoreo y predicción de sequías para Bogotá, Colombia.
+Plataforma web de monitoreo y prediccion de sequias. Interfaz interactiva con mapas, graficos de alta resolucion y panel de administracion.
 
-## 🚀 Características
+## Tecnologias
 
-- **Análisis Histórico**: Visualización de variables hidrometeorológicas e índices de sequía de los últimos 30 años
-- **Predicción**: Modelos predictivos de sequía con horizontes de 1, 3 y 6 meses
-- **Visualización Interactiva**: Mapas interactivos con estaciones de monitoreo y celdas de análisis
-- **Modo Claro/Oscuro**: Interfaz adaptable con temas claro y oscuro
-- **Exportación de Datos**: Descarga de datos en formato CSV y gráficos en PNG/JPEG
-- **Diseño Responsivo**: Optimizado para diferentes tamaños de pantalla
-
-## 🛠️ Tecnologías
-
-- **Framework**: Next.js 16 (App Router)
-- **UI**: React 19, Tailwind CSS 4
-- **Mapas**: Leaflet, React-Leaflet
-- **Gráficos**: Recharts (preparado para integración)
+- **Framework**: Next.js 16 (App Router) con React 19
+- **Estilos**: Tailwind CSS 4 con modo claro/oscuro
+- **Mapas**: Leaflet 1.9 + react-leaflet (importacion dinamica, SSR-safe)
+- **Graficos**: uPlot (series temporales alto rendimiento) + Canvas 2D nativo (predicciones con bandas IQR)
 - **Iconos**: Lucide React
 - **Lenguaje**: JavaScript (ES6+)
 
-## 📦 Instalación
+## Instalacion
 
 ```bash
-# Instalar dependencias
 npm install
-
-# Modo desarrollo
-npm run dev
-
-# Construcción para producción
-npm run build
-
-# Iniciar servidor de producción
-npm start
+npm run dev          # Modo desarrollo (http://localhost:3000)
+npm run build        # Compilacion produccion
+npm start            # Servidor produccion
 ```
 
-El servidor de desarrollo estará disponible en `http://localhost:3000`
+## Variables de Entorno
 
-## 🏗️ Estructura del Proyecto
+Crear `.env.local`:
+```env
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
+
+## Estructura del Proyecto
 
 ```
 drought-frontend/
 ├── src/
 │   ├── app/
-│   │   ├── layout.js          # Layout principal con ThemeProvider
-│   │   ├── page.js             # Página principal del dashboard
-│   │   └── globals.css         # Estilos globales y variables CSS
+│   │   ├── page.js                    # Dashboard principal
+│   │   ├── layout.js                  # Layout con ThemeProvider
+│   │   ├── admin/dashboard/page.js    # Panel de administracion
+│   │   ├── condiciones-de-uso/        # Pagina legal
+│   │   └── globals.css                # Estilos globales
+│   │
 │   ├── components/
-│   │   ├── Header.js           # Encabezado con logo y toggle de tema
-│   │   ├── Sidebar.js          # Panel lateral con controles
-│   │   ├── MapArea.js          # Área del mapa y visualizaciones
-│   │   ├── Footer.js           # Pie de página con información
+│   │   ├── Header.js                  # Encabezado con tema y estado
+│   │   ├── Sidebar.js                 # Panel lateral con secciones
+│   │   ├── MapArea.js                 # Area de mapa + graficos + IA
+│   │   ├── LeafletMap.js              # Mapa Leaflet con grid multi-nivel
+│   │   ├── Footer.js                  # Pie de pagina
+│   │   ├── TimeSeriesChart.js         # Grafico uPlot (historico 1D)
+│   │   ├── PredictionTimeSeriesChart.js  # Grafico Canvas (prediccion 1D con IQR)
+│   │   │
+│   │   ├── sidebar/
+│   │   │   ├── HistoricalSection.js       # Analisis historico
+│   │   │   ├── PredictionSection.js       # Prediccion actual
+│   │   │   ├── PredictionHistorySection.js # Historico de predicciones
+│   │   │   └── primitives.js              # Componentes UI del sidebar
+│   │   │
+│   │   ├── admin/dashboard/
+│   │   │   └── FilesSection.js        # Gestion de archivos y datasets
+│   │   │
 │   │   └── ui/
-│   │       ├── Button.js       # Componente de botón reutilizable
-│   │       ├── Select.js       # Componente de selección
-│   │       └── DateRangePicker.js  # Selector de rango de fechas
+│   │       ├── Button.js              # Boton con variantes
+│   │       ├── Select.js              # Selector desplegable
+│   │       └── DateRangePicker.js     # Selector de rango de fechas
+│   │
+│   ├── services/
+│   │   ├── api.js                     # Cliente API publico (historico, prediccion, etc.)
+│   │   └── adminApi.js                # Cliente API admin (archivos, datasets, usuarios)
+│   │
 │   ├── contexts/
-│   │   └── ThemeContext.js     # Contexto para manejo de tema
-│   └── config/
-│       └── constants.js        # Configuración y constantes de la API
-├── public/                     # Archivos estáticos
-├── package.json
-└── next.config.mjs
+│   │   ├── ThemeContext.js            # Tema claro/oscuro
+│   │   └── ToastContext.js            # Notificaciones toast
+│   │
+│   ├── hooks/
+│   │   └── useGridNavigation.js       # Navegacion jerarquica de celdas
+│   │
+│   └── utils/
+│       ├── exporters.js               # Exportacion JSON e imagenes
+│       ├── gridLevels.js              # Niveles de zoom (LOW/MED/HIGH)
+│       └── prepareTimeSeriesData.js   # Downsampling LTTB para uPlot
+│
+├── docs/                              # Documentacion del frontend
+└── public/                            # Archivos estaticos (favicon, etc.)
 ```
 
-## 🎨 Paleta de Colores
+## Modulos Principales
 
-### Modo Claro
-- **Fondo**: `#f8f9fa`
-- **Primario**: `#2563eb` (Azul para hidrología)
-- **Sequía Extrema**: `#991b1b`
-- **Sequía Severa**: `#dc2626`
-- **Sequía Moderada**: `#f59e0b`
-- **Normal**: `#10b981`
+### 1. Analisis Historico (HistoricalSection)
+- **Datos Meteorologicos**: Precipitacion, temperaturas, PET, balance hidrico
+- **Datos Hidrologicos**: Estaciones con indices SDI, SRI, MFI, DDI, HDI
+- **Indices de Sequia Meteorologicos**: SPI, SPEI, RAI, EDDI, PDSI (escalas 1/3/6/12 meses)
+- **Fuentes**: ERA5 (0.25), IMERG (0.1), CHIRPS (0.05)
+- **Visualizacion 1D**: Serie temporal por celda o estacion (uPlot con zoom drag)
+- **Visualizacion 2D**: Mapa espacial con colores de sequia para todas las celdas
 
-### Modo Oscuro
-- **Fondo**: `#0f1419`
-- **Primario**: `#3b82f6`
-- **Tarjetas**: `#1a1f2e`
+### 2. Prediccion Actual (PredictionSection)
+- Celdas CHIRPS (297 celdas de 0.05)
+- Indices: SPI, SPEI, RAI, EDDI, PDSI
+- **1D**: Grafico Canvas con 12 horizontes y bandas IQR (Q1/Q3/min/max)
+- **2D**: Mapa con categorias de sequia coloreadas + leyenda dinamica
+- Click en celda del mapa 2D -> detalle 1D automatico
+- Resumen IA via Groq API
 
-## 📋 Componentes Principales
+### 3. Historico de Predicciones (PredictionHistorySection)
+- Selector desplegable con predicciones por fecha de emision (`issued_at`)
+- Tipo de visualizacion 1D/2D, indice, escala y horizonte
+- Misma logica de graficos que prediccion actual
+- Click en celda 2D -> 1D automatico
 
-### 1. Análisis Histórico
-- **Menu (1)**: Variables hidrometeorológicas (precipitación, temperatura, ET, caudal)
-- **Menu (2)**: Índices de sequía (SPI, SPEI, PDSI, SSI, SWI)
-- **Slidebar (1)**: Selector de rango de fechas
-- **Botones**: Graficar y Guardar
+### 4. Panel de Administracion
+- Upload de archivos .parquet (drag-and-drop)
+- Flujo de datasets: seleccionar dataset, adjuntar archivo con rol y metadata
+- Fecha de emision para archivos de prediccion
+- Activar/archivar/eliminar archivos
 
-### 2. Predicción
-- **Menu (3)**: Índices de sequía para predicción
-- **Menu (3A)**: Correlaciones con fenómenos macroclimáticos (ENSO, PDO, NAO)
-- **Menu (4)**: Horizonte de tiempo (1m, 3m, 6m)
-- **Botones**: Graficar y Guardar
+### 5. Mapa Interactivo (LeafletMap)
+- Celdas de grid en 3 niveles jerarquicos (LOW/MED/HIGH) con drill-down
+- Estaciones hidrologicas con marcadores
+- Celdas de prediccion CHIRPS overlay
+- Celdas coloreadas espaciales (2D) con click
+- Controles de capas (grid, estaciones, cuencas, embalses, limites)
 
-### 3. Zona de Visualización
-- **Mapa Interactivo**: Mapa de Bogotá con estaciones y celdas
-- **Área de Gráficos**: Visualización de series temporales y mapas 2D
-- **Botón Reset**: Reinicia la visualización
+## Integracion con Backend
 
-## 🔌 Integración con Backend
+El frontend se comunica con el backend FastAPI via los clientes en `services/`:
 
-El frontend está preparado para conectarse con un backend FastAPI. Configura la URL del backend en el archivo `.env.local`:
+### API Publica (`api.js`)
+- `historicalApi` - Catalogo, series temporales 1D, datos espaciales 2D
+- `predictionApi` - Celdas, series temporales, datos espaciales, resumen IA
+- `predictionHistoryApi` - Lista de predicciones, mismos endpoints de consulta
+- `hydroApi` - Estaciones e indices hidrologicos
 
-```env
-NEXT_PUBLIC_API_URL=http://localhost:8000
-```
+### API Admin (`adminApi.js`)
+- `filesApi` - Upload, listar, eliminar, activar archivos
+- `datasetsApi` - Catalogo, attach, merge, estado
+- `usersApi` - CRUD de usuarios
 
-### Endpoints Esperados
+## Modo Claro/Oscuro
 
-- `POST /api/historical/data` - Obtener datos históricos
-- `POST /api/prediction/drought-index` - Obtener predicciones
-- `GET /api/stations` - Obtener lista de estaciones
-- `POST /api/export/csv` - Exportar datos a CSV
-- `POST /api/export/chart` - Exportar gráfico
+| Elemento | Claro | Oscuro |
+|----------|-------|--------|
+| Fondo | `#f8f9fa` | `#0f1419` |
+| Primario | `#2563eb` | `#3b82f6` |
+| Tarjetas | `#ffffff` | `#1a1f2e` |
+| Sidebar | `#f8fafc` | `#141920` |
 
-## 🎯 Próximas Características
+Categorias de sequia:
+- Extrema: rojo oscuro (`#991b1b`)
+- Severa: rojo (`#dc2626`)
+- Moderada: ambar (`#f59e0b`)
+- Normal: verde (`#10b981`)
 
-- [ ] Integración completa con backend FastAPI
-- [ ] Visualización de gráficos con Recharts
-- [ ] Exportación de datos (CSV, PNG, JPEG)
-- [ ] Carga de archivos Parquet
-- [ ] Animaciones de series temporales
-- [ ] Sistema de notificaciones
-- [ ] Comparación de múltiples períodos
-- [ ] Generación de reportes PDF
+## Documentacion Adicional
 
-## 📱 Responsive Design
-
-La interfaz se adapta automáticamente a:
-- 💻 Desktop (1920x1080+)
-- 💻 Laptop (1366x768)
-- 📱 Tablet (768x1024)
-- 📱 Mobile (375x667)
-
-## 🔒 Variables de Entorno
-
-Crea un archivo `.env.local` en la raíz del proyecto:
-
-```env
-NEXT_PUBLIC_API_URL=http://localhost:8000
-NEXT_PUBLIC_MAP_TILE_URL=https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png
-```
-
-## 🤝 Contribución
-
-1. Clona el repositorio
-2. Crea una rama para tu feature (`git checkout -b feature/AmazingFeature`)
-3. Commit tus cambios (`git commit -m 'Add some AmazingFeature'`)
-4. Push a la rama (`git push origin feature/AmazingFeature`)
-5. Abre un Pull Request
-
-## 📄 Licencia
-
-Este proyecto está bajo licencia para uso académico e investigación.
-
-## 📞 Contacto
-
-Para más información sobre el proyecto, consulta la documentación completa o contacta al equipo de desarrollo.
+- [Guia TimeSeriesChart](docs/TIMESERIES_CHART_GUIDE.md) - Componente uPlot con LTTB downsampling
+- [Mejoras Recientes](docs/MEJORAS_TIMESERIES.md) - Changelog de mejoras UI/UX
 
 ---
 
-**Desarrollado para el monitoreo y predicción de sequías en Bogotá** 🌧️💧
+Ultima actualizacion: Abril 2026
