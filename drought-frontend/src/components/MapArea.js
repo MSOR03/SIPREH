@@ -37,6 +37,7 @@ export default function MapArea({
   aiSummary,
   setAiSummary,
   predictionOpen,
+  predictionHistoryOpen,
   predictionCells,
   selectedStation,
   selectedCell,
@@ -64,11 +65,12 @@ export default function MapArea({
   const gridNav = useGridNavigation('LOW');
   const [layerMenuOpen, setLayerMenuOpen] = useState(false);
 
-  // When prediction section is open and cells are loaded, override grid with prediction CHIRPS cells
+  // When prediction or prediction history section is open, override grid with prediction CHIRPS cells
+  const showPredictionCells = predictionOpen || predictionHistoryOpen;
   const predictionGridCells = useMemo(() => {
-    if (!predictionOpen || !predictionCells?.cells?.length) return null;
+    if (!showPredictionCells || !predictionCells?.cells?.length) return null;
     return parseCellIds(predictionCells.cells, predictionCells.resolution || 0.05);
-  }, [predictionOpen, predictionCells]);
+  }, [showPredictionCells, predictionCells]);
 
   // Decide which cells to show on the map: prediction cells or historical grid cells
   const effectiveGridCells = predictionGridCells || gridNav.gridCells;
@@ -279,7 +281,7 @@ export default function MapArea({
       </div>
 
       {/* Map Container */}
-      <div className="flex-1 relative bg-gradient-to-br from-blue-50/20 via-blue-50/10 to-blue-50/10 dark:from-gray-950 dark:via-[#0f1419] dark:to-gray-950 p-6">
+      <div data-tour="map" className="flex-1 relative bg-gradient-to-br from-blue-50/20 via-blue-50/10 to-blue-50/10 dark:from-gray-950 dark:via-[#0f1419] dark:to-gray-950 p-6">
         <div className="h-full relative bg-white/60 dark:bg-gray-900/60 backdrop-blur-sm rounded-2xl shadow-2xl ring-4 ring-blue-500/20 dark:ring-blue-400/20 border border-gray-200 dark:border-gray-700">
           <LeafletMap 
             theme={theme}
@@ -293,8 +295,8 @@ export default function MapArea({
             gridCells={effectiveGridCells}
             currentLevel={effectiveLevel}
             hoveredCell={gridNav.hoveredCell}
-            spatialDataCells={(plotData?.type === '2D' || plotData?.type === 'prediction-2d') ? plotData.gridCells : null}
-            spatialResolution={(plotData?.type === '2D' || plotData?.type === 'prediction-2d') ? (plotData.resolution || 0.05) : 0.05}
+            spatialDataCells={(plotData?.type === '2D' || plotData?.type === 'prediction-2d' || plotData?.type === 'prediction-history-2d') ? plotData.gridCells : null}
+            spatialResolution={(plotData?.type === '2D' || plotData?.type === 'prediction-2d' || plotData?.type === 'prediction-history-2d') ? (plotData.resolution || 0.05) : 0.05}
             onSpatialCellClick={handleSpatialCellClick}
             showGrid={mapLayers?.grid ?? true}
             showStations={mapLayers?.stations ?? true}
@@ -302,7 +304,7 @@ export default function MapArea({
           />
 
           {/* ── Layer Control Overlay ── */}
-          <div className="absolute top-1 left-1 z-[1000]">
+          <div data-tour="layers" className="absolute top-1 left-1 z-[1000]">
             <button
               onClick={() => setLayerMenuOpen(!layerMenuOpen)}
               className="flex items-center gap-2 px-3 py-2 bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm rounded-lg shadow-lg border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm font-medium text-gray-700 dark:text-gray-200"
@@ -379,7 +381,7 @@ export default function MapArea({
               </div>
               <div className="flex items-center gap-2">
                 {/* AI Summary button - only for predictions */}
-                {(plotData.type === 'prediction-1d' || plotData.type === 'prediction-2d') && (
+                {(plotData.type === 'prediction-1d' || plotData.type === 'prediction-2d' || plotData.type === 'prediction-history-1d' || plotData.type === 'prediction-history-2d') && (
                   <Button
                     variant="secondary"
                     className="shadow-lg hover:shadow-xl bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border-green-300 dark:border-green-700 text-green-700 dark:text-green-300 hover:from-green-100 hover:to-emerald-100 dark:hover:from-green-900/30 dark:hover:to-emerald-900/30"
@@ -409,11 +411,11 @@ export default function MapArea({
             </div>
 
             {/* Chart area: show time series when available or 2D spatial info */}
-            {plotData.type === 'prediction-2d' && plotData.gridCells ? (
+            {(plotData.type === 'prediction-2d' || plotData.type === 'prediction-history-2d') && plotData.gridCells ? (
               <div className="relative">
                 {plotData.subtitle && (
-                  <div className="mb-4 px-4 py-2 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
-                    <p className="text-sm text-green-700 dark:text-green-300 font-medium">
+                  <div className={`mb-4 px-4 py-2 rounded-lg border ${plotData.type === 'prediction-history-2d' ? 'bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800' : 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800'}`}>
+                    <p className={`text-sm font-medium ${plotData.type === 'prediction-history-2d' ? 'text-purple-700 dark:text-purple-300' : 'text-green-700 dark:text-green-300'}`}>
                       {plotData.subtitle}
                     </p>
                   </div>
@@ -448,22 +450,22 @@ export default function MapArea({
                 )}
                 <div className="bg-white dark:bg-gray-900/50 rounded-xl p-6 shadow-inner">
                   <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
-                    Prediccion Espacial 2D
+                    {plotData.type === 'prediction-history-2d' ? 'Prediccion Historica Espacial 2D' : 'Prediccion Espacial 2D'}
                   </h4>
                   <p className="text-xs text-gray-600 dark:text-gray-400 mb-4">
                     Las 297 celdas CHIRPS muestran la prediccion de <strong>{plotData.variable}</strong> para el horizonte seleccionado.
                     Los colores representan las categorias de sequia.
-                    <span className="text-green-600 dark:text-green-400 font-medium"> Haz click en una celda para ver el detalle 1D.</span>
+                    <span className={`font-medium ${plotData.type === 'prediction-history-2d' ? 'text-purple-600 dark:text-purple-400' : 'text-green-600 dark:text-green-400'}`}> Haz click en una celda para ver el detalle 1D.</span>
                   </p>
                   {hasCategorizedCells && <DroughtLegend gridCells={plotData.gridCells} />}
                 </div>
               </div>
-            ) : plotData.type === 'prediction-1d' && plotData.data ? (
+            ) : (plotData.type === 'prediction-1d' || plotData.type === 'prediction-history-1d') && plotData.data ? (
               /* Prediction 1D: time series with IQR bands */
               <div className="relative">
                 {plotData.subtitle && (
-                  <div className="mb-4 px-4 py-2 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
-                    <p className="text-sm text-green-700 dark:text-green-300 font-medium">
+                  <div className={`mb-4 px-4 py-2 rounded-lg border ${plotData.type === 'prediction-history-1d' ? 'bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800' : 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800'}`}>
+                    <p className={`text-sm font-medium ${plotData.type === 'prediction-history-1d' ? 'text-purple-700 dark:text-purple-300' : 'text-green-700 dark:text-green-300'}`}>
                       {plotData.subtitle}
                     </p>
                   </div>

@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
 import MapArea from '@/components/MapArea';
 import Footer from '@/components/Footer';
+import GuidedTour from '@/components/GuidedTour';
 import { useToast } from '@/contexts/ToastContext';
 import { downloadAnalysisImage, downloadAnalysisJson } from '@/utils/exporters';
 
@@ -44,16 +45,21 @@ export default function Home() {
 
   // Prediction History State
   const [predictionHistoryState, setPredictionHistoryState] = useState({
+    selectedFileId: '',
+    visualizationType: '1D',  // '1D' | '2D'
     droughtIndex: '',
-    timeHorizon: '',
-    predictionDate: '',
+    scale: 1,
+    horizon: 1,
   });
 
   // Plot data state
   const [plotData, setPlotData] = useState(null);
 
   // Prediction section open state (lifted from Sidebar so MapArea can react)
-  const [predictionOpen, setPredictionOpen] = useState(true);
+  const [predictionOpen, setPredictionOpen] = useState(false);
+
+  // Prediction History section open state (lifted so MapArea can react)
+  const [predictionHistoryOpen, setPredictionHistoryOpen] = useState(false);
 
   // Prediction cells (loaded from backend when prediction section opens)
   const [predictionCells, setPredictionCells] = useState(null);
@@ -77,9 +83,19 @@ export default function Home() {
     }
   }, [analysisState.dataCategory]);
 
-  // Load prediction cells when prediction section opens
+  // Ensure grid is visible when prediction or prediction history section opens
   useEffect(() => {
-    if (!predictionOpen || predictionCells) return;
+    if (predictionOpen || predictionHistoryOpen) {
+      setMapLayers(prev => ({ ...prev, grid: true }));
+    }
+  }, [predictionOpen, predictionHistoryOpen]);
+
+  // Background: preload prediction CHIRPS cells on mount
+  // The 297 CHIRPS cells are the same for all prediction files, so load once from any available file
+  const predCellsLoadedRef = useRef(false);
+  useEffect(() => {
+    if (predCellsLoadedRef.current || predictionCells) return;
+    predCellsLoadedRef.current = true;
     let cancelled = false;
     async function loadPredictionCells() {
       try {
@@ -101,7 +117,7 @@ export default function Home() {
     }
     loadPredictionCells();
     return () => { cancelled = true; };
-  }, [predictionOpen, predictionCells]);
+  }, [predictionCells]);
 
   // Handle Analysis Plot
   const handleAnalysisPlot = useCallback(async () => {
@@ -509,8 +525,8 @@ export default function Home() {
   const handleAiSummary = useCallback(async () => {
     if (!plotData) return;
 
-    const isPred1d = plotData.type === 'prediction-1d';
-    const isPred2d = plotData.type === 'prediction-2d';
+    const isPred1d = plotData.type === 'prediction-1d' || plotData.type === 'prediction-history-1d';
+    const isPred2d = plotData.type === 'prediction-2d' || plotData.type === 'prediction-history-2d';
     if (!isPred1d && !isPred2d) {
       showWarning('El resumen IA solo esta disponible para predicciones', 'No disponible');
       return;
@@ -595,36 +611,101 @@ export default function Home() {
 
   // Handle Prediction History Plot
   const handlePredictionHistoryPlot = useCallback(async () => {
-    if (!selectedStation && !selectedCell) {
-      showError('Debes seleccionar una estación o celda del mapa', 'Selección Requerida');
+    const is2D = predictionHistoryState.visualizationType === '2D';
+
+    if (!predictionHistoryState.selectedFileId) {
+      showWarning('Por favor selecciona una prediccion (fecha de emision)', 'Prediccion requerida');
       return;
     }
     if (!predictionHistoryState.droughtIndex) {
-      showWarning('Por favor selecciona un índice de sequía', 'Datos incompletos');
+      showWarning('Por favor selecciona un indice de sequia', 'Datos incompletos');
       return;
     }
-    if (!predictionHistoryState.predictionDate) {
-      showWarning('Por favor selecciona la fecha de emisión de la predicción', 'Fecha requerida');
+    if (!predictionHistoryState.scale) {
+      showWarning('Por favor selecciona una escala temporal', 'Escala requerida');
+      return;
+    }
+    if (!is2D && !selectedCell) {
+      showError('Selecciona una celda del mapa para la prediccion 1D', 'Seleccion Requerida');
+      return;
+    }
+    if (is2D && !predictionHistoryState.horizon) {
+      showWarning('Por favor selecciona un horizonte de prediccion', 'Horizonte requerido');
       return;
     }
 
-    const location = selectedStation
-      ? `Estación: ${selectedStation.name}`
-      : `Celda: [${selectedCell.center[0].toFixed(3)}, ${selectedCell.center[1].toFixed(3)}]`;
+    try {
+      showInfo(is2D ? 'Consultando prediccion historica espacial...' : 'Consultando prediccion historica temporal...', 'Cargando');
 
-    console.log('Querying prediction history:', {
-      ...predictionHistoryState,
-      location: selectedStation || selectedCell,
-    });
+      const { predictionHistoryApi } = await import('@/services/api');
+      const predFileId = Number(predictionHistoryState.selectedFileId);
 
-    showSuccess(`Histórico de predicción consultado para ${location}`, '¡Listo!');
+      if (is2D) {
+        // === 2D: Spatial grid ===
+        const response = await predictionHistoryApi.getSpatialData({
+          fileId: predFileId,
+          var: predictionHistoryState.droughtIndex,
+          scale: predictionHistoryState.scale,
+          horizon: predictionHistoryState.horizon,
+        });
 
-    setPlotData({
-      title: `Histórico Predicción: ${predictionHistoryState.droughtIndex} - ${predictionHistoryState.timeHorizon}`,
-      type: 'Histórico de Predicción',
-      data: predictionHistoryState,
-    });
-  }, [predictionHistoryState, selectedStation, selectedCell, showError, showWarning, showSuccess]);
+        setPlotData({
+          type: 'prediction-history-2d',
+          title: `Historico ${predictionHistoryState.droughtIndex} (${predictionHistoryState.scale}m) - Horizonte ${predictionHistoryState.horizon}`,
+          subtitle: `${response.statistics?.unique_cells || 0} celdas | Escala: ${predictionHistoryState.scale} meses | Prediccion historica`,
+          variable: predictionHistoryState.droughtIndex,
+          gridCells: response.grid_cells,
+          statistics: response.statistics,
+          bounds: response.bounds,
+          resolution: 0.05,
+          predictionMeta: {
+            index: predictionHistoryState.droughtIndex,
+            scale: predictionHistoryState.scale,
+            horizon: predictionHistoryState.horizon,
+            fileId: predFileId,
+            isHistory: true,
+          },
+        });
+
+        showSuccess(
+          `Mapa de prediccion historica generado: ${response.statistics?.unique_cells || 0} celdas`,
+          '!Listo!'
+        );
+      } else {
+        // === 1D: Time series for cell ===
+        const response = await predictionHistoryApi.getTimeSeries({
+          fileId: predFileId,
+          cellId: selectedCell.cell_id,
+          var: predictionHistoryState.droughtIndex,
+          scale: predictionHistoryState.scale,
+        });
+
+        setPlotData({
+          type: 'prediction-history-1d',
+          title: `Historico ${predictionHistoryState.droughtIndex} (${predictionHistoryState.scale}m)`,
+          subtitle: `Celda: ${selectedCell.cell_id} | 12 horizontes | Prediccion historica`,
+          variable: predictionHistoryState.droughtIndex,
+          data: response.data,
+          statistics: response.statistics,
+          predictionMeta: {
+            index: predictionHistoryState.droughtIndex,
+            scale: predictionHistoryState.scale,
+            cellId: selectedCell.cell_id,
+            fileId: predFileId,
+            isHistory: true,
+          },
+        });
+
+        showSuccess(
+          `Prediccion historica generada para celda ${selectedCell.cell_id} (${response.data?.length || 0} horizontes)`,
+          '!Listo!'
+        );
+      }
+    } catch (error) {
+      console.error('Error plotting prediction history:', error);
+      showError(error.message || 'Error al consultar prediccion historica', 'Error en la consulta');
+    }
+  }, [predictionHistoryState, selectedCell, showError, showWarning, showInfo, showSuccess]);
 
   // Handle Reset
   const handleReset = useCallback(() => {
@@ -639,7 +720,7 @@ export default function Home() {
     if (!plotData) return;
 
     try {
-      const { historicalApi, hydroApi, predictionApi } = await import('@/services/api');
+      const { historicalApi, hydroApi, predictionApi, predictionHistoryApi } = await import('@/services/api');
 
       // === Prediction 2D -> Prediction 1D ===
       if (plotData.type === 'prediction-2d') {
@@ -692,6 +773,54 @@ export default function Home() {
         });
 
         showSuccess(`Prediccion 1D generada para celda ${cellId}`, '!Listo!');
+        return;
+      }
+
+      // === Prediction History 2D -> Prediction History 1D ===
+      if (plotData.type === 'prediction-history-2d') {
+        const cellId = cell.cell_id || `${Number(cell.lon).toFixed(6)}_${Number(cell.lat).toFixed(6)}`;
+        const index = plotData.predictionMeta?.index || predictionHistoryState.droughtIndex;
+        const scale = plotData.predictionMeta?.scale || predictionHistoryState.scale;
+        const fileId = plotData.predictionMeta?.fileId;
+
+        if (!fileId) { showError('No se encontro archivo de prediccion historica', 'Error'); return; }
+
+        showInfo(`Consultando prediccion historica 1D para celda ${cellId}...`, 'Cargando');
+
+        const response = await predictionHistoryApi.getTimeSeries({
+          fileId: fileId,
+          cellId: cellId,
+          var: index,
+          scale: scale,
+        });
+
+        // Update selected cell visually
+        const halfRes = 0.05 / 2;
+        setSelectedCell({
+          id: cellId,
+          cell_id: cellId,
+          center: [cell.lat, cell.lon],
+          bounds: [[cell.lat - halfRes, cell.lon - halfRes], [cell.lat + halfRes, cell.lon + halfRes]],
+          resolution: 0.05,
+          lat: cell.lat,
+          lon: cell.lon,
+        });
+        setSelectedStation(null);
+
+        // Switch prediction history sidebar to 1D mode
+        setPredictionHistoryState(prev => ({ ...prev, visualizationType: '1D' }));
+
+        setPlotData({
+          type: 'prediction-history-1d',
+          title: `Historico ${index} (${scale}m)`,
+          subtitle: `Celda: ${cellId} | 12 horizontes | Prediccion historica`,
+          variable: index,
+          data: response.data,
+          statistics: response.statistics,
+          predictionMeta: { index, scale, cellId, fileId, isHistory: true },
+        });
+
+        showSuccess(`Prediccion historica 1D generada para celda ${cellId}`, '!Listo!');
         return;
       }
 
@@ -836,7 +965,7 @@ export default function Home() {
       console.error('Error in spatial cell click -> 1D:', error);
       showError(error.message || 'Error al consultar datos 1D', 'Error');
     }
-  }, [plotData, predictionState, predictionCells, analysisState, showError, showWarning, showInfo, showSuccess]);
+  }, [plotData, predictionState, predictionHistoryState, predictionCells, analysisState, showError, showWarning, showInfo, showSuccess]);
 
   return (
     <div className="flex flex-col h-screen bg-gradient-to-br from-blue-50/30 via-blue-50/20 to-blue-50/20 dark:from-[#0f1419] dark:via-[#0a0e13] dark:to-[#0f1419] p-4">
@@ -850,6 +979,8 @@ export default function Home() {
           setPredictionState={setPredictionState}
           predictionOpen={predictionOpen}
           setPredictionOpen={setPredictionOpen}
+          predictionHistoryOpen={predictionHistoryOpen}
+          setPredictionHistoryOpen={setPredictionHistoryOpen}
           predictionHistoryState={predictionHistoryState}
           setPredictionHistoryState={setPredictionHistoryState}
           onAnalysisPlot={handleAnalysisPlot}
@@ -868,6 +999,7 @@ export default function Home() {
           aiSummary={aiSummary}
           setAiSummary={setAiSummary}
           predictionOpen={predictionOpen}
+          predictionHistoryOpen={predictionHistoryOpen}
           predictionCells={predictionCells}
           selectedStation={selectedStation}
           selectedCell={selectedCell}
@@ -880,6 +1012,8 @@ export default function Home() {
       </div>
       
       <Footer />
+
+      <GuidedTour />
     </div>
   );
 }

@@ -13,8 +13,9 @@ Este archivo lista TODA la documentación disponible en el proyecto DroughtMonit
 | **Subir/gestionar archivos** | Gestión de archivos | [FILE_MANAGEMENT_GUIDE.md](FILE_MANAGEMENT_GUIDE.md) |
 | **Sincronizar con Cloudflare** | Sync Cloudflare | [SINCRONIZACION_CLOUDFLARE.md](SINCRONIZACION_CLOUDFLARE.md) |
 | **Entender arquitectura** | Arquitectura | [ARCHITECTURE.md](ARCHITECTURE.md) |
-| **Ver variables disponibles** | Catálogo de variables | [VARIABLES_GUIDE.md](VARIABLES_GUIDE.md) |
-| **Copy-paste código** | Respuestas rápidas | [RESPUESTAS_RAPIDAS.md](RESPUESTAS_RAPIDAS.md) |
+| **Ver variables disponibles** | Catalogo de variables | [VARIABLES_GUIDE.md](VARIABLES_GUIDE.md) |
+| **Sistema de prediccion** | Prediccion y historico | [PREDICTION_GUIDE.md](PREDICTION_GUIDE.md) |
+| **Copy-paste codigo** | Respuestas rapidas | [RESPUESTAS_RAPIDAS.md](RESPUESTAS_RAPIDAS.md) |
 | **Detalles técnicos DuckDB** | Guía DuckDB | [HISTORICAL_DATA_GUIDE.md](HISTORICAL_DATA_GUIDE.md) |
 
 ---
@@ -27,19 +28,22 @@ Este archivo lista TODA la documentación disponible en el proyecto DroughtMonit
 3. **[FAQ.md](FAQ.md)** - Preguntas frecuentes y troubleshooting
 
 ### 📊 Uso de la API
-4. **[ENDPOINTS_GUIDE.md](ENDPOINTS_GUIDE.md)** 🆕 - Matriz completa de endpoints (¿cuál usar?)
+4. **[ENDPOINTS_GUIDE.md](ENDPOINTS_GUIDE.md)** - Matriz completa de endpoints
 5. **[FLUJOS_CONSULTA.md](FLUJOS_CONSULTA.md)** - Flujos 1D (timeseries) y 2D (mapas)
-6. **[RESPUESTAS_RAPIDAS.md](RESPUESTAS_RAPIDAS.md)** - Ejemplos código copy-paste
+6. **[RESPUESTAS_RAPIDAS.md](RESPUESTAS_RAPIDAS.md)** - Ejemplos codigo copy-paste
 
-### 📁 Gestión de datos
-7. **[FILE_MANAGEMENT_GUIDE.md](FILE_MANAGEMENT_GUIDE.md)** - Upload, registro, gestión archivos
-8. **[SINCRONIZACION_CLOUDFLARE.md](SINCRONIZACION_CLOUDFLARE.md)** - Sync BD ↔ Cloudflare R2
-9. **[VARIABLES_GUIDE.md](VARIABLES_GUIDE.md)** - Variables climáticas disponibles
+### 🔮 Prediccion
+7. **[PREDICTION_GUIDE.md](PREDICTION_GUIDE.md)** - Sistema de prediccion, historico y flujo completo
 
-### 🏗️ Arquitectura técnica
-10. **[ARCHITECTURE.md](ARCHITECTURE.md)** - Diseño general del sistema
-11. **[HISTORICAL_DATA_GUIDE.md](HISTORICAL_DATA_GUIDE.md)** - Sistema DuckDB completo
-12. **[IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md)** - Resumen de implementación
+### 📁 Gestion de datos
+8. **[FILE_MANAGEMENT_GUIDE.md](FILE_MANAGEMENT_GUIDE.md)** - Upload, registro, gestion archivos
+9. **[SINCRONIZACION_CLOUDFLARE.md](SINCRONIZACION_CLOUDFLARE.md)** - Sync BD ↔ Cloudflare R2
+10. **[VARIABLES_GUIDE.md](VARIABLES_GUIDE.md)** - Variables climaticas disponibles
+
+### 🏗️ Arquitectura tecnica
+11. **[ARCHITECTURE.md](ARCHITECTURE.md)** - Diseno general del sistema
+12. **[HISTORICAL_DATA_GUIDE.md](HISTORICAL_DATA_GUIDE.md)** - Sistema DuckDB completo
+13. **[IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md)** - Resumen de implementacion
 
 ### 📜 Otros documentos
 13. **[REQUERIMIENTOS_VALIDACION.md](../drought-frontend/REQUERIMIENTOS_VALIDACION.md)** - Validación de requerimientos (frontend)
@@ -361,7 +365,7 @@ Cuando crees nueva documentación:
 
 ## 🔄 Última actualización
 
-Este índice fue actualizado el: **2024** (revisar cuando se cree/elimine documentación)
+Este indice fue actualizado el: **Abril 2026**
 
 ---
 

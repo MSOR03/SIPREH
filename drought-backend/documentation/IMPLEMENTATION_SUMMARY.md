@@ -67,10 +67,11 @@ requests==2.31.0
 | **Click en celda/estación** | ✅ | `lat`, `lon` o `cell_id` en requests |
 | **Graficar 1D (serie de tiempo)** | ✅ | `POST /historical/timeseries` |
 | **Graficar 2D (mapa espacial)** | ✅ | `POST /historical/spatial` |
-| **Menu (3): Índices para predicción** | 🔜 | Próximo paso |
-| **Menu (4): Horizonte (1m, 3m, 6m)** | 🔜 | Próximo paso |
-| **Botón Guardar (CSV, PNG, JPEG)** | 🔜 | Próximo paso |
-| **Correlaciones macroclimáticas** | 🔜 | Próximo paso |
+| **Menu (3): Indices para prediccion** | ✅ | `POST /prediction/timeseries`, `POST /prediction/spatial` |
+| **Menu (4): Horizonte (1-12 meses)** | ✅ | Parametro `horizon` en requests |
+| **Boton Guardar (CSV, PNG, JPEG)** | 🔜 | Proximo paso |
+| **Correlaciones macroclimaticas** | 🔜 | Proximo paso |
+| **Historico de predicciones** | ✅ | `GET /prediction/history/list` + consultas por file_id |
 
 ---
 
@@ -268,19 +269,15 @@ drought-backend/
 
 ## 🎓 Siguientes Funcionalidades a Implementar
 
-### 1. **Predicción de Sequías** (Próximo)
-- Endpoints para predicción 1m, 3m, 6m
-- Modelos de ML para SPI, SPEI, EDDI
-
-### 2. **Exportación de Datos**
+### 1. **Exportacion de Datos** (Proximo)
 - CSV para series de tiempo
 - PNG/JPEG para mapas
-- Múltiples fechas en batch
+- Multiples fechas en batch
 
-### 3. **Correlaciones Macroclimáticas**
-- ENSO (El Niño/La Niña)
+### 2. **Correlaciones Macroclimaticas**
+- ENSO (El Nino/La Nina)
 - IOD, NAO, etc.
-- Análisis de correlación temporal
+- Analisis de correlacion temporal
 
 ---
 

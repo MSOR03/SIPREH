@@ -488,6 +488,47 @@ export const predictionApi = {
 };
 
 /**
+ * Prediction History API
+ */
+export const predictionHistoryApi = {
+  // Listar todas las predicciones disponibles con fecha de emision
+  getList: async () => {
+    return fetchApi('/prediction/history/list');
+  },
+
+  // Celdas unicas de un archivo de prediccion historico
+  getCells: async (fileId) => {
+    return fetchApi(`/prediction/cells/${fileId}`);
+  },
+
+  // Serie temporal 1D por celda (12 horizontes) para prediccion historica
+  getTimeSeries: async ({ fileId, cellId, var: varName, scale }) => {
+    return fetchApi('/prediction/timeseries', {
+      method: 'POST',
+      body: JSON.stringify({
+        parquet_file_id: fileId,
+        cell_id: cellId,
+        var: varName,
+        scale: scale,
+      }),
+    });
+  },
+
+  // Datos espaciales 2D (297 celdas) para prediccion historica
+  getSpatialData: async ({ fileId, var: varName, scale, horizon }) => {
+    return fetchApi('/prediction/spatial', {
+      method: 'POST',
+      body: JSON.stringify({
+        parquet_file_id: fileId,
+        var: varName,
+        scale: scale,
+        horizon: horizon,
+      }),
+    });
+  },
+};
+
+/**
  * Helper functions
  */
 export const apiHelpers = {
