@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
 import MapArea from '@/components/MapArea';
@@ -92,10 +92,8 @@ export default function Home() {
 
   // Background: preload prediction CHIRPS cells on mount
   // The 297 CHIRPS cells are the same for all prediction files, so load once from any available file
-  const predCellsLoadedRef = useRef(false);
   useEffect(() => {
-    if (predCellsLoadedRef.current || predictionCells) return;
-    predCellsLoadedRef.current = true;
+    if (predictionCells) return;
     let cancelled = false;
     async function loadPredictionCells() {
       try {

@@ -12,7 +12,7 @@ Este archivo lista TODA la documentación disponible en el proyecto DroughtMonit
 | **Hacer consultas de datos** | Flujos 1D/2D | [FLUJOS_CONSULTA.md](FLUJOS_CONSULTA.md) |
 | **Subir/gestionar archivos** | Gestión de archivos | [FILE_MANAGEMENT_GUIDE.md](FILE_MANAGEMENT_GUIDE.md) |
 | **Sincronizar con Cloudflare** | Sync Cloudflare | [SINCRONIZACION_CLOUDFLARE.md](SINCRONIZACION_CLOUDFLARE.md) |
-| **Entender arquitectura** | Arquitectura | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| **Entender arquitectura** | Arquitectura | [ARCHITECTURE.md](../ARCHITECTURE.md) |
 | **Ver variables disponibles** | Catalogo de variables | [VARIABLES_GUIDE.md](VARIABLES_GUIDE.md) |
 | **Sistema de prediccion** | Prediccion y historico | [PREDICTION_GUIDE.md](PREDICTION_GUIDE.md) |
 | **Copy-paste codigo** | Respuestas rapidas | [RESPUESTAS_RAPIDAS.md](RESPUESTAS_RAPIDAS.md) |
@@ -23,7 +23,7 @@ Este archivo lista TODA la documentación disponible en el proyecto DroughtMonit
 ## 📂 Documentación por categoría
 
 ### 🚀 Instalación y configuración
-1. **[README.md](README.md)** - Documentación principal del proyecto
+1. **[README.md](../README.md)** - Documentación principal del proyecto
 2. **[QUICKSTART.md](QUICKSTART.md)** - Instalación y configuración inicial
 3. **[FAQ.md](FAQ.md)** - Preguntas frecuentes y troubleshooting
 
@@ -41,12 +41,12 @@ Este archivo lista TODA la documentación disponible en el proyecto DroughtMonit
 10. **[VARIABLES_GUIDE.md](VARIABLES_GUIDE.md)** - Variables climaticas disponibles
 
 ### 🏗️ Arquitectura tecnica
-11. **[ARCHITECTURE.md](ARCHITECTURE.md)** - Diseno general del sistema
+11. **[ARCHITECTURE.md](../ARCHITECTURE.md)** - Diseno general del sistema
 12. **[HISTORICAL_DATA_GUIDE.md](HISTORICAL_DATA_GUIDE.md)** - Sistema DuckDB completo
 13. **[IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md)** - Resumen de implementacion
 
 ### 📜 Otros documentos
-13. **[REQUERIMIENTOS_VALIDACION.md](../drought-frontend/REQUERIMIENTOS_VALIDACION.md)** - Validación de requerimientos (frontend)
+13. **[REQUERIMIENTOS_VALIDACION.md](../../drought-frontend/docs/REQUERIMIENTOS_VALIDACION.md)** - Validación de requerimientos (frontend)
 14. **[documents/](../documents/)** - Carpeta con documentos adicionales
 
 ---
@@ -284,12 +284,12 @@ Este archivo lista TODA la documentación disponible en el proyecto DroughtMonit
 ## 🔍 Búsqueda de temas
 
 ### Autenticación y seguridad
-- [README.md](README.md) - Sección "Autenticación"
+- [README.md](../README.md) - Sección "Autenticación"
 - [QUICKSTART.md](QUICKSTART.md) - Configuración JWT
 - [RESPUESTAS_RAPIDAS.md](RESPUESTAS_RAPIDAS.md) - Ejemplos login
 
 ### Base de datos
-- [README.md](README.md) - Sección "Configuración"
+- [README.md](../README.md) - Sección "Configuración"
 - [QUICKSTART.md](QUICKSTART.md) - Inicialización BD
 - [FAQ.md](FAQ.md) - Errores de conexión
 
@@ -300,7 +300,7 @@ Este archivo lista TODA la documentación disponible en el proyecto DroughtMonit
 
 ### DuckDB y performance
 - [HISTORICAL_DATA_GUIDE.md](HISTORICAL_DATA_GUIDE.md) - Documentación técnica completa
-- [README.md](README.md) - Benchmarks
+- [README.md](../README.md) - Benchmarks
 - [ENDPOINTS_GUIDE.md](ENDPOINTS_GUIDE.md) - Comparación performance endpoints
 
 ### Consultas de datos

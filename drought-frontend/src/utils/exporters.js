@@ -27,6 +27,15 @@ function resolveSelectedVariable(plotData, analysisState) {
 }
 
 function resolveTimeInterval(plotData, analysisState) {
+  // Prediction types: describe the scale/horizon instead of a date range
+  if (plotData?.type?.startsWith('prediction')) {
+    const meta = plotData?.predictionMeta;
+    if (meta) {
+      return `Escala ${meta.scale || 'N/A'}m - Horizontes 1-12`;
+    }
+    return 'N/A';
+  }
+
   if (plotData?.type === '2D') {
     if (plotData?.isInterval && plotData?.period?.start_date && plotData?.period?.end_date) {
       return `${plotData.period.start_date} -> ${plotData.period.end_date}`;
@@ -58,6 +67,7 @@ function resolveTimeFooterLabel(plotData) {
 
 function build1DJson({ plotData, analysisState, selectedCell }) {
   const variable = resolveSelectedVariable(plotData, analysisState);
+  const isPrediction = plotData?.type?.startsWith('prediction');
   const rows = Array.isArray(plotData?.data)
     ? plotData.data.map((entry) => ({
         Tiempo: entry?.date ?? null,
@@ -68,7 +78,9 @@ function build1DJson({ plotData, analysisState, selectedCell }) {
   return {
     tipo: '1D',
     metadata: {
-      identificador_celda: selectedCell?.cell_id || plotData?.location?.cell_id || 'N/A',
+      identificador_celda: isPrediction
+        ? (plotData?.predictionMeta?.cellId || 'N/A')
+        : (selectedCell?.cell_id || plotData?.location?.cell_id || plotData?.location?.codigo || 'N/A'),
       variable_o_indice: variable,
       resolucion: selectedCell?.resolution || plotData?.resolution || analysisState?.spatialResolution || 'N/A',
       intervalo_tiempo: resolveTimeInterval(plotData, analysisState),
@@ -80,9 +92,14 @@ function build1DJson({ plotData, analysisState, selectedCell }) {
 
 function build2DJson({ plotData, analysisState }) {
   const variable = resolveSelectedVariable(plotData, analysisState);
-  const range = plotData?.isInterval && plotData?.period?.start_date && plotData?.period?.end_date
-    ? `${plotData.period.start_date} -> ${plotData.period.end_date}`
-    : (plotData?.date || analysisState?.startDate || 'N/A');
+  const isPrediction = plotData?.type === 'prediction-2d' || plotData?.type === 'prediction-history-2d';
+  const range = isPrediction
+    ? (plotData?.predictionMeta
+      ? `${plotData.predictionMeta.index || variable} escala ${plotData.predictionMeta.scale || 'N/A'}m horizonte ${plotData.predictionMeta.horizon || 'N/A'}`
+      : 'N/A')
+    : (plotData?.isInterval && plotData?.period?.start_date && plotData?.period?.end_date
+      ? `${plotData.period.start_date} -> ${plotData.period.end_date}`
+      : (plotData?.date || analysisState?.startDate || 'N/A'));
 
   const rows = Array.isArray(plotData?.gridCells)
     ? plotData.gridCells.map((cell) => ({
@@ -115,8 +132,10 @@ ctx.fillStyle = '#fff';
 ctx.fillRect(0, 0, canvas.width, canvas.height);
 ctx.restore();
 
+  const is2D = plotData.type === '2D' || plotData.type === 'prediction-2d' || plotData.type === 'prediction-history-2d';
+
   // Dibuja el contenido según el tipo de datos
-  if (plotData.type === '2D') {
+  if (is2D) {
     // Dibuja el mapa 2D completo
     await draw2DMap(ctx, plotData, analysisState);
   } else {
@@ -132,7 +151,7 @@ ctx.restore();
       triggerFileDownload(blob, fileName);
       resolve({
         fileName,
-        rows: plotData.type === '2D'
+        rows: is2D
           ? (Array.isArray(plotData?.gridCells) ? plotData.gridCells.length : 0)
           : (Array.isArray(plotData?.data) ? plotData.data.length : 0),
         type: 'image',
@@ -1062,14 +1081,15 @@ const metaY = DEFAULT_IMAGE_HEIGHT - 54;
   ctx.restore();
 }
 export function downloadAnalysisJson({ plotData, analysisState, selectedCell }) {
-  const data = plotData.type === '2D'
+  const is2D = plotData.type === '2D' || plotData.type === 'prediction-2d' || plotData.type === 'prediction-history-2d';
+  const data = is2D
     ? build2DJson({ plotData, analysisState })
     : build1DJson({ plotData, analysisState, selectedCell });
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   triggerFileDownload(blob, sanitizeFilename(plotData?.title) + '.json');
   return {
     fileName: sanitizeFilename(plotData?.title) + '.json',
-    rows: plotData.type === '2D'
+    rows: is2D
       ? (Array.isArray(plotData?.gridCells) ? plotData.gridCells.length : 0)
       : (Array.isArray(plotData?.data) ? plotData.data.length : 0),
     type: 'json',
