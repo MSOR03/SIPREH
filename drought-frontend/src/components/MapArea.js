@@ -46,6 +46,8 @@ export default function MapArea({
   onSpatialCellClick,
   mapLayers,
   setMapLayers,
+  selectedEntity,
+  onEntitySelect,
 }) {
   const { theme } = useTheme();
   const [mapKey, setMapKey] = useState(() => Date.now());
@@ -84,21 +86,31 @@ export default function MapArea({
     setMapKey(Date.now());
     onStationSelect(null);
     onCellSelect(null);
+    onEntitySelect?.(null);
     gridNav.resetToRoot();
     gridNav.clearSelection();
     onReset();
-  }, [onStationSelect, onCellSelect, gridNav, onReset]);
+  }, [onStationSelect, onCellSelect, onEntitySelect, gridNav, onReset]);
 
   const handleStationSelect = useCallback((station) => {
     onStationSelect(station);
     onCellSelect(null);
+    onEntitySelect?.(null);
     gridNav.clearSelection();
-  }, [onStationSelect, onCellSelect, gridNav]);
+  }, [onStationSelect, onCellSelect, onEntitySelect, gridNav]);
 
   const handleGridCellClick = useCallback((cell) => {
     onCellSelect(cell);
     onStationSelect(null);
-  }, [onCellSelect, onStationSelect]);
+    onEntitySelect?.(null);
+  }, [onCellSelect, onStationSelect, onEntitySelect]);
+
+  const handleEntitySelect = useCallback((entity) => {
+    onEntitySelect?.(entity);
+    onStationSelect(null);
+    onCellSelect(null);
+    gridNav.clearSelection();
+  }, [onEntitySelect, onStationSelect, onCellSelect, gridNav]);
 
   const handleSpatialCellClick = useCallback((cell) => {
     onSpatialCellClick?.(cell);
@@ -222,7 +234,7 @@ export default function MapArea({
             </div>
             
             {/* Selection Indicators */}
-            <div className="flex items-center gap-3 ml-7 mt-1">
+            <div className="flex items-center gap-3 ml-7 mt-1 flex-wrap">
               {selectedStation && (
                 <p className="text-xs text-gray-600 dark:text-gray-400 flex items-center gap-2 animate-fade-in">
                   <span className="inline-flex relative">
@@ -257,11 +269,54 @@ export default function MapArea({
                   </div>
                 </div>
               )}
+
+              {selectedEntity && (
+                <div className={`flex items-center gap-3 px-3 py-1.5 rounded-lg shadow-sm animate-fade-in border ${
+                  selectedEntity.type === 'embalse'
+                    ? 'bg-gradient-to-r from-purple-50 to-violet-50 dark:from-purple-900/20 dark:to-violet-900/20 border-purple-300 dark:border-purple-700'
+                    : 'bg-gradient-to-r from-teal-50 to-cyan-50 dark:from-teal-900/20 dark:to-cyan-900/20 border-teal-300 dark:border-teal-700'
+                }`}>
+                  <span className="inline-flex relative">
+                    <span className={`inline-block w-2 h-2 rounded-full ${selectedEntity.type === 'embalse' ? 'bg-purple-600' : 'bg-teal-600'}`}></span>
+                    <span className={`absolute inline-flex w-2 h-2 rounded-full animate-ping opacity-75 ${selectedEntity.type === 'embalse' ? 'bg-purple-600' : 'bg-teal-600'}`}></span>
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs font-semibold ${
+                      selectedEntity.type === 'embalse'
+                        ? 'text-purple-900 dark:text-purple-100'
+                        : 'text-teal-900 dark:text-teal-100'
+                    }`}>
+                      {selectedEntity.type === 'embalse' ? 'Embalse' : 'Cuenca'}:
+                    </span>
+                    <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${
+                      selectedEntity.type === 'embalse'
+                        ? 'bg-purple-200 dark:bg-purple-800 text-purple-900 dark:text-purple-100'
+                        : 'bg-teal-200 dark:bg-teal-800 text-teal-900 dark:text-teal-100'
+                    }`}>
+                      {selectedEntity.layer}
+                    </span>
+                    <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                      selectedEntity.type === 'embalse'
+                        ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300'
+                        : 'bg-teal-100 dark:bg-teal-900/40 text-teal-700 dark:text-teal-300'
+                    }`}>
+                      {selectedEntity.areakm2} km²
+                    </span>
+                    <span className={`text-xs px-1.5 py-0.5 rounded font-mono ${
+                      selectedEntity.type === 'embalse'
+                        ? 'bg-white dark:bg-gray-800 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-700'
+                        : 'bg-white dark:bg-gray-800 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-700'
+                    }`}>
+                      DN: {selectedEntity.dn}
+                    </span>
+                  </div>
+                </div>
+              )}
               
-              {!selectedStation && !selectedCell && (
+              {!selectedStation && !selectedCell && !selectedEntity && (
                 <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-2 animate-pulse">
                   <span className="inline-block w-2 h-2 bg-amber-500 rounded-full"></span>
-                  <span className="font-medium">Selecciona una estación o celda del mapa</span>
+                  <span className="font-medium">Selecciona una estación, celda, cuenca o embalse del mapa</span>
                 </p>
               )}
             </div>
@@ -301,6 +356,10 @@ export default function MapArea({
             showGrid={mapLayers?.grid ?? true}
             showStations={mapLayers?.stations ?? true}
             showBoundary={mapLayers?.boundary ?? true}
+            showCuencas={mapLayers?.cuencas ?? false}
+            showEmbalses={mapLayers?.embalses ?? false}
+            selectedEntity={selectedEntity}
+            onEntitySelect={handleEntitySelect}
           />
 
           {/* ── Layer Control Overlay ── */}
