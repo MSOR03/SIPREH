@@ -15,6 +15,7 @@ export default function Home() {
   // Selection state
   const [selectedStation, setSelectedStation] = useState(null);
   const [selectedCell, setSelectedCell] = useState(null);
+  const [selectedEntity, setSelectedEntity] = useState(null); // Cuenca o Embalse seleccionado
   
   // Historical Analysis State
   const [analysisState, setAnalysisState] = useState({
@@ -1006,6 +1007,8 @@ export default function Home() {
           onSpatialCellClick={handleSpatialCellClick}
           mapLayers={mapLayers}
           setMapLayers={setMapLayers}
+          selectedEntity={selectedEntity}
+          onEntitySelect={setSelectedEntity}
         />
       </div>
       
