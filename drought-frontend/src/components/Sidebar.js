@@ -196,7 +196,7 @@ export default function Sidebar({
   const showSpatialUnit = is2DMode;
 
   return (
-    <aside data-tour="sidebar" className="w-[480px] min-w-[420px] bg-gradient-to-b from-gray-50 to-gray-100/50 dark:from-[#141920] dark:to-[#0f1419] border border-gray-200 dark:border-gray-700 overflow-y-auto shadow-2xl rounded-xl">
+    <aside data-tour="sidebar" className="w-[480px] min-w-[420px] min-h-0 bg-gradient-to-b from-gray-50 to-gray-100/50 dark:from-[#141920] dark:to-[#0f1419] border border-gray-200 dark:border-gray-700 overflow-y-auto shadow-2xl rounded-xl">
       <div className="px-6 py-5 space-y-6">
         <div className={`p-3 rounded-xl border-2 transition-all duration-300 ${
           !needsSelection || hasSelection

@@ -96,25 +96,25 @@ Notas de estabilidad:
 
 ## 📚 Documentación
 
-> 📑 **Ver índice completo**: [DOCS_INDEX.md](DOCS_INDEX.md) - Toda la documentación disponible organizada por categorías y rutas de aprendizaje
+> 📑 **Ver índice completo**: [DOCS_INDEX.md](documentation/DOCS_INDEX.md) - Toda la documentación disponible organizada por categorías y rutas de aprendizaje
 
 ### 🚀 Para empezar
-- **[Quick Start Guide](QUICKSTART.md)** - Puesta en marcha rápida
-- **[FAQ](FAQ.md)** - Preguntas frecuentes y solución de problemas
+- **[Quick Start Guide](documentation/QUICKSTART.md)** - Puesta en marcha rápida
+- **[FAQ](documentation/FAQ.md)** - Preguntas frecuentes y solución de problemas
 
 ### 📖 Guías de usuario
-- **[Matriz de Endpoints](ENDPOINTS_GUIDE.md)** 🆕 - **¿Qué endpoint usar?** Guía completa de endpoints duplicados y recomendaciones
-- **[Flujos de consulta 1D/2D](FLUJOS_CONSULTA.md)** - Cómo hacer consultas timeseries y espaciales
-- **[Guía de variables](VARIABLES_GUIDE.md)** - Variables climáticas disponibles
-- **[Gestión de archivos](FILE_MANAGEMENT_GUIDE.md)** - Upload, registro y gestión de archivos parquet
+- **[Matriz de Endpoints](documentation/ENDPOINTS_GUIDE.md)** 🆕 - **¿Qué endpoint usar?** Guía completa de endpoints duplicados y recomendaciones
+- **[Flujos de consulta 1D/2D](documentation/FLUJOS_CONSULTA.md)** - Cómo hacer consultas timeseries y espaciales
+- **[Guía de variables](documentation/VARIABLES_GUIDE.md)** - Variables climáticas disponibles
+- **[Gestión de archivos](documentation/FILE_MANAGEMENT_GUIDE.md)** - Upload, registro y gestión de archivos parquet
 
 ### 🔧 Guías técnicas
-- **[Sistema DuckDB](HISTORICAL_DATA_GUIDE.md)** - Arquitectura completa del sistema de consultas
-- **[Sincronización Cloudflare](SINCRONIZACION_CLOUDFLARE.md)** - Sync bidireccional BD ↔ R2
+- **[Sistema DuckDB](documentation/HISTORICAL_DATA_GUIDE.md)** - Arquitectura completa del sistema de consultas
+- **[Sincronización Cloudflare](documentation/SINCRONIZACION_CLOUDFLARE.md)** - Sync bidireccional BD ↔ R2
 - **[Arquitectura del sistema](ARCHITECTURE.md)** - Diseño general y componentes
 
 ### ⚡ Referencia rápida
-- **[Respuestas rápidas](RESPUESTAS_RAPIDAS.md)** - Ejemplos de código copy-paste
+- **[Respuestas rápidas](documentation/RESPUESTAS_RAPIDAS.md)** - Ejemplos de código copy-paste
 
 ## 🔌 API Endpoints
 
@@ -333,7 +333,7 @@ GET /api/v1/historical/files/{id}/validate
 3. Filtrar por bounds: `min_lat`, `max_lat`, `min_lon`, `max_lon`
 4. Verificar caché está activo (Redis recomendado)
 
-Ver más en [FAQ.md](FAQ.md)
+Ver más en [FAQ.md](documentation/FAQ.md)
 
 ## 🚢 Deployment
 
@@ -382,6 +382,6 @@ Una vez corriendo el servidor:
 
 ## 📧 Soporte
 
-- Reportar bugs: [GitHub Issues](link-to-issues)
+- Reportar bugs: Ver sección [📚 Documentación](#-documentación)
 - Documentación completa: Ver sección [📚 Documentación](#-documentación)
 - Email: [tu-email]

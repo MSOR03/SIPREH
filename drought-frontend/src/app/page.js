@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
 import MapArea from '@/components/MapArea';
@@ -92,10 +92,8 @@ export default function Home() {
 
   // Background: preload prediction CHIRPS cells on mount
   // The 297 CHIRPS cells are the same for all prediction files, so load once from any available file
-  const predCellsLoadedRef = useRef(false);
   useEffect(() => {
-    if (predCellsLoadedRef.current || predictionCells) return;
-    predCellsLoadedRef.current = true;
+    if (predictionCells) return;
     let cancelled = false;
     async function loadPredictionCells() {
       try {
@@ -968,10 +966,10 @@ export default function Home() {
   }, [plotData, predictionState, predictionHistoryState, predictionCells, analysisState, showError, showWarning, showInfo, showSuccess]);
 
   return (
-    <div className="flex flex-col h-screen bg-gradient-to-br from-blue-50/30 via-blue-50/20 to-blue-50/20 dark:from-[#0f1419] dark:via-[#0a0e13] dark:to-[#0f1419] p-4">
+    <div className="flex flex-col h-screen bg-linear-to-br from-blue-50/30 via-blue-50/20 to-blue-50/20 dark:from-[#0f1419] dark:via-[#0a0e13] dark:to-[#0f1419] p-4">
       <Header />
       
-      <div className="flex flex-1 overflow-hidden gap-3 mt-3 mb-3">
+      <div className="flex flex-1 min-h-0 overflow-hidden gap-3 mt-3 mb-3">
         <Sidebar
           analysisState={analysisState}
           setAnalysisState={setAnalysisState}

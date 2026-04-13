@@ -415,4 +415,4 @@ response = requests.post("/api/v1/drought/historical/spatial", json={
 
 - [FLUJOS_CONSULTA.md](FLUJOS_CONSULTA.md) - Flujos completos de 1D/2D con frontend
 - [HISTORICAL_DATA_GUIDE.md](HISTORICAL_DATA_GUIDE.md) - Documentación técnica DuckDB
-- [README.md](README.md) - Guía principal del proyecto
+- [README.md](../README.md) - Guía principal del proyecto

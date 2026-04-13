@@ -136,7 +136,7 @@ export default function MapArea({
   }, [gridNav, onCellSelect, onStationSelect]);
 
   return (
-    <main className="flex-1 flex flex-col bg-gradient-to-br from-blue-50/30 via-blue-50/20 to-gray-50 dark:from-[#0f1419] dark:via-[#141920] dark:to-[#0f1419] rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden shadow-2xl">
+    <main className="flex-1 min-h-0 flex flex-col bg-linear-to-br from-blue-50/30 via-blue-50/20 to-gray-50 dark:from-[#0f1419] dark:via-[#141920] dark:to-[#0f1419] rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden shadow-2xl">
       {/* Map Controls */}
       <div className="bg-white/90 dark:bg-[#141920]/90 backdrop-blur-xl border-b border-gray-200 dark:border-gray-700 px-6 py-3 shadow-lg">
         <div className="flex items-center justify-between">
@@ -281,7 +281,7 @@ export default function MapArea({
       </div>
 
       {/* Map Container */}
-      <div data-tour="map" className="flex-1 relative bg-gradient-to-br from-blue-50/20 via-blue-50/10 to-blue-50/10 dark:from-gray-950 dark:via-[#0f1419] dark:to-gray-950 p-6">
+      <div data-tour="map" className="flex-1 min-h-0 relative bg-linear-to-br from-blue-50/20 via-blue-50/10 to-blue-50/10 dark:from-gray-950 dark:via-[#0f1419] dark:to-gray-950 p-6">
         <div className="h-full relative bg-white/60 dark:bg-gray-900/60 backdrop-blur-sm rounded-2xl shadow-2xl ring-4 ring-blue-500/20 dark:ring-blue-400/20 border border-gray-200 dark:border-gray-700">
           <LeafletMap 
             theme={theme}
