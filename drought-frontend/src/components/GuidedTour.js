@@ -9,7 +9,7 @@ const TOUR_STEPS = [
     icon: BarChart3,
     color: 'blue',
     title: 'Panel de Control',
-    description: 'Desde aqui configuras todos los analisis. Tiene tres secciones principales que puedes abrir y cerrar.',
+    description: 'Desde aqui configuras todos los análisis. Tiene tres secciones principales que puedes abrir y cerrar.',
     position: 'right',
   },
   {

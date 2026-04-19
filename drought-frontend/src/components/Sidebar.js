@@ -59,6 +59,7 @@ export default function Sidebar({
   onPredictionHistoryPlot,
   selectedStation,
   selectedCell,
+  selectedEntity,
 }) {
   const [historicalOpen, setHistoricalOpen] = useState(false);
   const [showCategoryPicker, setShowCategoryPicker] = useState(true);
@@ -66,14 +67,16 @@ export default function Sidebar({
   const isHydromet = (analysisState.dataCategory || 'hydromet') === 'hydromet';
   const isHydrological = (analysisState.dataCategory || 'hydromet') === 'hydrological';
   const is2DMode = analysisState.visualizationType === '2D';
-  const needsSelection = !is2DMode;
-  const hasSelection = selectedStation || selectedCell;
+  const needsSelection = !is2DMode && (analysisState.spatialUnit || 'grid') !== 'cuencas';
+  const hasSelection = selectedStation || selectedCell || (selectedEntity?.type === 'cuenca');
 
   const selectionText = selectedStation
     ? selectedStation.name
     : selectedCell
       ? `Celda [${selectedCell.center[0].toFixed(2)}, ${selectedCell.center[1].toFixed(2)}]`
-      : null;
+      : selectedEntity?.type === 'cuenca'
+        ? `Cuenca: ${selectedEntity.layer}`
+        : null;
 
   const currentVariables = useMemo(
     () => (isHydromet ? hydrometeorologicalVariables : hydrologicalVariables),
@@ -192,8 +195,12 @@ export default function Sidebar({
     ]
   );
 
-  const showDataSource = is2DMode && isHydromet && (analysisState.spatialUnit || 'grid') === 'grid';
-  const showSpatialUnit = is2DMode;
+  const isCuencasMode = (analysisState.spatialUnit || 'grid') === 'cuencas';
+  const showDataSource = isHydromet && (
+    (is2DMode && ['grid', 'cuencas'].includes(analysisState.spatialUnit || 'grid'))
+    || (!is2DMode && isCuencasMode)
+  );
+  const showSpatialUnit = is2DMode || (!is2DMode && isHydromet);
 
   return (
     <aside data-tour="sidebar" className="w-[480px] min-w-[420px] min-h-0 bg-gradient-to-b from-gray-50 to-gray-100/50 dark:from-[#141920] dark:to-[#0f1419] border border-gray-200 dark:border-gray-700 overflow-y-auto shadow-2xl rounded-xl">
