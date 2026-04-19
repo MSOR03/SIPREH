@@ -28,3 +28,19 @@ class AiSummaryRequest(BaseModel):
     values: Optional[List[float]] = Field(None, description="Valores temporales (para tipo 1d)")
     grid_summary: Optional[Dict[str, Any]] = Field(None, description="Resumen del grid (para tipo 2d)")
     horizon: Optional[int] = Field(None, description="Horizonte (para tipo 2d)")
+
+
+# ── Watershed Requests ──
+
+class PredictionWatershedSpatialRequest(BaseModel):
+    parquet_file_id: int = Field(..., description="ID del archivo parquet de prediccion")
+    var: str = Field(..., description="Indice de sequia: SPI, SPEI, RAI, EDDI, PDSI")
+    scale: int = Field(..., description="Escala temporal en meses (1, 3, 6, 12)")
+    horizon: int = Field(..., ge=1, le=12, description="Horizonte de prediccion (1-12)")
+
+
+class PredictionWatershedTimeSeriesRequest(BaseModel):
+    parquet_file_id: int = Field(..., description="ID del archivo parquet de prediccion")
+    var: str = Field(..., description="Indice de sequia: SPI, SPEI, RAI, EDDI, PDSI")
+    scale: int = Field(..., description="Escala temporal en meses (1, 3, 6, 12)")
+    cuenca_dn: int = Field(..., ge=1, le=7, description="DN de la cuenca (1-7)")
