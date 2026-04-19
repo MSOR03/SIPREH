@@ -148,3 +148,54 @@ class FileValidationResponse(BaseModel):
     errors: List[str]
     warnings: List[str]
     info: List[str]
+
+
+# ============================================================================
+# WATERSHED (CUENCAS)
+# ============================================================================
+
+class WatershedSpatialRequest(BaseModel):
+    """Request para datos espaciales agregados por cuenca."""
+    parquet_file_id: int = Field(..., description="ID del archivo parquet")
+    variable: str = Field(..., description="Variable o índice")
+    data_source: str = Field(..., description="Fuente de datos: ERA5, IMERG o CHIRPS")
+    target_date: Optional[date] = Field(None, description="Fecha objetivo (modo fecha única)")
+    start_date: Optional[date] = Field(None, description="Fecha inicial (modo intervalo)")
+    end_date: Optional[date] = Field(None, description="Fecha final (modo intervalo)")
+    use_interval: bool = Field(False, description="Si true, usa rango y promedia")
+    scale: Optional[int] = Field(None, description="Escala temporal (1, 3, 6, 12) — solo índices")
+    frequency: Optional[str] = Field(None, description="Frecuencia: 'D' o 'M'")
+
+
+class WatershedCuencaValue(BaseModel):
+    """Valor agregado de una cuenca."""
+    dn: int
+    nombre: str
+    value: Optional[float]
+    color: Optional[str]
+    category: Optional[str] = None
+    severity: Optional[int] = None
+    cell_count: int = 0
+
+
+class WatershedSpatialResponse(BaseModel):
+    """Response con datos espaciales agregados por cuenca."""
+    variable: str
+    variable_name: str
+    unit: str
+    date: date
+    data_source: str
+    cuencas: List[WatershedCuencaValue]
+    statistics: StatisticsInfo
+
+
+class WatershedTimeSeriesRequest(BaseModel):
+    """Request para serie de tiempo de una cuenca."""
+    parquet_file_id: int = Field(..., description="ID del archivo parquet")
+    variable: str = Field(..., description="Variable o índice")
+    data_source: str = Field(..., description="Fuente de datos: ERA5, IMERG o CHIRPS")
+    cuenca_dn: int = Field(..., description="DN de la cuenca (1-7)")
+    start_date: date = Field(..., description="Fecha inicial")
+    end_date: date = Field(..., description="Fecha final")
+    scale: Optional[int] = Field(None, description="Escala temporal — solo índices")
+    frequency: Optional[str] = Field(None, description="Frecuencia: 'D' o 'M'")

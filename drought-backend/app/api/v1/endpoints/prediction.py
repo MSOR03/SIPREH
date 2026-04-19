@@ -18,6 +18,8 @@ from app.api.v1.endpoints.prediction_schemas import (
     PredictionTimeSeriesRequest,
     PredictionSpatialRequest,
     AiSummaryRequest,
+    PredictionWatershedSpatialRequest,
+    PredictionWatershedTimeSeriesRequest,
 )
 from app.api.v1.endpoints.historical_utils import orjson_response
 from app.services.tiered_storage import _parse_meta
@@ -222,6 +224,88 @@ def prediction_spatial(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error consultando datos espaciales de prediccion: {str(e)}",
+        )
+
+
+# ============================================================================
+# DATOS ESPACIALES POR CUENCA (7 cuencas, ponderado por area)
+# ============================================================================
+
+@router.post("/watershed/spatial", response_class=JSONResponse)
+def prediction_watershed_spatial(
+    request: PredictionWatershedSpatialRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Obtiene datos espaciales de prediccion agregados por cuenca (7 cuencas).
+    Promedio ponderado por area de interseccion celda-cuenca.
+    """
+    logger.info(
+        "POST /prediction/watershed/spatial - file=%s var=%s scale=%s horizon=%s",
+        request.parquet_file_id, request.var, request.scale, request.horizon,
+    )
+
+    cloud_key = _resolve_prediction_cloud_key(request.parquet_file_id, db)
+    if not cloud_key:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Archivo de prediccion no encontrado o sin cloud_key",
+        )
+
+    try:
+        result = _prediction_service.query_watershed_spatial(
+            parquet_url=cloud_key,
+            var=request.var,
+            scale=request.scale,
+            horizon=request.horizon,
+        )
+        return orjson_response(result)
+    except Exception as e:
+        logger.error("Error en prediction watershed spatial: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error consultando datos de cuenca: {str(e)}",
+        )
+
+
+# ============================================================================
+# SERIE TEMPORAL POR CUENCA (12 horizontes, ponderado por area)
+# ============================================================================
+
+@router.post("/watershed/timeseries", response_class=JSONResponse)
+def prediction_watershed_timeseries(
+    request: PredictionWatershedTimeSeriesRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Obtiene serie de prediccion (12 horizontes) para una cuenca,
+    promedio ponderado por area de interseccion.
+    """
+    logger.info(
+        "POST /prediction/watershed/timeseries - file=%s var=%s scale=%s dn=%s",
+        request.parquet_file_id, request.var, request.scale, request.cuenca_dn,
+    )
+
+    cloud_key = _resolve_prediction_cloud_key(request.parquet_file_id, db)
+    if not cloud_key:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Archivo de prediccion no encontrado o sin cloud_key",
+        )
+
+    try:
+        result = _prediction_service.query_watershed_timeseries(
+            parquet_url=cloud_key,
+            var=request.var,
+            scale=request.scale,
+            cuenca_dn=request.cuenca_dn,
+        )
+        return orjson_response(result)
+    except Exception as e:
+        logger.error("Error en prediction watershed timeseries: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error consultando serie de cuenca: {str(e)}",
         )
 
 

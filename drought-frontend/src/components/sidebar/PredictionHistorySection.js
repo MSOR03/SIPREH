@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { History, BarChart3, Map as MapIcon, RefreshCw } from 'lucide-react';
+import { History, BarChart3, Map as MapIcon, RefreshCw, Grid3x3, Droplets } from 'lucide-react';
 import Select from '../ui/Select';
 import Button from '../ui/Button';
 import { CollapsiblePanel, RadioCard, RadioOption, StepSection } from './primitives';
@@ -67,11 +67,13 @@ export default function PredictionHistorySection({
 
   const is2D = predictionHistoryState.visualizationType === '2D';
   const is1D = predictionHistoryState.visualizationType === '1D';
+  const isCuencas = predictionHistoryState.spatialUnit === 'cuencas';
 
   const canGenerate = (() => {
     if (!predictionHistoryState.selectedFileId) return false;
     if (!predictionHistoryState.droughtIndex || !predictionHistoryState.scale) return false;
-    if (is1D && !hasSelection) return false;
+    if (is1D && !isCuencas && !hasSelection) return false;
+    if (is1D && isCuencas && !hasSelection) return false;
     if (is2D && !predictionHistoryState.horizon) return false;
     return true;
   })();
@@ -146,7 +148,7 @@ export default function PredictionHistorySection({
                 checked={is1D}
                 onChange={() => setPredictionHistoryState((prev) => ({ ...prev, visualizationType: '1D' }))}
                 label="1D Serie"
-                description="Por celda, 12 horizontes"
+                description={isCuencas ? 'Por cuenca, 12 horizontes' : 'Por celda, 12 horizontes'}
                 icon={BarChart3}
               />
               <RadioOption
@@ -155,14 +157,36 @@ export default function PredictionHistorySection({
                 checked={is2D}
                 onChange={() => setPredictionHistoryState((prev) => ({ ...prev, visualizationType: '2D' }))}
                 label="2D Mapa"
-                description="297 celdas CHIRPS"
+                description={isCuencas ? '7 cuencas CHIRPS' : '297 celdas CHIRPS'}
                 icon={MapIcon}
               />
             </div>
           </StepSection>
 
-          {/* Step 3: Drought Index */}
-          <StepSection step={3} title="Indice de sequia" color="purple" collapsible defaultOpen>
+          {/* Step 2.5: Spatial Unit (Celdas / Cuencas) */}
+          <StepSection step={3} title="Unidad espacial" color="purple" collapsible defaultOpen={false}>
+            <div className="space-y-2">
+              <RadioOption
+                name="predHistSpatialUnit"
+                value="grid"
+                checked={!isCuencas}
+                onChange={() => setPredictionHistoryState((prev) => ({ ...prev, spatialUnit: 'grid' }))}
+                label="Celdas"
+                icon={Grid3x3}
+              />
+              <RadioOption
+                name="predHistSpatialUnit"
+                value="cuencas"
+                checked={isCuencas}
+                onChange={() => setPredictionHistoryState((prev) => ({ ...prev, spatialUnit: 'cuencas' }))}
+                label="Cuencas"
+                icon={Droplets}
+              />
+            </div>
+          </StepSection>
+
+          {/* Step 4: Drought Index */}
+          <StepSection step={4} title="Indice de sequia" color="purple" collapsible defaultOpen>
             <Select
               label="Seleccionar indice"
               options={PREDICTION_INDICES}
@@ -172,8 +196,8 @@ export default function PredictionHistorySection({
             />
           </StepSection>
 
-          {/* Step 4: Scale */}
-          <StepSection step={4} title="Escala temporal" color="purple" collapsible defaultOpen={false}>
+          {/* Step 5: Scale */}
+          <StepSection step={5} title="Escala temporal" color="purple" collapsible defaultOpen={false}>
             <div className="grid grid-cols-4 gap-2">
               {SCALES.map((s) => (
                 <RadioCard
@@ -189,9 +213,9 @@ export default function PredictionHistorySection({
             </div>
           </StepSection>
 
-          {/* Step 5: Horizon (only 2D) */}
+          {/* Step 6: Horizon (only 2D) */}
           {is2D && (
-            <StepSection step={5} title="Horizonte de prediccion" color="purple" collapsible defaultOpen>
+            <StepSection step={6} title="Horizonte de prediccion" color="purple" collapsible defaultOpen>
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-gray-500 dark:text-gray-400">
@@ -220,7 +244,9 @@ export default function PredictionHistorySection({
           {is1D && !hasSelection && (
             <div className="px-3 py-2 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
               <p className="text-xs text-amber-700 dark:text-amber-300">
-                Selecciona una celda del mapa para ver la prediccion 1D
+                {isCuencas
+                  ? 'Selecciona una cuenca del mapa para ver la prediccion 1D'
+                  : 'Selecciona una celda del mapa para ver la prediccion 1D'}
               </p>
             </div>
           )}

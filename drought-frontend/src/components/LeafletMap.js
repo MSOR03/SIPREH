@@ -34,8 +34,9 @@ export default function LeafletMap({
   showGrid = true,       // Visibilidad de celdas del grid
   showStations = true,   // Visibilidad de estaciones
   showBoundary = true,   // Visibilidad del límite del área de estudio
-  showCuencas = false,   // Visibilidad de cuencas (R.)
-  showEmbalses = false,  // Visibilidad de embalses (E.)
+  showCuencas = false,   // Visibilidad de cuencas
+  showEmbalses = false,  // Visibilidad de embalses
+  cuencasSpatialData = null, // Datos espaciales por cuenca [{dn, nombre, value, color, ...}]
   selectedEntity = null,  // Entidad seleccionada (cuenca o embalse) { layer, type, dn, area }
   onEntitySelect,         // Callback al seleccionar una entidad
 }) {
@@ -296,18 +297,17 @@ export default function LeafletMap({
         map.getPane('embalsesPane').style.zIndex = 460;
         map.getPane('embalsesPane').style.display = 'none';
 
-        // Load cuencas & embalses GeoJSON
-        fetch('/data/cuencas-embalses.geojson?t=' + Date.now())
-          .then(response => {
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            return response.json();
-          })
-          .then(geojsonData => {
-            const cuencasFeatures = geojsonData.features.filter(f => f.properties.layer?.startsWith('R.'));
-            const embalsesFeatures = geojsonData.features.filter(f => f.properties.layer?.startsWith('E.'));
+        // Load cuencas & embalses from separate GeoJSON files
+        Promise.all([
+          fetch('/data/Cuencas.geojson?t=' + Date.now()).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+          fetch('/data/Embalses.geojson?t=' + Date.now()).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+        ])
+          .then(([cuencasGeoData, embalsesGeoData]) => {
+            const cuencasFeatures = cuencasGeoData.features;
+            const embalsesFeatures = embalsesGeoData.features;
 
-            // Cuencas layer (R.) — teal borders, low fill opacity
-            const cuencasGeoJSON = { ...geojsonData, features: cuencasFeatures };
+            // Cuencas layer — teal borders, low fill opacity
+            const cuencasGeoJSON = cuencasGeoData;
             // Style helpers for cuencas/embalses
             const cuencaDefaultStyle = {
               color: '#0d9488',
@@ -340,26 +340,30 @@ export default function LeafletMap({
 
             // Build entity click handler
             const makeEntityHandler = (feature, layer, type, defaultStyle, hoverStyle) => {
-              const name = feature.properties.layer || type;
+              const name = feature.properties.Nombre || feature.properties.layer || type;
               const dn = feature.properties.DN;
               const areaM2 = feature.properties['Area m2'];
-              const areakm2 = (areaM2 / 1e6).toFixed(1);
+              const areakm2 = areaM2 ? (areaM2 / 1e6).toFixed(1) : 'N/A';
 
               layer.bindTooltip(
-                `<b>${name}</b><br>Área: ${areakm2} km²<br>DN: ${dn}`,
+                `<b>${type === 'cuenca' ? 'Cuenca' : 'Embalse'}: ${name}</b><br>Área: ${areakm2} km²<br>DN: ${dn}`,
                 { sticky: true, direction: 'top', className: type === 'cuenca' ? 'cuenca-tooltip' : 'embalse-tooltip' }
               );
+
+              // Store base styles on the layer so they can be updated later (e.g. cuencasSpatialData)
+              layer._baseStyle = { ...defaultStyle };
+              layer._hoverStyle = { ...hoverStyle };
 
               layer.on('mouseover', () => {
                 const sel = selectedEntityRef.current;
                 if (sel?.dn === dn && sel?.type === type) return;
-                layer.setStyle(hoverStyle);
+                layer.setStyle(layer._hoverStyle || hoverStyle);
               });
 
               layer.on('mouseout', () => {
                 const sel = selectedEntityRef.current;
                 if (sel?.dn === dn && sel?.type === type) return;
-                layer.setStyle(defaultStyle);
+                layer.setStyle(layer._baseStyle || defaultStyle);
               });
 
               layer.on('click', () => {
@@ -383,8 +387,8 @@ export default function LeafletMap({
             cuencasLayerRef.current = cuencasLayer;
             // Don't add to map yet — visibility controlled by showCuencas prop
 
-            // Embalses layer (E.) — purple borders, low fill opacity
-            const embalsesGeoJSON = { ...geojsonData, features: embalsesFeatures };
+            // Embalses layer — purple borders, low fill opacity
+            const embalsesGeoJSON = embalsesGeoData;
             const embalsesLayer = L.geoJSON(embalsesGeoJSON, {
               pane: 'embalsesPane',
               style: () => ({ ...embalseDefaultStyle }),
@@ -637,22 +641,92 @@ export default function LeafletMap({
     }
   }, [showEmbalses, mapReady, cuencasLoaded]);
 
+  // Apply cuencas spatial data coloring
+  useEffect(() => {
+    if (!cuencasLayerRef.current) return;
+
+    if (cuencasSpatialData && cuencasSpatialData.length > 0) {
+      // Build DN → data lookup
+      const dnMap = {};
+      for (const c of cuencasSpatialData) {
+        dnMap[c.dn] = c;
+      }
+      cuencasLayerRef.current.eachLayer(layer => {
+        const dn = layer.feature?.properties?.DN;
+        const data = dnMap[dn];
+        if (data && data.color) {
+          const baseStyle = {
+            fillColor: data.color,
+            fillOpacity: 0.6,
+            color: '#1f2937',
+            weight: 2,
+            opacity: 0.9,
+          };
+          const hoverStyle = {
+            fillColor: data.color,
+            fillOpacity: 0.78,
+            color: '#111827',
+            weight: 3,
+            opacity: 1,
+          };
+          layer.setStyle(baseStyle);
+          // Update stored styles so hover/mouseout use the data-driven colors
+          layer._baseStyle = { ...baseStyle };
+          layer._hoverStyle = { ...hoverStyle };
+          // Update tooltip with value
+          const name = layer.feature?.properties?.Nombre || data.nombre;
+          const valStr = data.value != null ? data.value.toFixed(3) : 'N/A';
+          const catStr = data.category ? ` | ${data.category}` : '';
+          layer.unbindTooltip();
+          layer.bindTooltip(`<b>Cuenca: ${name}</b><br/>Valor: ${valStr}${catStr}`, { sticky: true });
+        } else {
+          const noDataStyle = {
+            fillColor: '#CCCCCC',
+            fillOpacity: 0.3,
+            color: '#6b7280',
+            weight: 1,
+            opacity: 0.6,
+          };
+          layer.setStyle(noDataStyle);
+          layer._baseStyle = { ...noDataStyle };
+          layer._hoverStyle = { ...noDataStyle, fillOpacity: 0.45, weight: 2 };
+        }
+      });
+    } else {
+      // Reset to default teal style
+      const defaultTeal = {
+        color: '#0d9488', weight: 2, opacity: 0.8, fillColor: '#14b8a6', fillOpacity: 0.15,
+      };
+      const hoverTeal = {
+        weight: 3, fillOpacity: 0.28, color: '#0d9488', fillColor: '#14b8a6', opacity: 0.8,
+      };
+      cuencasLayerRef.current.eachLayer(layer => {
+        layer.setStyle(defaultTeal);
+        layer._baseStyle = { ...defaultTeal };
+        layer._hoverStyle = { ...hoverTeal };
+      });
+    }
+  }, [cuencasSpatialData, cuencasLoaded]);
+
   // Highlight selected entity (cuenca or embalse)
   useEffect(() => {
-    const resetStyle = (geoLayer, defaultStyle) => {
-      if (!geoLayer) return;
-      geoLayer.eachLayer(layer => {
-        layer.setStyle({ ...defaultStyle });
+    // Reset embalses always
+    if (embalsesLayerRef.current) {
+      embalsesLayerRef.current.eachLayer(layer => {
+        layer.setStyle(layer._baseStyle || {
+          color: '#7c3aed', weight: 2, opacity: 0.8, fillColor: '#8b5cf6', fillOpacity: 0.18,
+        });
       });
-    };
+    }
 
-    // Reset all styles first
-    resetStyle(cuencasLayerRef.current, {
-      color: '#0d9488', weight: 2, opacity: 0.8, fillColor: '#14b8a6', fillOpacity: 0.15,
-    });
-    resetStyle(embalsesLayerRef.current, {
-      color: '#7c3aed', weight: 2, opacity: 0.8, fillColor: '#8b5cf6', fillOpacity: 0.18,
-    });
+    // Reset cuencas to their current base style (data-driven or default)
+    if (cuencasLayerRef.current) {
+      cuencasLayerRef.current.eachLayer(layer => {
+        layer.setStyle(layer._baseStyle || {
+          color: '#0d9488', weight: 2, opacity: 0.8, fillColor: '#14b8a6', fillOpacity: 0.15,
+        });
+      });
+    }
 
     if (!selectedEntity) return;
 
@@ -662,15 +736,13 @@ export default function LeafletMap({
       : embalsesLayerRef.current;
     if (!targetLayer) return;
 
-    const baseColor = selectedEntity.type === 'cuenca' ? '#0d9488' : '#7c3aed';
     targetLayer.eachLayer(layer => {
       const dn = layer.feature?.properties?.DN;
       if (dn === selectedEntity.dn) {
         layer.setStyle({
-          color: baseColor,
           weight: 4,
           opacity: 1,
-          fillOpacity: 0.35,
+          fillOpacity: cuencasSpatialData ? 0.75 : 0.35,
         });
         layer.bringToFront();
       }

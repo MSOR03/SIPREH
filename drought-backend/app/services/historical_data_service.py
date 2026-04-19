@@ -32,10 +32,11 @@ from app.services.historical_constants import (
 )
 from app.services.historical_timeseries_mixin import TimeseriesMixin
 from app.services.historical_spatial_mixin import SpatialMixin
+from app.services.historical_watershed_mixin import WatershedMixin
 from app.services.tiered_storage import decode_multi_keys, build_duckdb_source, touch_cache_file
 
 
-class HistoricalDataService(TimeseriesMixin, SpatialMixin):
+class HistoricalDataService(TimeseriesMixin, SpatialMixin, WatershedMixin):
     """
     Servicio para consulta rápida de datos históricos usando DuckDB.
 

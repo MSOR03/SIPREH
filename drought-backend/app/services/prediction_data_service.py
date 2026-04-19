@@ -6,11 +6,17 @@ ds, freq, date, cell_id, lon, lat, var, scale, value,
 conf_interp, conf_flag, n_used, neff, q1, q3, iqr_min, iqr_max, horizon
 """
 import logging
+import numpy as np
+import pandas as pd
 from typing import Dict, List, Any, Optional, Tuple
 
 from app.services.historical_data_service import HistoricalDataService
 from app.services.cache import CacheService
 from app.services.cloud_storage import CloudStorageService
+from app.services.watershed_relations import (
+    get_relations_for_source,
+    CUENCA_NAMES,
+)
 
 logger = logging.getLogger("prediction")
 
@@ -286,4 +292,225 @@ class PredictionDataService:
         }
 
         self.cache.set(cache_key, result, expire=3600)
+        return result
+
+    # ------------------------------------------------------------------
+    # 2D CUENCAS: datos espaciales agregados por cuenca (ponderado por área)
+    # ------------------------------------------------------------------
+    def query_watershed_spatial(
+        self,
+        parquet_url: str,
+        var: str,
+        scale: int,
+        horizon: int,
+    ) -> Dict[str, Any]:
+        """
+        Retorna las 7 cuencas con valor ponderado por area para un horizonte.
+        Solo usa celdas CHIRPS que intersectan con las cuencas.
+        """
+        cache_key = f"pred:ws_spatial:{parquet_url}:{var}:{scale}:{horizon}"
+        cached = self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        conn = self.historical._get_connection()
+        source_info = self.historical._resolve_parquet_source(parquet_url)
+        parquet_source = source_info["source_expr"]
+
+        relations = get_relations_for_source("CHIRPS")
+        all_cell_ids = list({r["cell_id"] for r in relations})
+        cell_list_sql = ", ".join(f"'{c}'" for c in all_cell_ids)
+
+        query = f"""
+            SELECT
+                cell_id,
+                CAST(value AS DOUBLE) AS value
+            FROM {parquet_source}
+            WHERE var = '{var}'
+              AND scale = {scale}
+              AND horizon = {horizon}
+              AND cell_id IN ({cell_list_sql})
+        """
+        df = conn.execute(query).fetchdf()
+
+        cell_values = {}
+        for _, row in df.iterrows():
+            cid = str(row["cell_id"])
+            val = row["value"]
+            if val is not None and np.isfinite(val):
+                cell_values[cid] = float(val)
+
+        # Aggregate per cuenca
+        cuencas = []
+        all_vals = []
+        for dn in range(1, 8):
+            cuenca_rels = [r for r in relations if r["dn"] == dn]
+            weighted_sum = 0.0
+            total_area = 0.0
+            cell_count = 0
+            for r in cuenca_rels:
+                val = cell_values.get(r["cell_id"])
+                if val is not None:
+                    weighted_sum += val * r["area_m2"]
+                    total_area += r["area_m2"]
+                    cell_count += 1
+
+            avg_val = (weighted_sum / total_area) if total_area > 0 else None
+            cuenca = {
+                "dn": dn,
+                "nombre": CUENCA_NAMES.get(dn, f"Cuenca {dn}"),
+                "value": round(avg_val, 4) if avg_val is not None else None,
+                "cell_count": cell_count,
+                "color": None,
+                "category": None,
+                "severity": None,
+            }
+            if avg_val is not None:
+                all_vals.append(avg_val)
+            cuencas.append(cuenca)
+
+        # Apply drought scale coloring
+        if cuencas:
+            temp_df = pd.DataFrame([{"value": c["value"]} for c in cuencas])
+            temp_df["value"] = pd.to_numeric(temp_df["value"], errors="coerce")
+            temp_df = self.historical._apply_drought_scale(temp_df, var)
+            for i, c in enumerate(cuencas):
+                row = temp_df.iloc[i]
+                if pd.notna(row.get("color")):
+                    c["color"] = str(row["color"])
+                if pd.notna(row.get("category")):
+                    c["category"] = str(row["category"])
+                if pd.notna(row.get("severity")):
+                    c["severity"] = int(row["severity"])
+
+        statistics = {
+            "mean": float(np.mean(all_vals)) if all_vals else None,
+            "min": float(np.min(all_vals)) if all_vals else None,
+            "max": float(np.max(all_vals)) if all_vals else None,
+            "count": len(all_vals),
+        }
+
+        result = {
+            "var": var,
+            "scale": scale,
+            "horizon": horizon,
+            "cuencas": cuencas,
+            "statistics": statistics,
+        }
+
+        self.cache.set(cache_key, result, expire=900)
+        return result
+
+    # ------------------------------------------------------------------
+    # 1D CUENCAS: serie por horizonte para una cuenca (ponderado por área)
+    # ------------------------------------------------------------------
+    def query_watershed_timeseries(
+        self,
+        parquet_url: str,
+        var: str,
+        scale: int,
+        cuenca_dn: int,
+    ) -> Dict[str, Any]:
+        """
+        Retorna los 12 horizontes ponderados por area para una cuenca.
+        Incluye value, q1, q3, iqr_min, iqr_max.
+        """
+        cache_key = f"pred:ws_ts:{parquet_url}:{var}:{scale}:{cuenca_dn}"
+        cached = self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        conn = self.historical._get_connection()
+        source_info = self.historical._resolve_parquet_source(parquet_url)
+        parquet_source = source_info["source_expr"]
+
+        relations = get_relations_for_source("CHIRPS")
+        cuenca_rels = [r for r in relations if r["dn"] == cuenca_dn]
+        if not cuenca_rels:
+            raise ValueError(f"No hay relaciones para cuenca DN={cuenca_dn} con fuente CHIRPS")
+
+        cell_areas = {r["cell_id"]: r["area_m2"] for r in cuenca_rels}
+        cell_list_sql = ", ".join(f"'{c}'" for c in cell_areas)
+
+        # Build VALUES for areas to push weighted avg into SQL
+        values_parts = [f"('{cid}', {area})" for cid, area in cell_areas.items()]
+        values_clause = ", ".join(values_parts)
+
+        query = f"""
+            WITH cell_values AS (
+                SELECT
+                    CAST(horizon AS INTEGER) AS horizon,
+                    CAST(date AS VARCHAR) AS date,
+                    cell_id,
+                    CAST(value AS DOUBLE) AS value,
+                    CAST(q1 AS DOUBLE) AS q1,
+                    CAST(q3 AS DOUBLE) AS q3,
+                    CAST(iqr_min AS DOUBLE) AS iqr_min,
+                    CAST(iqr_max AS DOUBLE) AS iqr_max
+                FROM {parquet_source}
+                WHERE var = '{var}'
+                  AND scale = {scale}
+                  AND cell_id IN ({cell_list_sql})
+            ),
+            areas(cell_id, area_m2) AS (
+                SELECT * FROM (VALUES {values_clause}) AS t(cell_id, area_m2)
+            )
+            SELECT
+                cv.horizon,
+                MAX(cv.date) AS date,
+                SUM(cv.value * a.area_m2) / NULLIF(SUM(a.area_m2), 0) AS value,
+                SUM(cv.q1 * a.area_m2) / NULLIF(SUM(a.area_m2), 0) AS q1,
+                SUM(cv.q3 * a.area_m2) / NULLIF(SUM(a.area_m2), 0) AS q3,
+                SUM(cv.iqr_min * a.area_m2) / NULLIF(SUM(a.area_m2), 0) AS iqr_min,
+                SUM(cv.iqr_max * a.area_m2) / NULLIF(SUM(a.area_m2), 0) AS iqr_max
+            FROM cell_values cv
+            JOIN areas a ON cv.cell_id = a.cell_id
+            WHERE cv.value IS NOT NULL AND isfinite(cv.value)
+            GROUP BY cv.horizon
+            ORDER BY cv.horizon
+        """
+        df = conn.execute(query).fetchdf()
+
+        if df.empty:
+            return {
+                "var": var,
+                "scale": scale,
+                "cuenca_dn": cuenca_dn,
+                "cuenca_nombre": CUENCA_NAMES.get(cuenca_dn, f"Cuenca {cuenca_dn}"),
+                "data": [],
+                "statistics": {},
+            }
+
+        data = []
+        for _, row in df.iterrows():
+            data.append({
+                "horizon": int(row["horizon"]),
+                "date": str(row["date"]).split(" ")[0] if row["date"] else None,
+                "value": float(row["value"]) if row["value"] is not None else None,
+                "q1": float(row["q1"]) if row["q1"] is not None else None,
+                "q3": float(row["q3"]) if row["q3"] is not None else None,
+                "iqr_min": float(row["iqr_min"]) if row["iqr_min"] is not None else None,
+                "iqr_max": float(row["iqr_max"]) if row["iqr_max"] is not None else None,
+            })
+
+        values = [d["value"] for d in data if d["value"] is not None]
+        statistics = {}
+        if values:
+            statistics = {
+                "count": len(values),
+                "mean": sum(values) / len(values),
+                "min": min(values),
+                "max": max(values),
+            }
+
+        result = {
+            "var": var,
+            "scale": scale,
+            "cuenca_dn": cuenca_dn,
+            "cuenca_nombre": CUENCA_NAMES.get(cuenca_dn, f"Cuenca {cuenca_dn}"),
+            "data": data,
+            "statistics": statistics,
+        }
+
+        self.cache.set(cache_key, result, expire=900)
         return result
