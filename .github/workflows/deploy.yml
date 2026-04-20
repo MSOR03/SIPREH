@@ -30,7 +30,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./drought-frontend/dist  
+          path: ./drought-frontend/out
 
       - name: Deploy
         uses: actions/deploy-pages@v4
