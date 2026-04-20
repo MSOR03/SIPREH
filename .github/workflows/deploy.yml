@@ -1,3 +1,4 @@
+#Fixed the workflow to deploy the frontend to GitHub Pages. The workflow is triggered on push to the main branch, checks out the repository, sets up GitHub Pages, installs dependencies, builds the frontend, uploads the build artifact, and deploys it to GitHub Pages.
 name: Deploy frontend to GitHub Pages
 
 on:
@@ -40,4 +41,3 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v4
 
-        
