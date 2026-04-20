@@ -27,6 +27,7 @@ from app.services.historical_constants import (
     COLUMN_MAPPING,
     PARQUET_FILES,
     INDEX_DROUGHT_SCALES,
+    VARIABLE_CLASS_SCALES,
     DROUGHT_INDEX_KEYS,
     HYDROMETEOROLOGICAL_KEYS,
 )
@@ -48,6 +49,7 @@ class HistoricalDataService(TimeseriesMixin, SpatialMixin):
     COLUMN_MAPPING = COLUMN_MAPPING
     PARQUET_FILES = PARQUET_FILES
     INDEX_DROUGHT_SCALES = INDEX_DROUGHT_SCALES
+    VARIABLE_CLASS_SCALES = VARIABLE_CLASS_SCALES
     
     def __init__(self, cache_service: Optional[CacheService] = None, cloud_storage_service: Optional[CloudStorageService] = None):
         """
@@ -69,11 +71,57 @@ class HistoricalDataService(TimeseriesMixin, SpatialMixin):
             os.getenv('RENDER') or 
             os.getenv('FLY_APP_NAME')
         )
-  
+
     def _get_scale_for_index(self, variable: str) -> Dict[str, Any]:
         if variable in self.INDEX_DROUGHT_SCALES:
             return self.INDEX_DROUGHT_SCALES[variable]
         return self.INDEX_DROUGHT_SCALES["DEFAULT"]
+
+    def _get_scale_for_variable(self, variable: str, frequency: Optional[str] = None) -> Dict[str, Any]:
+        scale = self.VARIABLE_CLASS_SCALES.get(variable)
+        if not scale:
+            return None
+
+        if variable == "precip" and frequency:
+            freq_key = frequency.upper()
+            return scale.get(freq_key)
+
+        if variable == "precip":
+            return scale.get("M")
+
+        return scale
+
+    def _apply_variable_scale(self, df: pd.DataFrame, variable: str, frequency: Optional[str] = None) -> pd.DataFrame:
+        scale = self._get_scale_for_variable(variable, frequency)
+        if not scale:
+            return df
+
+        bins = scale["bins"]
+        cats = scale["categories"]
+
+        vals = df["value"].values
+        finite_bins = np.array(bins[1:-1], dtype=np.float64)
+        indices = np.searchsorted(finite_bins, vals, side="right")
+
+        cat_arr = np.empty(len(vals), dtype=object)
+        col_arr = np.empty(len(vals), dtype=object)
+        sev_arr = np.empty(len(vals), dtype=np.float64)
+
+        for i, cat in enumerate(cats):
+            mask = indices == i
+            cat_arr[mask] = cat["label"]
+            col_arr[mask] = cat["color"]
+            sev_arr[mask] = cat["severity"]
+
+        df["category"] = pd.array(cat_arr, dtype="string")
+        df["color"] = pd.array(col_arr, dtype="string")
+        df["severity"] = pd.array(sev_arr, dtype="Int64")
+
+        null_mask = np.isnan(vals) if vals.dtype.kind == "f" else df["value"].isna()
+        if np.any(null_mask):
+            df.loc[null_mask, ["category", "color", "severity"]] = pd.NA
+
+        return df
 
     def _apply_drought_scale(self, df: pd.DataFrame, variable: str) -> pd.DataFrame:
         scale = self._get_scale_for_index(variable)

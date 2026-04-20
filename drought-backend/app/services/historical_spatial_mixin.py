@@ -306,14 +306,17 @@ class SpatialMixin:
             if is_drought_index:
                 result_df = self._apply_drought_scale(result_df, variable)
             else:
-                # Escala de colores continua vectorizada
-                valid_values = vals[np.isfinite(vals)]
-                if len(valid_values) > 0:
-                    vmin = float(valid_values.min())
-                    vmax = float(valid_values.max())
-                    result_df['color'] = _vectorized_colors(result_df['value'], vmin, vmax)
+                variable_scale = self._get_scale_for_variable(variable, effective_freq)
+                if variable_scale:
+                    result_df = self._apply_variable_scale(result_df, variable, effective_freq)
                 else:
-                    result_df['color'] = "#CCCCCC"
+                    valid_values = vals[np.isfinite(vals)]
+                    if len(valid_values) > 0:
+                        vmin = float(valid_values.min())
+                        vmax = float(valid_values.max())
+                        result_df["color"] = _vectorized_colors(result_df["value"], vmin, vmax)
+                    else:
+                        result_df["color"] = "#CCCCCC"
 
             # Estadísticas (usando numpy directo, sin copia de dropna)
             valid_mask = np.isfinite(vals)
