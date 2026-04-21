@@ -46,6 +46,8 @@ export default function MapArea({
   onSpatialCellClick,
   mapLayers,
   setMapLayers,
+  selectedEntity,
+  onEntitySelect,
 }) {
   const { theme } = useTheme();
   const [mapKey, setMapKey] = useState(() => Date.now());
@@ -84,21 +86,31 @@ export default function MapArea({
     setMapKey(Date.now());
     onStationSelect(null);
     onCellSelect(null);
+    onEntitySelect?.(null);
     gridNav.resetToRoot();
     gridNav.clearSelection();
     onReset();
-  }, [onStationSelect, onCellSelect, gridNav, onReset]);
+  }, [onStationSelect, onCellSelect, onEntitySelect, gridNav, onReset]);
 
   const handleStationSelect = useCallback((station) => {
     onStationSelect(station);
     onCellSelect(null);
+    onEntitySelect?.(null);
     gridNav.clearSelection();
-  }, [onStationSelect, onCellSelect, gridNav]);
+  }, [onStationSelect, onCellSelect, onEntitySelect, gridNav]);
 
   const handleGridCellClick = useCallback((cell) => {
     onCellSelect(cell);
     onStationSelect(null);
-  }, [onCellSelect, onStationSelect]);
+    onEntitySelect?.(null);
+  }, [onCellSelect, onStationSelect, onEntitySelect]);
+
+  const handleEntitySelect = useCallback((entity) => {
+    onEntitySelect?.(entity);
+    onStationSelect(null);
+    onCellSelect(null);
+    gridNav.clearSelection();
+  }, [onEntitySelect, onStationSelect, onCellSelect, gridNav]);
 
   const handleSpatialCellClick = useCallback((cell) => {
     onSpatialCellClick?.(cell);
@@ -222,7 +234,7 @@ export default function MapArea({
             </div>
             
             {/* Selection Indicators */}
-            <div className="flex items-center gap-3 ml-7 mt-1">
+            <div className="flex items-center gap-3 ml-7 mt-1 flex-wrap">
               {selectedStation && (
                 <p className="text-xs text-gray-600 dark:text-gray-400 flex items-center gap-2 animate-fade-in">
                   <span className="inline-flex relative">
@@ -257,11 +269,54 @@ export default function MapArea({
                   </div>
                 </div>
               )}
+
+              {selectedEntity && (
+                <div className={`flex items-center gap-3 px-3 py-1.5 rounded-lg shadow-sm animate-fade-in border ${
+                  selectedEntity.type === 'embalse'
+                    ? 'bg-gradient-to-r from-purple-50 to-violet-50 dark:from-purple-900/20 dark:to-violet-900/20 border-purple-300 dark:border-purple-700'
+                    : 'bg-gradient-to-r from-teal-50 to-cyan-50 dark:from-teal-900/20 dark:to-cyan-900/20 border-teal-300 dark:border-teal-700'
+                }`}>
+                  <span className="inline-flex relative">
+                    <span className={`inline-block w-2 h-2 rounded-full ${selectedEntity.type === 'embalse' ? 'bg-purple-600' : 'bg-teal-600'}`}></span>
+                    <span className={`absolute inline-flex w-2 h-2 rounded-full animate-ping opacity-75 ${selectedEntity.type === 'embalse' ? 'bg-purple-600' : 'bg-teal-600'}`}></span>
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs font-semibold ${
+                      selectedEntity.type === 'embalse'
+                        ? 'text-purple-900 dark:text-purple-100'
+                        : 'text-teal-900 dark:text-teal-100'
+                    }`}>
+                      {selectedEntity.type === 'embalse' ? 'Embalse' : 'Cuenca'}:
+                    </span>
+                    <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${
+                      selectedEntity.type === 'embalse'
+                        ? 'bg-purple-200 dark:bg-purple-800 text-purple-900 dark:text-purple-100'
+                        : 'bg-teal-200 dark:bg-teal-800 text-teal-900 dark:text-teal-100'
+                    }`}>
+                      {selectedEntity.layer}
+                    </span>
+                    <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                      selectedEntity.type === 'embalse'
+                        ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300'
+                        : 'bg-teal-100 dark:bg-teal-900/40 text-teal-700 dark:text-teal-300'
+                    }`}>
+                      {selectedEntity.areakm2} km²
+                    </span>
+                    <span className={`text-xs px-1.5 py-0.5 rounded font-mono ${
+                      selectedEntity.type === 'embalse'
+                        ? 'bg-white dark:bg-gray-800 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-700'
+                        : 'bg-white dark:bg-gray-800 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-700'
+                    }`}>
+                      DN: {selectedEntity.dn}
+                    </span>
+                  </div>
+                </div>
+              )}
               
-              {!selectedStation && !selectedCell && (
+              {!selectedStation && !selectedCell && !selectedEntity && (
                 <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-2 animate-pulse">
                   <span className="inline-block w-2 h-2 bg-amber-500 rounded-full"></span>
-                  <span className="font-medium">Selecciona una estación o celda del mapa</span>
+                  <span className="font-medium">Selecciona una estación, celda, cuenca o embalse del mapa</span>
                 </p>
               )}
             </div>
@@ -301,6 +356,11 @@ export default function MapArea({
             showGrid={mapLayers?.grid ?? true}
             showStations={mapLayers?.stations ?? true}
             showBoundary={mapLayers?.boundary ?? true}
+            showCuencas={mapLayers?.cuencas ?? false}
+            showEmbalses={mapLayers?.embalses ?? false}
+            cuencasSpatialData={plotData?.isCuencas ? plotData.cuencasData : null}
+            selectedEntity={selectedEntity}
+            onEntitySelect={handleEntitySelect}
           />
 
           {/* ── Layer Control Overlay ── */}
@@ -497,6 +557,72 @@ export default function MapArea({
                     yLabel={plotData.variable || 'Valor'}
                     height={340}
                   />
+                </div>
+              </div>
+            ) : (plotData.type === '2D' || plotData.type === 'prediction-2d' || plotData.type === 'prediction-history-2d') && plotData.isCuencas && plotData.cuencasData ? (
+              <div className="relative">
+                {plotData.subtitle && (
+                  <div className={`mb-4 px-4 py-2 rounded-lg border ${plotData.type === 'prediction-history-2d' ? 'bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800' : plotData.type === 'prediction-2d' ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' : 'bg-teal-50 dark:bg-teal-900/20 border-teal-200 dark:border-teal-800'}`}>
+                    <p className={`text-sm font-medium ${plotData.type === 'prediction-history-2d' ? 'text-purple-700 dark:text-purple-300' : plotData.type === 'prediction-2d' ? 'text-green-700 dark:text-green-300' : 'text-teal-700 dark:text-teal-300'}`}>
+                      {plotData.subtitle}
+                    </p>
+                  </div>
+                )}
+
+                {plotData.statistics && (
+                  <div className="mb-4 grid grid-cols-4 gap-3">
+                    <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Media</p>
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.mean?.toFixed(2) || 'N/A'}</p>
+                    </div>
+                    <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Mínimo</p>
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.min?.toFixed(2) || 'N/A'}</p>
+                    </div>
+                    <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Máximo</p>
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.max?.toFixed(2) || 'N/A'}</p>
+                    </div>
+                    <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Cuencas</p>
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.cuencasData.filter(c => c.value != null).length} / {plotData.cuencasData.length}</p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="bg-white dark:bg-gray-900/50 rounded-xl p-6 shadow-inner">
+                  <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
+                    Valores por Cuenca (ponderados por área)
+                  </h4>
+                  {/* Compact cuenca table */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
+                    {plotData.cuencasData.map(c => (
+                      <div key={c.dn} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700/30 transition-colors">
+                        <div
+                          className="w-4 h-4 rounded-sm border border-gray-300 dark:border-gray-600 shrink-0"
+                          style={{ backgroundColor: c.color || '#CCCCCC' }}
+                        />
+                        <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate flex-1">{c.nombre}</span>
+                        <span className="text-xs font-bold text-gray-900 dark:text-gray-100 tabular-nums">{c.value != null ? c.value.toFixed(3) : 'N/A'}</span>
+                        {c.category && <span className="text-[10px] text-gray-500 dark:text-gray-400 truncate max-w-[80px]">{c.category}</span>}
+                      </div>
+                    ))}
+                  </div>
+                  {/* Color legend: drought index uses DroughtLegend, continuous uses gradient bar */}
+                  {isDroughtIndex && plotData.cuencasData.some(c => c.category) ? (
+                    <DroughtLegend gridCells={plotData.cuencasData} />
+                  ) : plotData.statistics && plotData.statistics.min != null && plotData.statistics.max != null ? (
+                    <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-gray-500 dark:text-gray-400 tabular-nums">{plotData.statistics.min.toFixed(2)}</span>
+                        <div className="flex-1 h-3 rounded" style={{ background: 'linear-gradient(to right, #0000ff, #00aaff, #00ff00, #ffff00, #ff0000)' }} />
+                        <span className="text-[10px] text-gray-500 dark:text-gray-400 tabular-nums">{plotData.statistics.max.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  ) : null}
+                  <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                    <span className={`font-medium ${plotData.type === 'prediction-history-2d' ? 'text-purple-600 dark:text-purple-400' : plotData.type === 'prediction-2d' ? 'text-green-600 dark:text-green-400' : 'text-teal-600 dark:text-teal-400'}`}>Haz click en una cuenca del mapa para ver la serie de tiempo.</span>
+                  </p>
                 </div>
               </div>
             ) : plotData.type === '2D' && plotData.gridCells ? (

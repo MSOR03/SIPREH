@@ -385,6 +385,64 @@ export const historicalApi = {
     });
     return file || files[0];
   },
+
+  // Datos espaciales agregados por cuenca (watershed)
+  getWatershedSpatial: async (params) => {
+    const {
+      fileId,
+      variable,
+      dataSource,
+      targetDate,
+      startDate = null,
+      endDate = null,
+      useInterval = false,
+      scale = null,
+      frequency = null,
+    } = params;
+
+    return fetchApi('/historical/watershed/spatial', {
+      method: 'POST',
+      body: JSON.stringify({
+        parquet_file_id: fileId,
+        variable: variable,
+        data_source: dataSource,
+        target_date: targetDate,
+        start_date: startDate,
+        end_date: endDate,
+        use_interval: useInterval,
+        scale: scale,
+        frequency: frequency,
+      }),
+    });
+  },
+
+  // Serie de tiempo de una cuenca (watershed)
+  getWatershedTimeSeries: async (params) => {
+    const {
+      fileId,
+      variable,
+      dataSource,
+      cuencaDn,
+      startDate,
+      endDate,
+      scale = null,
+      frequency = null,
+    } = params;
+
+    return fetchApi('/historical/watershed/timeseries', {
+      method: 'POST',
+      body: JSON.stringify({
+        parquet_file_id: fileId,
+        variable: variable,
+        data_source: dataSource,
+        cuenca_dn: cuencaDn,
+        start_date: startDate,
+        end_date: endDate,
+        scale: scale,
+        frequency: frequency,
+      }),
+    });
+  },
 };
 
 /**
@@ -485,6 +543,32 @@ export const predictionApi = {
       }),
     });
   },
+
+  // Datos espaciales agregados por cuenca (watershed) - prediccion
+  getWatershedSpatial: async ({ fileId, var: varName, scale, horizon }) => {
+    return fetchApi('/prediction/watershed/spatial', {
+      method: 'POST',
+      body: JSON.stringify({
+        parquet_file_id: fileId,
+        var: varName,
+        scale: scale,
+        horizon: horizon,
+      }),
+    });
+  },
+
+  // Serie temporal por cuenca (watershed) - prediccion
+  getWatershedTimeSeries: async ({ fileId, var: varName, scale, cuencaDn }) => {
+    return fetchApi('/prediction/watershed/timeseries', {
+      method: 'POST',
+      body: JSON.stringify({
+        parquet_file_id: fileId,
+        var: varName,
+        scale: scale,
+        cuenca_dn: cuencaDn,
+      }),
+    });
+  },
 };
 
 /**
@@ -523,6 +607,32 @@ export const predictionHistoryApi = {
         var: varName,
         scale: scale,
         horizon: horizon,
+      }),
+    });
+  },
+
+  // Datos espaciales agregados por cuenca (watershed) - prediccion historica
+  getWatershedSpatial: async ({ fileId, var: varName, scale, horizon }) => {
+    return fetchApi('/prediction/watershed/spatial', {
+      method: 'POST',
+      body: JSON.stringify({
+        parquet_file_id: fileId,
+        var: varName,
+        scale: scale,
+        horizon: horizon,
+      }),
+    });
+  },
+
+  // Serie temporal por cuenca (watershed) - prediccion historica
+  getWatershedTimeSeries: async ({ fileId, var: varName, scale, cuencaDn }) => {
+    return fetchApi('/prediction/watershed/timeseries', {
+      method: 'POST',
+      body: JSON.stringify({
+        parquet_file_id: fileId,
+        var: varName,
+        scale: scale,
+        cuenca_dn: cuencaDn,
       }),
     });
   },

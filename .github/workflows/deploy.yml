@@ -1,0 +1,43 @@
+#Fixed the workflow to deploy the frontend to GitHub Pages. The workflow is triggered on push to the main branch, checks out the repository, sets up GitHub Pages, installs dependencies, builds the frontend, uploads the build artifact, and deploys it to GitHub Pages.
+name: Deploy frontend to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Install and build frontend
+        working-directory: ./drought-frontend
+        run: |
+          npm install
+          npm run build
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./drought-frontend/out
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
+

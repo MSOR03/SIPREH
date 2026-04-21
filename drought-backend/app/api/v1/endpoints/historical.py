@@ -27,6 +27,8 @@ from app.api.v1.endpoints.historical_schemas import (
     ColumnInfo,
     FileColumnsResponse,
     FileValidationResponse,
+    WatershedSpatialRequest,
+    WatershedTimeSeriesRequest,
 )
 from app.api.v1.endpoints.historical_utils import (
     get_file_metadata,
@@ -646,6 +648,149 @@ def get_spatial_data(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error consultando datos espaciales: {str(e)}"
         )
+
+
+# ============================================================================
+# ANÁLISIS HISTÓRICO - CUENCAS / WATERSHED
+# ============================================================================
+
+@router.post("/watershed/spatial", response_class=JSONResponse)
+def get_watershed_spatial(
+    request: WatershedSpatialRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene datos espaciales agregados por cuenca (promedio ponderado por área).
+    """
+    logger.info(f"POST /watershed/spatial - file={request.parquet_file_id} var={request.variable} src={request.data_source}")
+
+    interval_mode = request.use_interval or (
+        request.start_date is not None and request.end_date is not None and request.start_date != request.end_date
+    )
+
+    if interval_mode:
+        if not request.start_date or not request.end_date:
+            raise HTTPException(status_code=400, detail="Para modo intervalo debes enviar start_date y end_date")
+        if request.start_date > request.end_date:
+            raise HTTPException(status_code=400, detail="start_date no puede ser mayor que end_date")
+    elif not request.target_date:
+        raise HTTPException(status_code=400, detail="En modo fecha única debes enviar target_date")
+
+    if request.data_source.upper() not in ("ERA5", "IMERG", "CHIRPS"):
+        raise HTTPException(status_code=400, detail="data_source debe ser ERA5, IMERG o CHIRPS")
+
+    endpoint_cache_key = (
+        f"endpoint:ws_spatial:{request.parquet_file_id}:{request.variable}:"
+        f"{request.data_source}:{'interval' if interval_mode else 'single'}:"
+        f"{request.target_date}:{request.start_date}:{request.end_date}:"
+        f"{request.scale}:{request.frequency}"
+    )
+    cached = cache_service.get(endpoint_cache_key)
+    if cached and isinstance(cached, dict):
+        return orjson_response(cached)
+
+    cloud_key = _resolve_cloud_keys(request.parquet_file_id, db)
+    if not cloud_key:
+        raise HTTPException(status_code=404, detail="Archivo parquet no encontrado o sin cloud_key")
+
+    try:
+        cuencas, statistics, used_date = historical_service.query_watershed_spatial(
+            parquet_url=cloud_key,
+            variable=request.variable,
+            data_source=request.data_source,
+            target_date=request.target_date,
+            start_date=request.start_date,
+            end_date=request.end_date,
+            use_interval=interval_mode,
+            scale=request.scale,
+            frequency=request.frequency,
+        )
+
+        var_info = historical_service.COLUMN_MAPPING.get(request.variable, {})
+
+        response_data = {
+            "variable": request.variable,
+            "variable_name": var_info.get("name", request.variable),
+            "unit": var_info.get("unit", ""),
+            "date": used_date if not interval_mode else request.end_date,
+            "data_source": request.data_source,
+            "cuencas": cuencas,
+            "statistics": statistics,
+        }
+
+        cache_service.set(endpoint_cache_key, response_data, expire=900)
+        return orjson_response(response_data)
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error consultando datos de cuenca: {str(e)}")
+
+
+@router.post("/watershed/timeseries", response_class=JSONResponse)
+def get_watershed_timeseries(
+    request: WatershedTimeSeriesRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene serie de tiempo para una cuenca (promedio ponderado por área).
+    """
+    logger.info(f"POST /watershed/timeseries - file={request.parquet_file_id} var={request.variable} src={request.data_source} dn={request.cuenca_dn}")
+
+    if request.data_source.upper() not in ("ERA5", "IMERG", "CHIRPS"):
+        raise HTTPException(status_code=400, detail="data_source debe ser ERA5, IMERG o CHIRPS")
+    if request.cuenca_dn < 1 or request.cuenca_dn > 7:
+        raise HTTPException(status_code=400, detail="cuenca_dn debe estar entre 1 y 7")
+    if request.start_date > request.end_date:
+        raise HTTPException(status_code=400, detail="start_date no puede ser mayor que end_date")
+
+    endpoint_cache_key = (
+        f"endpoint:ws_ts:{request.parquet_file_id}:{request.variable}:"
+        f"{request.data_source}:{request.cuenca_dn}:"
+        f"{request.start_date}:{request.end_date}:{request.scale}:{request.frequency}"
+    )
+    cached = cache_service.get(endpoint_cache_key)
+    if cached and isinstance(cached, dict):
+        return orjson_response(cached)
+
+    cloud_key = _resolve_cloud_keys(request.parquet_file_id, db)
+    if not cloud_key:
+        raise HTTPException(status_code=404, detail="Archivo parquet no encontrado o sin cloud_key")
+
+    try:
+        from app.services.watershed_relations import CUENCA_NAMES
+        data_points, statistics = historical_service.query_watershed_timeseries(
+            parquet_url=cloud_key,
+            variable=request.variable,
+            data_source=request.data_source,
+            cuenca_dn=request.cuenca_dn,
+            start_date=request.start_date,
+            end_date=request.end_date,
+            scale=request.scale,
+            frequency=request.frequency,
+        )
+
+        var_info = historical_service.COLUMN_MAPPING.get(request.variable, {})
+        cuenca_name = CUENCA_NAMES.get(request.cuenca_dn, f"Cuenca {request.cuenca_dn}")
+
+        response_data = {
+            "variable": request.variable,
+            "variable_name": var_info.get("name", request.variable),
+            "unit": var_info.get("unit", ""),
+            "data_source": request.data_source,
+            "cuenca": {"dn": request.cuenca_dn, "nombre": cuenca_name},
+            "frequency": request.frequency or "D",
+            "data": data_points,
+            "statistics": statistics,
+        }
+
+        cache_service.set(endpoint_cache_key, response_data, expire=900)
+        return orjson_response(response_data)
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error consultando serie de cuenca: {str(e)}")
 
 
 # ============================================================================

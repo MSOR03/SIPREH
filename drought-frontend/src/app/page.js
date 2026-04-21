@@ -15,6 +15,7 @@ export default function Home() {
   // Selection state
   const [selectedStation, setSelectedStation] = useState(null);
   const [selectedCell, setSelectedCell] = useState(null);
+  const [selectedEntity, setSelectedEntity] = useState(null); // Cuenca o Embalse seleccionado
   
   // Historical Analysis State
   const [analysisState, setAnalysisState] = useState({
@@ -35,6 +36,7 @@ export default function Home() {
   // Prediction State
   const [predictionState, setPredictionState] = useState({
     visualizationType: '1D',  // '1D' | '2D'
+    spatialUnit: 'grid',      // 'grid' | 'cuencas'
     droughtIndex: '',
     scale: 1,
     horizon: 1,
@@ -47,6 +49,7 @@ export default function Home() {
   const [predictionHistoryState, setPredictionHistoryState] = useState({
     selectedFileId: '',
     visualizationType: '1D',  // '1D' | '2D'
+    spatialUnit: 'grid',      // 'grid' | 'cuencas'
     droughtIndex: '',
     scale: 1,
     horizon: 1,
@@ -122,10 +125,10 @@ export default function Home() {
     const is2DMode = analysisState.visualizationType === '2D';
     const useSpatialInterval = is2DMode && Boolean(analysisState.useSpatialInterval);
     
-    // Validaciones: para 1D requiere celda/estación, para 2D no
-    if (!is2DMode && !selectedStation && !selectedCell) {
+    // Validaciones: para 1D requiere celda/estación/cuenca, para 2D no
+    if (!is2DMode && !selectedStation && !selectedCell && !(selectedEntity?.type === 'cuenca')) {
       showError(
-        'Debes seleccionar una estación o celda del mapa antes de graficar',
+        'Debes seleccionar una estación, celda o cuenca del mapa antes de graficar',
         'Selección Requerida'
       );
       return;
@@ -224,6 +227,57 @@ export default function Home() {
           const validStations = response.statistics?.valid_stations ?? response.stations.length;
           showSuccess(
             `Mapa 2D generado: ${validStations} estaciones con dato válido`,
+            '¡Listo!'
+          );
+
+        } else if (analysisState.spatialUnit === 'cuencas') {
+          // ===== 2D CUENCAS: promedio ponderado por cuenca =====
+          const dataSource = analysisState.dataSource || 'ERA5';
+          const sourceResMap = { ERA5: 0.25, IMERG: 0.1, CHIRPS: 0.05 };
+          const targetResolution = sourceResMap[dataSource] || 0.05;
+          const historicalFiles = files.filter(f => !f.dataset_type || f.dataset_type === 'historical');
+          const file = historicalFiles.find(f => Math.abs((f.resolution || 0.1) - targetResolution) < 0.01);
+
+          if (!file) {
+            showError(`No se encontró archivo para ${dataSource} (${targetResolution}°)`, 'Error');
+            return;
+          }
+
+          const response = await historicalApi.getWatershedSpatial({
+            fileId: file.file_id,
+            variable: variable,
+            dataSource: dataSource,
+            targetDate: useSpatialInterval ? null : analysisState.startDate,
+            startDate: useSpatialInterval ? analysisState.startDate : null,
+            endDate: useSpatialInterval ? analysisState.endDate : null,
+            useInterval: useSpatialInterval,
+            scale: analysisState.droughtIndex ? analysisState.indexScale : null,
+            frequency: (!analysisState.droughtIndex && analysisState.variable === 'precip') ? analysisState.frequency : null,
+          });
+
+          const periodSubtitle = response.is_interval
+            ? `Periodo: ${response.period?.start_date} a ${response.period?.end_date} (promedio)`
+            : `Fecha: ${response.date}`;
+
+          setPlotData({
+            type: '2D',
+            title: `${response.variable_name} - Cuencas`,
+            subtitle: `${periodSubtitle} | Fuente: ${dataSource}`,
+            variable: response.variable,
+            unit: response.unit,
+            date: response.date,
+            cuencasData: response.cuencas,
+            statistics: response.statistics,
+            isCuencas: true,
+            dataSource: dataSource,
+          });
+
+          // Auto-enable cuencas layer
+          setMapLayers(prev => ({ ...prev, cuencas: true }));
+
+          const validCuencas = response.cuencas?.filter(c => c.value !== null).length || 0;
+          showSuccess(
+            `Mapa de cuencas generado: ${validCuencas} cuencas con dato válido (${dataSource})`,
             '¡Listo!'
           );
 
@@ -411,6 +465,49 @@ export default function Home() {
             `Serie generada para estación ${selectedStation.name} (${response.statistics?.count || 0} registros)`,
             '¡Listo!'
           );
+        } else if (selectedEntity?.type === 'cuenca') {
+          // ===== 1D CUENCA: serie temporal ponderada =====
+          const dataSource = analysisState.dataSource || 'ERA5';
+          const sourceResMap = { ERA5: 0.25, IMERG: 0.1, CHIRPS: 0.05 };
+          const targetResolution = sourceResMap[dataSource] || 0.05;
+          const historicalFiles = files.filter(f => !f.dataset_type || f.dataset_type === 'historical');
+          const file = historicalFiles.find(f => Math.abs((f.resolution || 0.1) - targetResolution) < 0.01);
+
+          if (!file) {
+            showError(`No se encontró archivo para ${dataSource} (${targetResolution}°)`, 'Error');
+            return;
+          }
+
+          const response = await historicalApi.getWatershedTimeSeries({
+            fileId: file.file_id,
+            variable: variable,
+            dataSource: dataSource,
+            cuencaDn: selectedEntity.dn,
+            startDate: analysisState.startDate,
+            endDate: analysisState.endDate,
+            scale: analysisState.droughtIndex ? analysisState.indexScale : null,
+            frequency: (!analysisState.droughtIndex) ? analysisState.frequency : null,
+          });
+
+          const freqLabel = response.frequency === 'M' ? 'Mensual' : 'Diaria';
+          const cuencaName = response.cuenca?.nombre || selectedEntity.layer;
+
+          setPlotData({
+            type: '1D',
+            title: `${response.variable_name} - Cuenca ${cuencaName}`,
+            subtitle: `Fuente: ${dataSource} | Frecuencia: ${freqLabel}`,
+            variable: String(response.variable || variable || '').trim().toUpperCase(),
+            unit: response.unit,
+            frequency: response.frequency,
+            data: response.data,
+            statistics: response.statistics,
+            isCuencaTimeSeries: true,
+          });
+
+          showSuccess(
+            `Serie de tiempo generada para cuenca ${cuencaName} (${response.statistics?.count || 0} registros)`,
+            '¡Listo!'
+          );
         }
       }
 
@@ -421,11 +518,12 @@ export default function Home() {
         'Error en la consulta'
       );
     }
-  }, [analysisState, selectedCell, selectedStation, showError, showWarning, showInfo, showSuccess]);
+  }, [analysisState, selectedCell, selectedStation, selectedEntity, showError, showWarning, showInfo, showSuccess]);
 
   // Handle Prediction Plot
   const handlePredictionPlot = useCallback(async () => {
     const is2D = predictionState.visualizationType === '2D';
+    const isCuencas = predictionState.spatialUnit === 'cuencas';
 
     // Validations
     if (!predictionState.droughtIndex) {
@@ -436,7 +534,11 @@ export default function Home() {
       showWarning('Por favor selecciona una escala temporal', 'Escala requerida');
       return;
     }
-    if (!is2D && !selectedCell) {
+    if (!is2D && isCuencas && selectedEntity?.type !== 'cuenca') {
+      showError('Selecciona una cuenca del mapa para la prediccion 1D por cuencas', 'Seleccion Requerida');
+      return;
+    }
+    if (!is2D && !isCuencas && !selectedCell) {
       showError('Selecciona una celda del mapa para la prediccion 1D', 'Seleccion Requerida');
       return;
     }
@@ -465,59 +567,117 @@ export default function Home() {
       }
 
       if (is2D) {
-        // === 2D: Spatial grid ===
-        const response = await predictionApi.getSpatialData({
-          fileId: predFileId,
-          var: predictionState.droughtIndex,
-          scale: predictionState.scale,
-          horizon: predictionState.horizon,
-        });
+        if (isCuencas) {
+          // === 2D CUENCAS: promedio ponderado por horizonte ===
+          const response = await predictionApi.getWatershedSpatial({
+            fileId: predFileId,
+            var: predictionState.droughtIndex,
+            scale: predictionState.scale,
+            horizon: predictionState.horizon,
+          });
 
-        setPlotData({
-          type: 'prediction-2d',
-          title: `Prediccion ${predictionState.droughtIndex} (${predictionState.scale}m) - Horizonte ${predictionState.horizon}`,
-          subtitle: `${response.statistics?.unique_cells || 0} celdas | Escala: ${predictionState.scale} meses`,
-          variable: predictionState.droughtIndex,
-          gridCells: response.grid_cells,
-          statistics: response.statistics,
-          bounds: response.bounds,
-          resolution: 0.05,
-          predictionMeta: { index: predictionState.droughtIndex, scale: predictionState.scale, horizon: predictionState.horizon },
-        });
+          setPlotData({
+            type: 'prediction-2d',
+            title: `Prediccion ${predictionState.droughtIndex} (${predictionState.scale}m) - Horizonte ${predictionState.horizon} - Cuencas`,
+            subtitle: `${response.cuencas?.length || 0} cuencas | Escala: ${predictionState.scale} meses`,
+            variable: predictionState.droughtIndex,
+            cuencasData: response.cuencas,
+            statistics: response.statistics,
+            isCuencas: true,
+            resolution: 0.05,
+            predictionMeta: { index: predictionState.droughtIndex, scale: predictionState.scale, horizon: predictionState.horizon },
+          });
 
-        showSuccess(
-          `Mapa de prediccion generado: ${response.statistics?.unique_cells || 0} celdas`,
-          '!Listo!'
-        );
+          setMapLayers(prev => ({ ...prev, cuencas: true }));
+
+          const validCuencas = response.cuencas?.filter(c => c.value !== null).length || 0;
+          showSuccess(
+            `Mapa de cuencas prediccion generado: ${validCuencas} cuencas`,
+            '!Listo!'
+          );
+        } else {
+          // === 2D CELDAS: Spatial grid ===
+          const response = await predictionApi.getSpatialData({
+            fileId: predFileId,
+            var: predictionState.droughtIndex,
+            scale: predictionState.scale,
+            horizon: predictionState.horizon,
+          });
+
+          setPlotData({
+            type: 'prediction-2d',
+            title: `Prediccion ${predictionState.droughtIndex} (${predictionState.scale}m) - Horizonte ${predictionState.horizon}`,
+            subtitle: `${response.statistics?.unique_cells || 0} celdas | Escala: ${predictionState.scale} meses`,
+            variable: predictionState.droughtIndex,
+            gridCells: response.grid_cells,
+            statistics: response.statistics,
+            bounds: response.bounds,
+            resolution: 0.05,
+            predictionMeta: { index: predictionState.droughtIndex, scale: predictionState.scale, horizon: predictionState.horizon },
+          });
+
+          showSuccess(
+            `Mapa de prediccion generado: ${response.statistics?.unique_cells || 0} celdas`,
+            '!Listo!'
+          );
+        }
       } else {
-        // === 1D: Time series for cell ===
-        const response = await predictionApi.getTimeSeries({
-          fileId: predFileId,
-          cellId: selectedCell.cell_id,
-          var: predictionState.droughtIndex,
-          scale: predictionState.scale,
-        });
+        if (isCuencas) {
+          // === 1D CUENCA: 12 horizontes ponderados por area ===
+          const response = await predictionApi.getWatershedTimeSeries({
+            fileId: predFileId,
+            var: predictionState.droughtIndex,
+            scale: predictionState.scale,
+            cuencaDn: selectedEntity.dn,
+          });
 
-        setPlotData({
-          type: 'prediction-1d',
-          title: `Prediccion ${predictionState.droughtIndex} (${predictionState.scale}m)`,
-          subtitle: `Celda: ${selectedCell.cell_id} | 12 horizontes`,
-          variable: predictionState.droughtIndex,
-          data: response.data,
-          statistics: response.statistics,
-          predictionMeta: { index: predictionState.droughtIndex, scale: predictionState.scale, cellId: selectedCell.cell_id },
-        });
+          const cuencaName = response.cuenca_nombre || selectedEntity.layer;
 
-        showSuccess(
-          `Prediccion generada para celda ${selectedCell.cell_id} (${response.data?.length || 0} horizontes)`,
-          '!Listo!'
-        );
+          setPlotData({
+            type: 'prediction-1d',
+            title: `Prediccion ${predictionState.droughtIndex} (${predictionState.scale}m) - Cuenca ${cuencaName}`,
+            subtitle: `12 horizontes | Ponderado por area`,
+            variable: predictionState.droughtIndex,
+            data: response.data,
+            statistics: response.statistics,
+            predictionMeta: { index: predictionState.droughtIndex, scale: predictionState.scale, cuencaDn: selectedEntity.dn },
+            isCuencaTimeSeries: true,
+          });
+
+          showSuccess(
+            `Prediccion generada para cuenca ${cuencaName} (${response.data?.length || 0} horizontes)`,
+            '!Listo!'
+          );
+        } else {
+          // === 1D CELDAS: Time series for cell ===
+          const response = await predictionApi.getTimeSeries({
+            fileId: predFileId,
+            cellId: selectedCell.cell_id,
+            var: predictionState.droughtIndex,
+            scale: predictionState.scale,
+          });
+
+          setPlotData({
+            type: 'prediction-1d',
+            title: `Prediccion ${predictionState.droughtIndex} (${predictionState.scale}m)`,
+            subtitle: `Celda: ${selectedCell.cell_id} | 12 horizontes`,
+            variable: predictionState.droughtIndex,
+            data: response.data,
+            statistics: response.statistics,
+            predictionMeta: { index: predictionState.droughtIndex, scale: predictionState.scale, cellId: selectedCell.cell_id },
+          });
+
+          showSuccess(
+            `Prediccion generada para celda ${selectedCell.cell_id} (${response.data?.length || 0} horizontes)`,
+            '!Listo!'
+          );
+        }
       }
     } catch (error) {
       console.error('Error plotting prediction:', error);
       showError(error.message || 'Error al consultar prediccion', 'Error en la consulta');
     }
-  }, [predictionState, predictionCells, selectedCell, showError, showWarning, showInfo, showSuccess]);
+  }, [predictionState, predictionCells, selectedCell, selectedEntity, showError, showWarning, showInfo, showSuccess]);
 
   // Handle AI Summary
   const handleAiSummary = useCallback(async () => {
@@ -610,6 +770,7 @@ export default function Home() {
   // Handle Prediction History Plot
   const handlePredictionHistoryPlot = useCallback(async () => {
     const is2D = predictionHistoryState.visualizationType === '2D';
+    const isCuencas = predictionHistoryState.spatialUnit === 'cuencas';
 
     if (!predictionHistoryState.selectedFileId) {
       showWarning('Por favor selecciona una prediccion (fecha de emision)', 'Prediccion requerida');
@@ -623,7 +784,11 @@ export default function Home() {
       showWarning('Por favor selecciona una escala temporal', 'Escala requerida');
       return;
     }
-    if (!is2D && !selectedCell) {
+    if (!is2D && isCuencas && selectedEntity?.type !== 'cuenca') {
+      showError('Selecciona una cuenca del mapa para la prediccion 1D por cuencas', 'Seleccion Requerida');
+      return;
+    }
+    if (!is2D && !isCuencas && !selectedCell) {
       showError('Selecciona una celda del mapa para la prediccion 1D', 'Seleccion Requerida');
       return;
     }
@@ -639,71 +804,141 @@ export default function Home() {
       const predFileId = Number(predictionHistoryState.selectedFileId);
 
       if (is2D) {
-        // === 2D: Spatial grid ===
-        const response = await predictionHistoryApi.getSpatialData({
-          fileId: predFileId,
-          var: predictionHistoryState.droughtIndex,
-          scale: predictionHistoryState.scale,
-          horizon: predictionHistoryState.horizon,
-        });
-
-        setPlotData({
-          type: 'prediction-history-2d',
-          title: `Historico ${predictionHistoryState.droughtIndex} (${predictionHistoryState.scale}m) - Horizonte ${predictionHistoryState.horizon}`,
-          subtitle: `${response.statistics?.unique_cells || 0} celdas | Escala: ${predictionHistoryState.scale} meses | Prediccion historica`,
-          variable: predictionHistoryState.droughtIndex,
-          gridCells: response.grid_cells,
-          statistics: response.statistics,
-          bounds: response.bounds,
-          resolution: 0.05,
-          predictionMeta: {
-            index: predictionHistoryState.droughtIndex,
+        if (isCuencas) {
+          // === 2D CUENCAS: prediccion historica por cuenca ===
+          const response = await predictionHistoryApi.getWatershedSpatial({
+            fileId: predFileId,
+            var: predictionHistoryState.droughtIndex,
             scale: predictionHistoryState.scale,
             horizon: predictionHistoryState.horizon,
+          });
+
+          setPlotData({
+            type: 'prediction-history-2d',
+            title: `Historico ${predictionHistoryState.droughtIndex} (${predictionHistoryState.scale}m) - Horizonte ${predictionHistoryState.horizon} - Cuencas`,
+            subtitle: `${response.cuencas?.length || 0} cuencas | Escala: ${predictionHistoryState.scale} meses | Prediccion historica`,
+            variable: predictionHistoryState.droughtIndex,
+            cuencasData: response.cuencas,
+            statistics: response.statistics,
+            isCuencas: true,
+            resolution: 0.05,
+            predictionMeta: {
+              index: predictionHistoryState.droughtIndex,
+              scale: predictionHistoryState.scale,
+              horizon: predictionHistoryState.horizon,
+              fileId: predFileId,
+              isHistory: true,
+            },
+          });
+
+          setMapLayers(prev => ({ ...prev, cuencas: true }));
+
+          const validCuencas = response.cuencas?.filter(c => c.value !== null).length || 0;
+          showSuccess(
+            `Mapa de cuencas prediccion historica generado: ${validCuencas} cuencas`,
+            '!Listo!'
+          );
+        } else {
+          // === 2D CELDAS: Spatial grid ===
+          const response = await predictionHistoryApi.getSpatialData({
             fileId: predFileId,
-            isHistory: true,
-          },
-        });
-
-        showSuccess(
-          `Mapa de prediccion historica generado: ${response.statistics?.unique_cells || 0} celdas`,
-          '!Listo!'
-        );
-      } else {
-        // === 1D: Time series for cell ===
-        const response = await predictionHistoryApi.getTimeSeries({
-          fileId: predFileId,
-          cellId: selectedCell.cell_id,
-          var: predictionHistoryState.droughtIndex,
-          scale: predictionHistoryState.scale,
-        });
-
-        setPlotData({
-          type: 'prediction-history-1d',
-          title: `Historico ${predictionHistoryState.droughtIndex} (${predictionHistoryState.scale}m)`,
-          subtitle: `Celda: ${selectedCell.cell_id} | 12 horizontes | Prediccion historica`,
-          variable: predictionHistoryState.droughtIndex,
-          data: response.data,
-          statistics: response.statistics,
-          predictionMeta: {
-            index: predictionHistoryState.droughtIndex,
+            var: predictionHistoryState.droughtIndex,
             scale: predictionHistoryState.scale,
-            cellId: selectedCell.cell_id,
-            fileId: predFileId,
-            isHistory: true,
-          },
-        });
+            horizon: predictionHistoryState.horizon,
+          });
 
-        showSuccess(
-          `Prediccion historica generada para celda ${selectedCell.cell_id} (${response.data?.length || 0} horizontes)`,
-          '!Listo!'
-        );
+          setPlotData({
+            type: 'prediction-history-2d',
+            title: `Historico ${predictionHistoryState.droughtIndex} (${predictionHistoryState.scale}m) - Horizonte ${predictionHistoryState.horizon}`,
+            subtitle: `${response.statistics?.unique_cells || 0} celdas | Escala: ${predictionHistoryState.scale} meses | Prediccion historica`,
+            variable: predictionHistoryState.droughtIndex,
+            gridCells: response.grid_cells,
+            statistics: response.statistics,
+            bounds: response.bounds,
+            resolution: 0.05,
+            predictionMeta: {
+              index: predictionHistoryState.droughtIndex,
+              scale: predictionHistoryState.scale,
+              horizon: predictionHistoryState.horizon,
+              fileId: predFileId,
+              isHistory: true,
+            },
+          });
+
+          showSuccess(
+            `Mapa de prediccion historica generado: ${response.statistics?.unique_cells || 0} celdas`,
+            '!Listo!'
+          );
+        }
+      } else {
+        if (isCuencas) {
+          // === 1D CUENCA: prediccion historica por cuenca ===
+          const response = await predictionHistoryApi.getWatershedTimeSeries({
+            fileId: predFileId,
+            var: predictionHistoryState.droughtIndex,
+            scale: predictionHistoryState.scale,
+            cuencaDn: selectedEntity.dn,
+          });
+
+          const cuencaName = response.cuenca_nombre || selectedEntity.layer;
+
+          setPlotData({
+            type: 'prediction-history-1d',
+            title: `Historico ${predictionHistoryState.droughtIndex} (${predictionHistoryState.scale}m) - Cuenca ${cuencaName}`,
+            subtitle: `12 horizontes | Ponderado por area | Prediccion historica`,
+            variable: predictionHistoryState.droughtIndex,
+            data: response.data,
+            statistics: response.statistics,
+            predictionMeta: {
+              index: predictionHistoryState.droughtIndex,
+              scale: predictionHistoryState.scale,
+              cuencaDn: selectedEntity.dn,
+              fileId: predFileId,
+              isHistory: true,
+            },
+            isCuencaTimeSeries: true,
+          });
+
+          showSuccess(
+            `Prediccion historica generada para cuenca ${cuencaName} (${response.data?.length || 0} horizontes)`,
+            '!Listo!'
+          );
+        } else {
+          // === 1D CELDAS: Time series for cell ===
+          const response = await predictionHistoryApi.getTimeSeries({
+            fileId: predFileId,
+            cellId: selectedCell.cell_id,
+            var: predictionHistoryState.droughtIndex,
+            scale: predictionHistoryState.scale,
+          });
+
+          setPlotData({
+            type: 'prediction-history-1d',
+            title: `Historico ${predictionHistoryState.droughtIndex} (${predictionHistoryState.scale}m)`,
+            subtitle: `Celda: ${selectedCell.cell_id} | 12 horizontes | Prediccion historica`,
+            variable: predictionHistoryState.droughtIndex,
+            data: response.data,
+            statistics: response.statistics,
+            predictionMeta: {
+              index: predictionHistoryState.droughtIndex,
+              scale: predictionHistoryState.scale,
+              cellId: selectedCell.cell_id,
+              fileId: predFileId,
+              isHistory: true,
+            },
+          });
+
+          showSuccess(
+            `Prediccion historica generada para celda ${selectedCell.cell_id} (${response.data?.length || 0} horizontes)`,
+            '!Listo!'
+          );
+        }
       }
     } catch (error) {
       console.error('Error plotting prediction history:', error);
       showError(error.message || 'Error al consultar prediccion historica', 'Error en la consulta');
     }
-  }, [predictionHistoryState, selectedCell, showError, showWarning, showInfo, showSuccess]);
+  }, [predictionHistoryState, selectedCell, selectedEntity, showError, showWarning, showInfo, showSuccess]);
 
   // Handle Reset
   const handleReset = useCallback(() => {
@@ -712,6 +947,117 @@ export default function Home() {
     setSelectedCell(null);
     console.log('Map and selections reset');
   }, []);
+
+  // Handle entity (cuenca/embalse) selection — drill-down to 1D when in cuencas 2D
+  const handleEntitySelect = useCallback(async (entity) => {
+    setSelectedEntity(entity);
+    if (!entity || entity.type !== 'cuenca' || !plotData?.isCuencas) return;
+
+    // Drill-down: cuenca 2D → cuenca 1D
+    try {
+      const { historicalApi, predictionApi, predictionHistoryApi } = await import('@/services/api');
+
+      // === Prediction cuencas drill-down ===
+      if (plotData.predictionMeta) {
+        const meta = plotData.predictionMeta;
+        const index = meta.index;
+        const scale = meta.scale;
+
+        let fileId;
+        if (meta.fileId) {
+          fileId = meta.fileId;
+        } else if (predictionCells?.fileId) {
+          fileId = predictionCells.fileId;
+        } else {
+          const files = await historicalApi.getFiles();
+          const predFile = files.find(f => f.dataset_type === 'prediction');
+          if (!predFile) return;
+          fileId = predFile.file_id;
+        }
+
+        showInfo(`Consultando prediccion para cuenca ${entity.layer}...`, 'Cargando');
+
+        const api = meta.isHistory ? predictionHistoryApi : predictionApi;
+        const response = await api.getWatershedTimeSeries({
+          fileId: fileId,
+          var: index,
+          scale: scale,
+          cuencaDn: entity.dn,
+        });
+
+        const cuencaName = response.cuenca_nombre || entity.layer;
+        const typePrefix = meta.isHistory ? 'prediction-history' : 'prediction';
+
+        if (meta.isHistory) {
+          setPredictionHistoryState(prev => ({ ...prev, visualizationType: '1D' }));
+        } else {
+          setPredictionState(prev => ({ ...prev, visualizationType: '1D' }));
+        }
+
+        setPlotData({
+          type: `${typePrefix}-1d`,
+          title: `${meta.isHistory ? 'Historico ' : 'Prediccion '}${index} (${scale}m) - Cuenca ${cuencaName}`,
+          subtitle: `12 horizontes | Ponderado por area${meta.isHistory ? ' | Prediccion historica' : ''}`,
+          variable: index,
+          data: response.data,
+          statistics: response.statistics,
+          predictionMeta: { ...meta, cuencaDn: entity.dn },
+          isCuencaTimeSeries: true,
+        });
+
+        showSuccess(`Prediccion generada para cuenca ${cuencaName}`, '¡Listo!');
+        return;
+      }
+
+      // === Historical cuencas drill-down ===
+      const variable = analysisState.droughtIndex || analysisState.variable;
+      if (!variable) return;
+
+      const dataSource = plotData.dataSource || analysisState.dataSource || 'ERA5';
+      const sourceResMap = { ERA5: 0.25, IMERG: 0.1, CHIRPS: 0.05 };
+      const targetResolution = sourceResMap[dataSource] || 0.05;
+
+      const files = await historicalApi.getFiles();
+      const historicalFiles = files.filter(f => !f.dataset_type || f.dataset_type === 'historical');
+      const file = historicalFiles.find(f => Math.abs((f.resolution || 0.1) - targetResolution) < 0.01);
+      if (!file) return;
+
+      showInfo(`Consultando serie temporal para cuenca ${entity.layer}...`, 'Cargando');
+
+      const response = await historicalApi.getWatershedTimeSeries({
+        fileId: file.file_id,
+        variable: variable,
+        dataSource: dataSource,
+        cuencaDn: entity.dn,
+        startDate: analysisState.startDate,
+        endDate: analysisState.endDate,
+        scale: analysisState.droughtIndex ? analysisState.indexScale : null,
+        frequency: (!analysisState.droughtIndex) ? analysisState.frequency : null,
+      });
+
+      const freqLabel = response.frequency === 'M' ? 'Mensual' : 'Diaria';
+      const cuencaName = response.cuenca?.nombre || entity.layer;
+
+      setAnalysisState(prev => ({ ...prev, visualizationType: '1D' }));
+
+      setPlotData({
+        type: '1D',
+        title: `${response.variable_name} - Cuenca ${cuencaName}`,
+        subtitle: `Fuente: ${dataSource} | Frecuencia: ${freqLabel}`,
+        variable: String(response.variable || variable || '').trim().toUpperCase(),
+        unit: response.unit,
+        frequency: response.frequency,
+        data: response.data,
+        statistics: response.statistics,
+        isCuencaTimeSeries: true,
+      });
+
+      showSuccess(`Serie de tiempo generada para cuenca ${cuencaName}`, '¡Listo!');
+    } catch (error) {
+      console.error('Error in cuenca drill-down:', error);
+      showError(error.message || 'Error al consultar serie de cuenca', 'Error');
+    }
+  }, [plotData, analysisState, predictionCells, showInfo, showSuccess, showError]);
 
   // Handle Spatial Cell Click from 2D view -> auto-query 1D detail
   const handleSpatialCellClick = useCallback(async (cell) => {
@@ -986,6 +1332,7 @@ export default function Home() {
           onPredictionHistoryPlot={handlePredictionHistoryPlot}
           selectedStation={selectedStation}
           selectedCell={selectedCell}
+          selectedEntity={selectedEntity}
         />
 
         <MapArea
@@ -1006,6 +1353,8 @@ export default function Home() {
           onSpatialCellClick={handleSpatialCellClick}
           mapLayers={mapLayers}
           setMapLayers={setMapLayers}
+          selectedEntity={selectedEntity}
+          onEntitySelect={handleEntitySelect}
         />
       </div>
       
