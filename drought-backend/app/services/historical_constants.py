@@ -18,6 +18,7 @@ DEFAULT_SOURCE = "OBS_IDW"
 # Fuente específica por índice (cuando difiere del default)
 SOURCE_BY_INDEX = {
     "EDDI": "PET_HARGREAVES",
+    "pet": "PET_HARGREAVES",
 }
 
 # Mapeo de columnas reales en los archivos .parquet
@@ -97,5 +98,75 @@ INDEX_DROUGHT_SCALES = {
             {"label": "Severamente Seco",      "color": "#FFA500", "severity": 5},
             {"label": "Extremadamente Seco",   "color": "#FF0000", "severity": 6},
         ],
+    },
+}
+VARIABLE_CLASS_SCALES = {
+    "pet": {
+        "bins": [-np.inf, 3.0, 6.0, 9.0, 12.0, 15.0, np.inf],
+        "categories": [
+            {"label": "Muy baja", "color": "#08306B", "severity": 0},
+            {"label": "Baja", "color": "#2171B5", "severity": 1},
+            {"label": "Media-baja", "color": "#6BAED6", "severity": 2},
+            {"label": "Media-alta", "color": "#FDBE85", "severity": 3},
+            {"label": "Alta", "color": "#F16913", "severity": 4},
+            {"label": "Muy alta", "color": "#A50F15", "severity": 5},
+        ],
+    },
+    "tmean": {
+        "bins": [-np.inf, 10.0, 11.5, 13.0, 14.5, 16.0, np.inf],
+        "categories": [
+            {"label": "Muy baja", "color": "#08306B", "severity": 0},
+            {"label": "Baja", "color": "#2171B5", "severity": 1},
+            {"label": "Media-baja", "color": "#6BAED6", "severity": 2},
+            {"label": "Media-alta", "color": "#FDBE85", "severity": 3},
+            {"label": "Alta", "color": "#F16913", "severity": 4},
+            {"label": "Muy alta", "color": "#A50F15", "severity": 5},
+        ],
+    },
+    "tmin": {
+        "bins": [-np.inf, 2.0, 4.0, 6.5, 9.0, 11.0, np.inf],
+        "categories": [
+            {"label": "Muy baja", "color": "#08306B", "severity": 0},
+            {"label": "Baja", "color": "#2171B5", "severity": 1},
+            {"label": "Media-baja", "color": "#6BAED6", "severity": 2},
+            {"label": "Media-alta", "color": "#FDBE85", "severity": 3},
+            {"label": "Alta", "color": "#F16913", "severity": 4},
+            {"label": "Muy alta", "color": "#A50F15", "severity": 5},
+        ],
+    },
+    "tmax": {
+        "bins": [-np.inf, 16.5, 18.5, 20.5, 22.5, 24.0, np.inf],
+        "categories": [
+            {"label": "Muy baja", "color": "#08306B", "severity": 0},
+            {"label": "Baja", "color": "#2171B5", "severity": 1},
+            {"label": "Media-baja", "color": "#6BAED6", "severity": 2},
+            {"label": "Media-alta", "color": "#FDBE85", "severity": 3},
+            {"label": "Alta", "color": "#F16913", "severity": 4},
+            {"label": "Muy alta", "color": "#A50F15", "severity": 5},
+        ],
+    },
+    "precip": {
+        "D": {
+            "bins": [-np.inf, 10.0, 20.0, 35.0, 50.0, 70.0, np.inf],
+            "categories": [
+                {"label": "Muy baja", "color": "#BFDDF2", "severity": 0},
+                {"label": "Baja", "color": "#93C5E8", "severity": 1},
+                {"label": "Media-baja", "color": "#63A7D8", "severity": 2},
+                {"label": "Media-alta", "color": "#3D8AC5", "severity": 3},
+                {"label": "Alta", "color": "#1F6BA5", "severity": 4},
+                {"label": "Muy alta", "color": "#0B4F80", "severity": 5},
+            ],
+        },
+        "M": {
+            "bins": [-np.inf, 50.0, 150.0, 250.0, 400.0, 550.0, np.inf],
+            "categories": [
+                {"label": "Muy baja", "color": "#BFDDF2", "severity": 0},
+                {"label": "Baja", "color": "#93C5E8", "severity": 1},
+                {"label": "Media-baja", "color": "#63A7D8", "severity": 2},
+                {"label": "Media-alta", "color": "#3D8AC5", "severity": 3},
+                {"label": "Alta", "color": "#1F6BA5", "severity": 4},
+                {"label": "Muy alta", "color": "#0B4F80", "severity": 5},
+            ],
+        },
     },
 }

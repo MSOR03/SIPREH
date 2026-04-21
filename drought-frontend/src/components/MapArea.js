@@ -671,7 +671,7 @@ export default function MapArea({
                     <span className="text-blue-600 dark:text-blue-400 font-medium"> Haz click en una celda para ver el detalle 1D.</span>
                   </p>
                   {/* Leyenda de colores para índices de sequía — dinámica desde datos del backend */}
-                  {isDroughtIndex && hasCategorizedCells && <DroughtLegend gridCells={plotData.gridCells} />}
+                  {hasCategorizedCells && <DroughtLegend gridCells={plotData.gridCells} />}
                 </div>
               </div>
             ) : (plotData.type === 'Serie de Tiempo' || plotData.type === '1D') && plotData.data ? (
