@@ -197,7 +197,7 @@ export default function PredictionHistorySection({
           </StepSection>
 
           {/* Step 5: Scale */}
-          <StepSection step={5} title="Escala temporal" color="purple" collapsible defaultOpen={false}>
+          <StepSection step={5} title="Nivel de Agregación" color="purple" collapsible defaultOpen={false}>
             <div className="grid grid-cols-4 gap-2">
               {SCALES.map((s) => (
                 <RadioCard

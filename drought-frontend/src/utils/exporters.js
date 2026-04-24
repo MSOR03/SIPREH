@@ -2,6 +2,70 @@ const DEFAULT_IMAGE_WIDTH = 1800;
 const DEFAULT_IMAGE_HEIGHT = 1100;
 const LEAFLET_BASEMAP_TILE_URL = 'https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png';
 
+const METEOROLOGICAL_INDICES = new Set(['SPI', 'SPEI', 'RAI', 'EDDI', 'PDSI']);
+const HYDROLOGICAL_INDICES = new Set(['SDI', 'SRI', 'MFI', 'DDI', 'HDI']);
+
+const VARIABLE_LABELS = {
+  precip: 'Precipitación',
+  tmean: 'Temperatura Media',
+  tmin: 'Temperatura Mínima',
+  tmax: 'Temperatura Máxima',
+  pet: 'Evapotranspiración Potencial (PET)',
+};
+
+const INDEX_LABELS = {
+  SPI: 'Índice de Precipitación Estandarizado',
+  SPEI: 'Índice de Precipitación-Evapotranspiración Estandarizado',
+  RAI: 'Índice de Anomalía de Lluvia',
+  EDDI: 'Índice de Demanda de Evaporación por Sequía',
+  PDSI: 'Índice de Severidad de Sequía de Palmer',
+  SDI: 'Índice de Sequía de Caudales',
+  SRI: 'Índice de Recurrencia de Sequía',
+  MFI: 'Índice de Flujo Mensual',
+  DDI: 'Índice de Déficit de Duración',
+  HDI: 'Índice de Déficit Hidrológico',
+};
+
+function resolveDataKind(rawValue) {
+  const value = String(rawValue || '').trim();
+  const upper = value.toUpperCase();
+  const lower = value.toLowerCase();
+
+  if (METEOROLOGICAL_INDICES.has(upper)) {
+    return {
+      group: 'Índice de sequía',
+      family: 'Meteorológica',
+      code: upper,
+      label: INDEX_LABELS[upper] || upper,
+    };
+  }
+
+  if (HYDROLOGICAL_INDICES.has(upper)) {
+    return {
+      group: 'Índice de sequía',
+      family: 'Hidrológica',
+      code: upper,
+      label: INDEX_LABELS[upper] || upper,
+    };
+  }
+
+  if (VARIABLE_LABELS[lower]) {
+    return {
+      group: 'Variable climática',
+      family: null,
+      code: lower,
+      label: VARIABLE_LABELS[lower],
+    };
+  }
+
+  return {
+    group: 'Dato',
+    family: null,
+    code: value || 'N/A',
+    label: value || 'N/A',
+  };
+}
+
 function sanitizeFilename(value) {
   return String(value || 'export')
     .toLowerCase()
@@ -132,14 +196,16 @@ ctx.fillStyle = '#fff';
 ctx.fillRect(0, 0, canvas.width, canvas.height);
 ctx.restore();
 
-  const is2D = plotData.type === '2D' || plotData.type === 'prediction-2d' || plotData.type === 'prediction-history-2d';
+    const is2D = plotData.type === '2D' || plotData.type === 'prediction-2d' || plotData.type === 'prediction-history-2d';
 
   // Dibuja el contenido según el tipo de datos
   if (is2D) {
     // Dibuja el mapa 2D completo
     await draw2DMap(ctx, plotData, analysisState);
   } else {
-    // Dibuja el encabezado y el gráfico 1D
+    // Para gráficos 1D: panel institucional + barra indicadora + encabezado + gráfico
+    await draw2DInstitutionalPanel(ctx, plotData);
+    drawAnalysisTypeIndicator(ctx, plotData);
     drawHeader(ctx, plotData);
     draw1DChart(ctx, plotData);
   }
@@ -296,7 +362,7 @@ function draw1DChart(ctx, plotData) {
   if (!rows.length) return;
 
   const chartX = 56;
-  const chartY = 150;
+  const chartY = 170;
   const chartW = 980;
   const chartH = 560;
 
@@ -363,7 +429,7 @@ function draw1DChart(ctx, plotData) {
   ctx.strokeStyle = '#cbd5e1';
   drawCard(ctx, 1060, 170, 290, 140, 12);
   ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 18px Arial';
+  ctx.font = 'bold 20px Arial';
   ctx.fillText('Leyenda', 1082, 202);
   ctx.fillStyle = '#2563eb';
   ctx.fillRect(1082, 220, 24, 4);
@@ -428,7 +494,42 @@ function flattenFeatureCoordinates(geojson) {
 
   return points;
 }
+function drawAnalysisTypeIndicator(ctx, plotData) {
+  const x = 56;
+  const y = 112;
+  const w = DEFAULT_IMAGE_WIDTH - 112;
+  const h = 40;
 
+  const isPrediction = plotData?.type?.startsWith('prediction');
+  const isHistoricalPrediction = plotData?.type === 'prediction-history-2d' || plotData?.type === 'prediction-history-1d';
+  
+  let bgColor, textColor, label;
+  
+  if (isHistoricalPrediction) {
+    bgColor = '#e9d5ff';
+    textColor = '#6b21a8';
+    label = 'PREDICCIÓN HISTÓRICA';
+  } else if (isPrediction) {
+    bgColor = '#d1fae5';
+    textColor = '#065f46';
+    label = 'PREDICCIÓN ACTUAL';
+  } else {
+    bgColor = '#bfdbfe';
+    textColor = '#0c4a6e';
+    label = 'ANÁLISIS HISTÓRICO';
+  }
+
+  ctx.fillStyle = bgColor;
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = textColor;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x, y, w, h);
+  ctx.fillStyle = textColor;
+  ctx.font = 'bold 24px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText(label, x + w / 2, y + 28);
+  ctx.textAlign = 'left';
+}
 async function loadStudyAreaBoundary() {
   try {
     const response = await fetch(`/data/study-area.geojson?t=${Date.now()}`);
@@ -639,11 +740,6 @@ function drawBasemapBackdrop(ctx, frame, bounds) {
     ctx.stroke();
   }
   ctx.restore();
-
-  // Dibuja la grilla sobre el fondo
-  if (bounds) {
-    drawGraticule(ctx, bounds, frame);
-  }
 }
 
 function drawGraticule(ctx, bounds, frame) {
@@ -725,26 +821,31 @@ ctx.restore();
 
 function drawNorthArrow(ctx, x, y) {
   ctx.save();
-  ctx.fillStyle = '#0f172a';
-  const scale = 0.7;
-  ctx.font = `bold ${Math.round(14 * scale)}px Arial`;
-  ctx.fillText('N', x - 5 * scale, y - 14 * scale);
 
+  const scale = 1.65; // antes 0.7
+  ctx.fillStyle = '#0f172a';
+  ctx.textAlign = 'center';
+  ctx.font = `bold ${Math.round(16 * scale)}px Arial`;
+  ctx.fillText('N', x, y - 18 * scale);
+
+  // Triangulo de la flecha
   ctx.beginPath();
   ctx.moveTo(x, y - 10 * scale);
-  ctx.lineTo(x - 8 * scale, y + 12 * scale);
-  ctx.lineTo(x + 8 * scale, y + 12 * scale);
+  ctx.lineTo(x - 9 * scale, y + 12 * scale);
+  ctx.lineTo(x + 9 * scale, y + 12 * scale);
   ctx.closePath();
-  ctx.fillStyle = '#0f172a';
   ctx.fill();
 
+  // Cuerpo de la flecha
   ctx.beginPath();
   ctx.moveTo(x, y + 12 * scale);
-  ctx.lineTo(x, y + 36 * scale);
+  ctx.lineTo(x, y + 38 * scale);
   ctx.strokeStyle = '#0f172a';
-  ctx.lineWidth = 2 * scale;
+  ctx.lineWidth = 2.6 * scale;
   ctx.stroke();
-  }
+
+  ctx.restore();
+}
 
 function drawScaleBar(ctx, bounds, frame) {
   // Fija la escala a 25 km, con divisiones en 0, 5, 10 y 25 km
@@ -831,14 +932,15 @@ async function draw2DMap(ctx, plotData, analysisState) {
   if (!points.length) return;
 
   await draw2DInstitutionalPanel(ctx, plotData);
+  drawAnalysisTypeIndicator(ctx, plotData);
 
   const mapX = 56;
-  const mapY = 150;
+  const mapY = 172; // antes 150, baja el mapa para evitar traslape con la barra
   const mapW = 1300;
 
   const footerReserve = 90;
   const mapBottom = DEFAULT_IMAGE_HEIGHT - footerReserve;
-  const mapH = mapBottom - mapY;
+  const mapH = mapBottom - mapY; // se reduce un poco el alto del mapa
 
   const droughtSeverityScale = [
     { label: 'Extremadamente húmedo', color: '#000080' },
@@ -859,7 +961,7 @@ async function draw2DMap(ctx, plotData, analysisState) {
   // --- Cuadro informativo sobre la leyenda ---
   const infoBoxW = legendW;
   const infoBoxX = DEFAULT_IMAGE_WIDTH - infoBoxW - 56;
-  const infoBoxY = Math.round(DEFAULT_IMAGE_HEIGHT * 0.135);
+  const infoBoxY = Math.round(DEFAULT_IMAGE_HEIGHT * 0.135) + 18;
   const infoBoxH = legendY - infoBoxY - 16;
 
   ctx.save();
@@ -869,43 +971,56 @@ async function draw2DMap(ctx, plotData, analysisState) {
 
   // Título
   ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 18px Arial';
-  ctx.fillText('Información de consulta', infoBoxX + 22, infoBoxY + 32);
-
-  // Mapeo de siglas a descripciones
-  const indexDescriptions = {
-    SPI: 'Índice de Precipitación Estandarizado',
-    SPEI: 'Índice de Precipitación-Evapotranspiración Estandarizado',
-    RAI: 'Índice de Anomalía de Lluvia',
-    EDDI: 'Índice de Demanda de Evaporación por Sequía',
-    PDSI: 'Índice de Severidad de Sequía de Palmer'
-  };
+  ctx.font = 'bold 20px Arial';
+  ctx.fillText('INFORMACIÓN DE CONSULTA', infoBoxX + 22, infoBoxY + 32);
 
   // Texto secundario
-  ctx.font = '15px Arial';
+  ctx.font = '18px Arial';
   ctx.fillStyle = '#334155';
-  let infoY = infoBoxY + 60;
-  const infoBoxMaxWidth = infoBoxW - 44; // 22px de margen a cada lado
 
-  infoY = wrapText(ctx, 'Fecha de consulta: ' + new Date().toLocaleString(), infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
-  infoY = wrapText(
-    ctx,
-    'Visualización: ' +
+    let infoY = infoBoxY + 60;
+      const infoBoxMaxWidth = infoBoxW - 44; // 22px de margen a cada lado
+
+      // Función para formatear fecha de YYYY-MM-DD a YYYY/MM/DD
+      const formatDate = (dateStr) => {
+        if (!dateStr || dateStr === 'N/A') return dateStr;
+        return String(dateStr).replace(/-/g, '/');
+      };
+
+      infoY = wrapText(ctx, 'Fecha de consulta: ' + new Date().toLocaleString(), infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
+      infoY = wrapText(
+      ctx,
+      'Fecha de visualización: ' +
       (plotData?.isInterval && plotData?.period?.start_date && plotData?.period?.end_date
-        ? plotData.period.start_date + ' a ' + plotData.period.end_date
-        : (plotData?.date || 'N/A')),
-    infoBoxX + 22,
-    infoY,
-    infoBoxMaxWidth,
-    22
-  );
-  infoY = wrapText(ctx, 'Tipo de índice: Meteorológico', infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
-  const sigla = plotData?.variable_name || plotData?.variable || 'N/A';
-  const descripcion = indexDescriptions[sigla] ? ` (${indexDescriptions[sigla]})` : '';
-  wrapText(ctx, 'Índice ' + sigla + descripcion, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
-  // --- Fin cuadro informativo ---
+      ? formatDate(plotData.period.start_date) + ' a ' + formatDate(plotData.period.end_date)
+      : formatDate(plotData?.date || 'N/A')),
+      infoBoxX + 22,
+      infoY,
+      infoBoxMaxWidth,
+      22
+      );
 
-  const frame = { x: mapX, y: mapY, w: mapW, h: mapH, pad: 12 };
+      // Nivel de Agregación
+      const aggregationLevel = analysisState?.indexScale || plotData?.scale || 'N/A';
+      infoY = wrapText(ctx, 'Nivel de Agregación: ' + aggregationLevel + ' meses', infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
+
+      const selectedCode = plotData?.variable_name || plotData?.variable || analysisState?.droughtIndex || analysisState?.variable || 'N/A';
+      const dataKind = resolveDataKind(selectedCode);
+
+      infoY = wrapText(ctx, 'Tipo de dato: ' + dataKind.group, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
+      if (dataKind.family) {
+        // Es un índice de sequía
+        infoY = wrapText(ctx, 'Tipo de índice: ' + dataKind.family, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
+        wrapText(ctx, 'Índice: ' + dataKind.code + ' - ' + dataKind.label, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
+      } else {
+        // Es una variable climática
+        wrapText(ctx, 'Variable: ' + dataKind.label, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
+      }
+      // --- Fin cuadro informativo ---
+
+      ctx.restore();
+      const frame = { x: mapX, y: mapY, w: mapW, h: mapH, pad: 12 };
+
   ctx.fillStyle = '#f8fafc';
   ctx.strokeStyle = '#cbd5e1';
   drawCard(ctx, mapX, mapY, mapW, mapH, 14);
@@ -926,7 +1041,7 @@ async function draw2DMap(ctx, plotData, analysisState) {
     maxLat: Math.max(maxLat, ...(boundaryLats.length ? boundaryLats : [maxLat])),
   };
 
-  drawBasemapBackdrop(ctx, frame);
+drawBasemapBackdrop(ctx, frame, bounds);
   await drawLeafletBasemapTiles(ctx, bounds, frame);
   drawProjectBoundary(ctx, boundaryCoords, bounds, frame);
 
@@ -935,7 +1050,7 @@ async function draw2DMap(ctx, plotData, analysisState) {
 
   // --- DIBUJA LA LEYENDA DE LA GRILLA FUERA DEL MAPA ---
   ctx.fillStyle = '#64748b';
-  ctx.font = '14px Arial';
+  ctx.font = '20px Arial';
 
   // --- Continúa con el renderizado de celdas ---
   const lonRange = bounds.maxLon - bounds.minLon || 1;
@@ -969,27 +1084,6 @@ async function draw2DMap(ctx, plotData, analysisState) {
   });
   ctx.restore();
 
-function drawNorthArrow(ctx, x, y) {
-  ctx.save();
-  const scale = 2.0; // 200% del tamaño original
-  const yOffset = 20; // Desplazamiento hacia el sur (ahora el doble que antes)
-  // Letra N
-  ctx.fillStyle = '#222';
-  ctx.font = `bold ${Math.round(20 * scale)}px Arial`;
-  ctx.textAlign = 'center';
-  ctx.fillText('N', x, y - 18 * scale + yOffset);
-
-  // Flecha (triángulo)
-  ctx.beginPath();
-  ctx.moveTo(x, y - 10 * scale + yOffset);      // Punta de la flecha
-  ctx.lineTo(x - 8 * scale, y + 10 * scale + yOffset);  // Esquina izquierda
-  ctx.lineTo(x + 8 * scale, y + 10 * scale + yOffset);  // Esquina derecha
-  ctx.closePath();
-  ctx.fillStyle = '#222';
-  ctx.fill();
-  ctx.restore();
-}
-
 drawNorthArrow(ctx, mapX + 36, mapY + 36 + 40);
 drawScaleBar(ctx, bounds, frame);
 
@@ -1016,8 +1110,8 @@ drawScaleBar(ctx, bounds, frame);
   drawCard(ctx, legendX, legendY, legendW, legendH, 12);
 
   ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 18px Arial';
-  ctx.fillText('Leyenda', legendX + 22, legendY + 32);
+  ctx.font = 'bold 20px Arial';
+  ctx.fillText('LEYENDA', legendX + 22, legendY + 32);
 
   if (!legendEntries.length) {
     const values = cells
@@ -1028,7 +1122,7 @@ drawScaleBar(ctx, bounds, frame);
     const maxVal = values.length ? Math.max(...values) : null;
 
     ctx.fillStyle = '#334155';
-    ctx.font = '15px Arial';
+    ctx.font = '20px Arial';
     ctx.fillText('Escala continua', legendX + 22, legendY + 66);
     ctx.fillText('Min: ' + (minVal?.toFixed(2) ?? 'N/A'), legendX + 22, legendY + 92);
     ctx.fillText('Max: ' + (maxVal?.toFixed(2) ?? 'N/A'), legendX + 22, legendY + 116);
