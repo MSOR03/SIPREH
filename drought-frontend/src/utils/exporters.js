@@ -258,7 +258,10 @@ function resolvePrecipFrequencyCode(plotData, analysisState) {
 }
 
 function resolveSatelliteProductLabel(plotData, analysisState) {
-  const sourceCode = String(plotData?.dataSource || analysisState?.dataSource || '')
+  const plotSourceCode = String(plotData?.dataSource || '')
+    .trim()
+    .toUpperCase();
+  const stateSourceCode = String(analysisState?.dataSource || '')
     .trim()
     .toUpperCase();
 
@@ -268,11 +271,12 @@ function resolveSatelliteProductLabel(plotData, analysisState) {
     CHIRPS: 'CHIRPS (UCSB, 0.05°)',
   };
 
-  if (productBySource[sourceCode]) {
-    return productBySource[sourceCode];
+  // Priorizar fuente explícita asociada al resultado consultado.
+  if (productBySource[plotSourceCode]) {
+    return productBySource[plotSourceCode];
   }
 
-  // Fallback cuando no llega dataSource explícito: inferir por resolución.
+  // Si no llega dataSource explícito, inferir por resolución del resultado.
   const resolution = Number(plotData?.resolution || analysisState?.spatialResolution);
   if (Number.isFinite(resolution)) {
     if (Math.abs(resolution - 0.25) < 0.001) return productBySource.ERA5;
@@ -280,7 +284,11 @@ function resolveSatelliteProductLabel(plotData, analysisState) {
     if (Math.abs(resolution - 0.05) < 0.001) return productBySource.CHIRPS;
   }
 
-  return sourceCode || 'N/A';
+  if (productBySource[stateSourceCode]) {
+    return productBySource[stateSourceCode];
+  }
+
+  return plotSourceCode || stateSourceCode || 'N/A';
 }
 
 function sanitizeFilename(value) {

@@ -313,6 +313,8 @@ export default function Home() {
         const freqNote = !analysisState.droughtIndex && analysisState.frequency
           ? ` | Freq: ${analysisState.frequency === 'M' ? 'Mensual' : 'Diaria'}`
           : '';
+        const sourceByResolution = { 0.25: 'ERA5', 0.1: 'IMERG', 0.05: 'CHIRPS' };
+        const inferredSource = sourceByResolution[targetResolution] || analysisState.dataSource || null;
 
         // Procesar respuesta y actualizar plotData para modo 2D
         setPlotData({
@@ -329,6 +331,7 @@ export default function Home() {
           statistics: response.statistics,
           bounds: response.bounds,
           resolution: fileResolution,
+          dataSource: inferredSource,
         });
 
         const uniqueCells = response.statistics?.unique_cells ?? response.grid_cells.length;
