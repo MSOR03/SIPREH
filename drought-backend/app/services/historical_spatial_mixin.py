@@ -12,14 +12,16 @@ import numpy as np
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import date
 
-from app.services.historical_constants import DROUGHT_INDEX_KEYS, DEFAULT_SOURCE, DEFAULT_SCALE, SOURCE_BY_INDEX
+from app.services.historical_constants import (
+    DROUGHT_INDEX_KEYS,
+    DEFAULT_SOURCE,
+    DEFAULT_SCALE,
+    SOURCE_BY_INDEX,
+    COLOR_SCALE_VERSION,
+)
 
 
 def _vectorized_colors(values: pd.Series, vmin: float, vmax: float) -> pd.Series:
-    """
-    Genera colores azul→cyan→verde→amarillo→rojo de forma vectorizada.
-    Usa lookup table pre-computada para evitar f-string formatting por fila.
-    """
     n = len(values)
     if vmin == vmax:
         return pd.Series(["#CCCCCC"] * n, index=values.index)
@@ -30,31 +32,40 @@ def _vectorized_colors(values: pd.Series, vmin: float, vmax: float) -> pd.Series
     g = np.zeros(n, dtype=np.uint8)
     b = np.zeros(n, dtype=np.uint8)
 
-    # Segmento 0.00–0.25  → azul→cyan
+    def lerp(start, end, weight):
+        return (start + (end - start) * weight).astype(np.uint8)
+
+    # 0.00–0.25 -> azul oscuro #1e3a8a a azul fuerte #2563eb
     m1 = norm < 0.25
-    g[m1] = (255 * (norm[m1] / 0.25)).astype(np.uint8)
-    b[m1] = 255
+    t1 = norm[m1] / 0.25
+    r[m1] = lerp(30, 37, t1)
+    g[m1] = lerp(58, 99, t1)
+    b[m1] = lerp(138, 235, t1)
 
-    # Segmento 0.25–0.50  → cyan→verde
+    # 0.25–0.50 -> azul fuerte #2563eb a cian #06b6d4
     m2 = (norm >= 0.25) & (norm < 0.50)
-    g[m2] = 255
-    b[m2] = (255 * (1 - (norm[m2] - 0.25) / 0.25)).astype(np.uint8)
+    t2 = (norm[m2] - 0.25) / 0.25
+    r[m2] = lerp(37, 6, t2)
+    g[m2] = lerp(99, 182, t2)
+    b[m2] = lerp(235, 212, t2)
 
-    # Segmento 0.50–0.75  → verde→amarillo
+    # 0.50–0.75 -> cian a amarillo
     m3 = (norm >= 0.50) & (norm < 0.75)
-    r[m3] = (255 * ((norm[m3] - 0.50) / 0.25)).astype(np.uint8)
-    g[m3] = 255
+    t3 = (norm[m3] - 0.50) / 0.25
+    r[m3] = lerp(6, 250, t3)
+    g[m3] = lerp(182, 204, t3)
+    b[m3] = lerp(212, 21, t3)
 
-    # Segmento 0.75–1.00  → amarillo→rojo
+    # 0.75–1.00 -> amarillo a rojo intenso #dc2626
     m4 = norm >= 0.75
-    r[m4] = 255
-    g[m4] = (255 * (1 - (norm[m4] - 0.75) / 0.25)).astype(np.uint8)
+    t4 = (norm[m4] - 0.75) / 0.25
+    r[m4] = lerp(250, 220, t4)
+    g[m4] = lerp(204, 38, t4)
+    b[m4] = lerp(21, 38, t4)
 
-    # Construir hex usando bytes → hex conversion (evita f-string loop)
-    rgb_bytes = np.stack([r, g, b], axis=1)  # (n, 3)
+    rgb_bytes = np.stack([r, g, b], axis=1)
     colors = np.array(["#" + c.hex() for c in map(bytes, rgb_bytes)], dtype=object)
 
-    # NaN → gris
     nan_mask = np.isnan(values.values) if values.values.dtype.kind == 'f' else values.isna().values
     colors[nan_mask] = "#CCCCCC"
     return pd.Series(colors, index=values.index)
@@ -106,6 +117,7 @@ class SpatialMixin:
                 scale=effective_scale,
                 source=effective_source,
                 freq=requested_freq,
+                palette=COLOR_SCALE_VERSION,
                 limit=limit
             )
 
