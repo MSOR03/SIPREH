@@ -26,6 +26,146 @@ const INDEX_LABELS = {
   HDI: 'Índice de Déficit Hidrológico',
 };
 
+const FIXED_BACKEND_LEGEND_RANGES = {
+  tmean: {
+    'muy baja': '< 10.0 °C',
+    baja: '10.0 a < 11.5 °C',
+    'media-baja': '11.5 a < 13.0 °C',
+    'media-alta': '13.0 a < 14.5 °C',
+    alta: '14.5 a < 16.0 °C',
+    'muy alta': '>= 16.0 °C',
+  },
+  tmin: {
+    'muy baja': '< 2.0 °C',
+    baja: '2.0 a < 4.0 °C',
+    'media-baja': '4.0 a < 6.5 °C',
+    'media-alta': '6.5 a < 9.0 °C',
+    alta: '9.0 a < 11.0 °C',
+    'muy alta': '>= 11.0 °C',
+  },
+  tmax: {
+    'muy baja': '< 16.5 °C',
+    baja: '16.5 a < 18.5 °C',
+    'media-baja': '18.5 a < 20.5 °C',
+    'media-alta': '20.5 a < 22.5 °C',
+    alta: '22.5 a < 24.0 °C',
+    'muy alta': '>= 24.0 °C',
+  },
+  pet: {
+    'muy baja': '< 3.0 mm',
+    baja: '3.0 a < 6.0 mm',
+    'media-baja': '6.0 a < 9.0 mm',
+    'media-alta': '9.0 a < 12.0 mm',
+    alta: '12.0 a < 15.0 mm',
+    'muy alta': '>= 15.0 mm',
+  },
+  precip: {
+    D: {
+      'muy baja': '< 10.0 mm',
+      baja: '10.0 a < 20.0 mm',
+      'media-baja': '20.0 a < 35.0 mm',
+      'media-alta': '35.0 a < 50.0 mm',
+      alta: '50.0 a < 70.0 mm',
+      'muy alta': '>= 70.0 mm',
+    },
+    M: {
+      'muy baja': '< 50.0 mm',
+      baja: '50.0 a < 150.0 mm',
+      'media-baja': '150.0 a < 250.0 mm',
+      'media-alta': '250.0 a < 400.0 mm',
+      alta: '400.0 a < 550.0 mm',
+      'muy alta': '>= 550.0 mm',
+    },
+  },
+};
+
+const FIXED_INDEX_LEGEND_RANGES = {
+SPI: {
+'extremadamente seco': '< -2.0',
+'severamente seco': '-2.0 a < -1.5',
+'moderadamente seco': '-1.5 a < -1.0',
+normal: '-1.0 a < 1.0',
+'moderadamente humedo': '1.0 a < 1.5',
+'muy humedo': '1.5 a < 2.0',
+'extremadamente humedo': '>= 2.0',
+},
+SPEI: {
+'extremadamente seco': '< -2.0',
+'severamente seco': '-2.0 a < -1.5',
+'moderadamente seco': '-1.5 a < -1.0',
+normal: '-1.0 a < 1.0',
+'moderadamente humedo': '1.0 a < 1.5',
+'muy humedo': '1.5 a < 2.0',
+'extremadamente humedo': '>= 2.0',
+},
+RAI: {
+'extremadamente seco': '< -2.0',
+'severamente seco': '-2.0 a < -1.5',
+'moderadamente seco': '-1.5 a < -1.0',
+normal: '-1.0 a < 1.0',
+'moderadamente humedo': '1.0 a < 1.5',
+'muy humedo': '1.5 a < 2.0',
+'extremadamente humedo': '>= 2.0',
+},
+PDSI: {
+'extremadamente seco': '< -4.0',
+'severamente seco': '-4.0 a < -3.0',
+'moderadamente seco': '-3.0 a < -2.0',
+normal: '-2.0 a < 2.0',
+'moderadamente humedo': '2.0 a < 3.0',
+'muy humedo': '3.0 a < 4.0',
+'extremadamente humedo': '>= 4.0',
+},
+EDDI: {
+'extremadamente humedo': '< -2.0',
+'muy humedo': '-2.0 a < -1.5',
+'moderadamente humedo': '-1.5 a < -1.0',
+normal: '-1.0 a < 1.0',
+'moderadamente seco': '1.0 a < 1.5',
+'severamente seco': '1.5 a < 2.0',
+'extremadamente seco': '>= 2.0',
+},
+};
+
+function normalizeLegendLabel(value) {
+return String(value || '')
+.toLowerCase()
+.normalize('NFD')
+.replace(/[\u0300-\u036f]/g, '')
+.replace(/[.,;:]/g, '')
+.replace(/\s+/g, ' ')
+.trim()
+.replace('media baja', 'media-baja')
+.replace('media alta', 'media-alta');
+}
+
+function resolveFixedBackendRange(variableCode, frequencyCode, categoryLabel) {
+const normalizedVar = String(variableCode || '')
+.trim()
+.split(/\s*-\s*|\s+/)[0];
+
+const variableUpper = normalizedVar.toUpperCase();
+const variableLower = normalizedVar.toLowerCase();
+const key = normalizeLegendLabel(categoryLabel);
+
+  if (variableUpper === 'PRECIP') {
+    const freq = String(frequencyCode || 'M').toUpperCase();
+    const byFrequency = FIXED_BACKEND_LEGEND_RANGES.precip[freq] || FIXED_BACKEND_LEGEND_RANGES.precip.M;
+    return byFrequency?.[key] || null;
+  }
+
+  const variableConfig = FIXED_BACKEND_LEGEND_RANGES[variableLower];
+  if (variableConfig && !variableConfig.D && !variableConfig.M) {
+    return variableConfig[key] || null;
+  }
+
+  const indexConfig = FIXED_INDEX_LEGEND_RANGES[variableUpper];
+  if (indexConfig) {
+    return indexConfig[key] || null;
+  }
+
+  return null;
+}
 function resolveDataKind(rawValue) {
   const value = String(rawValue || '').trim();
   const upper = value.toUpperCase();
@@ -64,6 +204,83 @@ function resolveDataKind(rawValue) {
     code: value || 'N/A',
     label: value || 'N/A',
   };
+}
+
+function normalizeFrequencyCode(value) {
+  if (value == null) return null;
+
+  const normalized = String(value).trim().toUpperCase();
+  if (!normalized) return null;
+
+  if (
+    normalized === 'M' ||
+    normalized === 'MONTHLY' ||
+    normalized === 'MENSUAL' ||
+    normalized.startsWith('MENS')
+  ) {
+    return 'M';
+  }
+
+  if (
+    normalized === 'D' ||
+    normalized === 'DAILY' ||
+    normalized === 'DIARIA' ||
+    normalized === 'DIARIO' ||
+    normalized.startsWith('DIA')
+  ) {
+    return 'D';
+  }
+
+  return null;
+}
+
+function resolvePrecipFrequencyCode(plotData, analysisState) {
+  const candidates = [
+    plotData?.frequency,
+    analysisState?.frequency,
+    plotData?.periodicity,
+    analysisState?.periodicity,
+    plotData?.temporalResolution,
+    analysisState?.temporalResolution,
+  ];
+
+  for (const candidate of candidates) {
+    const code = normalizeFrequencyCode(candidate);
+    if (code) return code;
+  }
+
+  const subtitle = String(plotData?.subtitle || '').toLowerCase();
+  if (subtitle.includes('mensual')) return 'M';
+  if (subtitle.includes('diaria') || subtitle.includes('diario')) return 'D';
+
+  // Fallback histórico cuando backend no retorna frecuencia explícita.
+  return 'M';
+}
+
+function resolveSatelliteProductLabel(plotData, analysisState) {
+  const sourceCode = String(plotData?.dataSource || analysisState?.dataSource || '')
+    .trim()
+    .toUpperCase();
+
+  const productBySource = {
+    ERA5: 'ERA5 (ECMWF, 0.25°)',
+    IMERG: 'IMERG (GPM NASA, 0.10°)',
+    CHIRPS: 'CHIRPS (UCSB, 0.05°)',
+  };
+
+  if (productBySource[sourceCode]) {
+    return productBySource[sourceCode];
+  }
+
+  // Fallback cuando no llega dataSource explícito: inferir por resolución.
+  const resolution = Number(plotData?.resolution || analysisState?.spatialResolution);
+  if (Number.isFinite(resolution)) {
+    if (Math.abs(resolution - 0.25) < 0.001) return productBySource.ERA5;
+    if (Math.abs(resolution - 0.1) < 0.001) return productBySource.IMERG;
+    if (Math.abs(resolution - 0.05) < 0.001) return productBySource.CHIRPS;
+  }
+
+  return sourceCode || 'N/A';
 }
 
 function sanitizeFilename(value) {
@@ -797,26 +1014,22 @@ function drawGraticule(ctx, bounds, frame) {
 }
 
 function drawProjectBoundary(ctx, boundaryCoords, bounds, frame) {
-if (!boundaryCoords.length) return;
+  if (!boundaryCoords.length) return;
 
-ctx.save();
-ctx.beginPath();
-boundaryCoords.forEach(([lon, lat], index) => {
-const { x, y } = projectToMap(lon, lat, bounds, frame);
-if (index === 0) ctx.moveTo(x, y);
-else ctx.lineTo(x, y);
-});
-ctx.closePath();
+  ctx.save();
+  ctx.beginPath();
+  boundaryCoords.forEach(([lon, lat], index) => {
+    const { x, y } = projectToMap(lon, lat, bounds, frame);
+    if (index === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.closePath();
 
-ctx.fillStyle = 'rgba(37, 99, 235, 0.08)';
-ctx.fill();
-ctx.strokeStyle = 'rgba(30, 64, 175, 0.9)';
-ctx.lineWidth = 2;
-ctx.stroke();
+  ctx.strokeStyle = 'rgba(30, 64, 175, 0.9)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
 
-ctx.fillStyle = '#1e3a8a';
-ctx.font = 'bold 12px Arial';
-ctx.restore();
+  ctx.restore();
 }
 
 function drawNorthArrow(ctx, x, y) {
@@ -942,16 +1155,6 @@ async function draw2DMap(ctx, plotData, analysisState) {
   const mapBottom = DEFAULT_IMAGE_HEIGHT - footerReserve;
   const mapH = mapBottom - mapY; // se reduce un poco el alto del mapa
 
-  const droughtSeverityScale = [
-    { label: 'Extremadamente húmedo', color: '#000080' },
-    { label: 'Muy húmedo', color: '#0000FF' },
-    { label: 'Moderadamente húmedo', color: '#00FFFF' },
-    { label: 'Normal', color: '#00FF00' },
-    { label: 'Moderadamente seco', color: '#FFFF00' },
-    { label: 'Severamente seco', color: '#FFA500' },
-    { label: 'Extremadamente seco', color: '#FF0000' },
-  ];
-
   // Leyenda a la derecha del mapa
   const legendW = 370;
   const legendH = Math.floor((mapH - 24) / 2);
@@ -1001,21 +1204,46 @@ async function draw2DMap(ctx, plotData, analysisState) {
       );
 
       // Nivel de Agregación
+      // Nivel de Agregación / Frecuencia (según tipo de dato)
       const aggregationLevel = analysisState?.indexScale || plotData?.scale || 'N/A';
+      const precipitationFrequencyCode = resolvePrecipFrequencyCode(plotData, analysisState);
+      const frequencyLabel = precipitationFrequencyCode === 'D' ? 'Diaria' : 'Mensual';
+
+const selectedCode = analysisState?.droughtIndex || analysisState?.variable || plotData?.variable || plotData?.variable_name || 'N/A';
+const dataKind = resolveDataKind(selectedCode);
+const satelliteProductLabel = resolveSatelliteProductLabel(plotData, analysisState);
+const legendVariableCode = String(dataKind?.code || selectedCode || '')
+.trim()
+.split(/\s*-\s*|\s+/)[0]
+.toLowerCase();
+const legendFrequencyCode = resolvePrecipFrequencyCode(plotData, analysisState);
+
+infoY = wrapText(
+  ctx,
+  'Tipo de dato: ' + dataKind.group,
+  infoBoxX + 22,
+  infoY,
+  infoBoxMaxWidth,
+  22
+);
+    if (dataKind.family) {
       infoY = wrapText(ctx, 'Nivel de Agregación: ' + aggregationLevel + ' meses', infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
-
-      const selectedCode = plotData?.variable_name || plotData?.variable || analysisState?.droughtIndex || analysisState?.variable || 'N/A';
-      const dataKind = resolveDataKind(selectedCode);
-
-      infoY = wrapText(ctx, 'Tipo de dato: ' + dataKind.group, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
-      if (dataKind.family) {
-        // Es un índice de sequía
-        infoY = wrapText(ctx, 'Tipo de índice: ' + dataKind.family, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
-        wrapText(ctx, 'Índice: ' + dataKind.code + ' - ' + dataKind.label, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
-      } else {
-        // Es una variable climática
-        wrapText(ctx, 'Variable: ' + dataKind.label, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
+      infoY = wrapText(ctx, 'Tipo de índice: ' + dataKind.family, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
+      infoY = wrapText(ctx, 'Índice: ' + dataKind.code + ' - ' + dataKind.label, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
+    } else {
+      if (dataKind.code === 'precip') {
+        infoY = wrapText(ctx, 'Frecuencia de precipitación: ' + frequencyLabel, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
       }
+      infoY = wrapText(ctx, 'Variable: ' + dataKind.label, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
+    }
+    infoY = wrapText(
+      ctx,
+      'Producto de análisis satelital consultado: ' + satelliteProductLabel,
+      infoBoxX + 22,
+      infoY,
+      infoBoxMaxWidth,
+      22
+    );
       // --- Fin cuadro informativo ---
 
       ctx.restore();
@@ -1069,7 +1297,7 @@ drawBasemapBackdrop(ctx, frame, bounds);
   const cellHeight = Math.max(5, Math.abs(stepLat.y - base.y) * 0.92);
 
   ctx.save();
-  ctx.globalAlpha = 0.58;
+  ctx.globalAlpha = 0.9;
   points.forEach((point) => {
     const { x, y } = projectToMap(point.lon, point.lat, bounds, frame);
     const left = x - cellWidth / 2;
@@ -1090,70 +1318,149 @@ drawScaleBar(ctx, bounds, frame);
   ctx.fillStyle = '#334155';
   ctx.font = '15px Arial';
 
-  const legendEntries = [];
-  const seen = new Set();
-  cells.forEach((cell) => {
-    if (!cell?.category || !cell?.color) return;
-    if (seen.has(cell.category)) return;
-    seen.add(cell.category);
-    legendEntries.push({
-      label: cell.category,
-      color: cell.color,
-      severity: Number.isFinite(Number(cell.severity)) ? Number(cell.severity) : 99,
+const groupedLegend = [];
+const mapLegend = new Map();
+
+cells.forEach((cell) => {
+  const key = `${cell?.category || 'Sin categoría'}|${cell?.color || '#CCCCCC'}`;
+  const v = Number(cell?.value);
+
+  if (!mapLegend.has(key)) {
+    mapLegend.set(key, {
+      label: cell?.category || 'Sin categoría',
+      color: cell?.color || '#CCCCCC',
+      severity: Number.isFinite(Number(cell?.severity)) ? Number(cell.severity) : 999,
+      min: Number.POSITIVE_INFINITY,
+      max: Number.NEGATIVE_INFINITY,
+      hasValue: false,
     });
-  });
-
-  legendEntries.sort((a, b) => a.severity - b.severity);
-
-  ctx.fillStyle = '#ffffff';
-  ctx.strokeStyle = '#cbd5e1';
-  drawCard(ctx, legendX, legendY, legendW, legendH, 12);
-
-  ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 20px Arial';
-  ctx.fillText('LEYENDA', legendX + 22, legendY + 32);
-
-  if (!legendEntries.length) {
-    const values = cells
-      .map((cell) => Number(cell?.value))
-      .filter((value) => Number.isFinite(value));
-
-    const minVal = values.length ? Math.min(...values) : null;
-    const maxVal = values.length ? Math.max(...values) : null;
-
-    ctx.fillStyle = '#334155';
-    ctx.font = '20px Arial';
-    ctx.fillText('Escala continua', legendX + 22, legendY + 66);
-    ctx.fillText('Min: ' + (minVal?.toFixed(2) ?? 'N/A'), legendX + 22, legendY + 92);
-    ctx.fillText('Max: ' + (maxVal?.toFixed(2) ?? 'N/A'), legendX + 22, legendY + 116);
-    return;
   }
 
-  let offsetY = legendY + 60;
-  droughtSeverityScale.forEach((entry) => {
-    ctx.fillStyle = entry.color;
-    ctx.fillRect(legendX + 22, offsetY, 32, 18);
-    ctx.fillStyle = '#334155';
-    ctx.font = '15px Arial';
-    ctx.fillText(entry.label, legendX + 62, offsetY + 15);
-    offsetY += 32;
-  });
+  if (Number.isFinite(v)) {
+    const item = mapLegend.get(key);
+    item.min = Math.min(item.min, v);
+    item.max = Math.max(item.max, v);
+    item.hasValue = true;
+  }
+});
 
-  // Entrada para el área de interés (contorno azul)
+groupedLegend.push(...mapLegend.values());
+groupedLegend.sort((a, b) => a.severity - b.severity);
+
+const fitLegendText = (ctx2, text, maxWidth) => {
+  if (ctx2.measureText(text).width <= maxWidth) return text;
+  const ellipsis = '...';
+  let out = text;
+  while (out.length > 0 && ctx2.measureText(out + ellipsis).width > maxWidth) {
+    out = out.slice(0, -1);
+  }
+  return out + ellipsis;
+};
+
+ctx.fillStyle = '#ffffff';
+ctx.strokeStyle = '#cbd5e1';
+drawCard(ctx, legendX, legendY, legendW, legendH, 12);
+
+ctx.fillStyle = '#0f172a';
+ctx.font = 'bold 20px Arial';
+ctx.fillText('LEYENDA', legendX + 22, legendY + 32);
+
+if (!groupedLegend.length) {
+  const values = cells
+    .map((cell) => Number(cell?.value))
+    .filter((value) => Number.isFinite(value));
+
+  const minVal = values.length ? Math.min(...values) : null;
+  const maxVal = values.length ? Math.max(...values) : null;
+
+  ctx.fillStyle = '#334155';
+  ctx.font = '20px Arial';
+  ctx.fillText('Escala continua', legendX + 22, legendY + 66);
+  ctx.fillText('Min: ' + (minVal?.toFixed(2) ?? 'N/A'), legendX + 22, legendY + 92);
+  ctx.fillText('Max: ' + (maxVal?.toFixed(2) ?? 'N/A'), legendX + 22, legendY + 116);
+
+  const fallbackBaseY = legendY + 66;
+  const fallbackLineH = 26;
+  const fallbackOffsetY = fallbackBaseY + (2 * fallbackLineH) + 24;
   ctx.save();
   ctx.strokeStyle = 'rgba(30, 64, 175, 0.9)';
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.rect(legendX + 22, offsetY, 32, 18);
+  ctx.rect(legendX + 22, fallbackOffsetY, 32, 18);
   ctx.stroke();
   ctx.restore();
 
   ctx.fillStyle = '#334155';
   ctx.font = '15px Arial';
-  ctx.fillText('Área de interés', legendX + 64, offsetY + 14);
+  ctx.fillText('Área de interés', legendX + 64, fallbackOffsetY + 14);
+} else {
+  let offsetY = legendY + 60;
+  const rowStep = 28;
+  const legendBottomLimit = legendY + legendH - 24;
+  let hiddenCount = 0;
 
-  offsetY += 32;
+  for (let index = 0; index < groupedLegend.length; index += 1) {
+    const legendEntry = groupedLegend[index];
+    if (!legendEntry) continue;
 
+    const nextRowY = offsetY + rowStep;
+    const needsAreaRow = rowStep;
+
+    if (nextRowY + needsAreaRow > legendBottomLimit) {
+      hiddenCount = groupedLegend.length - index;
+      break;
+    }
+
+const fixedRangeText = resolveFixedBackendRange(
+  legendVariableCode,
+  legendFrequencyCode,
+  legendEntry.label
+);
+
+const indexCode = String(dataKind?.code || legendVariableCode || '').trim().toUpperCase();
+const isIndex =
+METEOROLOGICAL_INDICES.has(indexCode) ||
+HYDROLOGICAL_INDICES.has(indexCode);
+
+const rangeText = fixedRangeText || (
+  isIndex
+    ? 'Clasificación backend'
+    : (legendEntry.hasValue
+        ? legendEntry.min.toFixed(2) + ' a ' + legendEntry.max.toFixed(2)
+        : 'N/A')
+);
+    ctx.fillStyle = legendEntry.color;
+    ctx.fillRect(legendX + 22, offsetY, 32, 18);
+
+    ctx.fillStyle = '#334155';
+    ctx.font = '13px Arial';
+    const rawText = legendEntry.label + ': ' + rangeText;
+    const safeText = fitLegendText(ctx, rawText, legendW - 90);
+    ctx.fillText(safeText, legendX + 62, offsetY + 14);
+
+    offsetY += rowStep;
+  }
+
+  if (hiddenCount > 0) {
+    ctx.fillStyle = '#64748b';
+    ctx.font = '12px Arial';
+    ctx.fillText('... +' + hiddenCount + ' categorías más', legendX + 22, offsetY + 12);
+    offsetY += 20;
+  }
+
+  ctx.save();
+  ctx.strokeStyle = 'rgba(30, 64, 175, 0.9)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  const areaY = Math.min(offsetY, legendBottomLimit - 20);
+  ctx.rect(legendX + 22, areaY, 32, 18);
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.fillStyle = '#334155';
+  ctx.font = '15px Arial';
+  ctx.fillText('Área de interés', legendX + 64, areaY + 14);
+}
   ctx.fillStyle = '#64748b';
   ctx.font = '14px Arial';
 

@@ -321,13 +321,14 @@ export default function Home() {
           subtitle: `${periodSubtitle}${freqNote} | Resolución: ${targetResolution}°`,
           variable: response.variable,
           unit: response.unit,
+          frequency: response.frequency || analysisState.frequency || null, // <- agregar
           date: response.date,
           period: response.period,
           isInterval: Boolean(response.is_interval),
-          gridCells: response.grid_cells,  // Array de celdas con lat, lon, value, color, etc.
+          gridCells: response.grid_cells,
           statistics: response.statistics,
           bounds: response.bounds,
-          resolution: fileResolution, // Pasar resolución del archivo
+          resolution: fileResolution,
         });
 
         const uniqueCells = response.statistics?.unique_cells ?? response.grid_cells.length;
