@@ -78,16 +78,32 @@ class HistoricalDataService(TimeseriesMixin, SpatialMixin, WatershedMixin):
             return self.INDEX_DROUGHT_SCALES[variable]
         return self.INDEX_DROUGHT_SCALES["DEFAULT"]
 
+    def _normalize_variable_for_scale(self, variable: str) -> str:
+        if not variable:
+            return variable
+
+        normalized = str(variable).strip().lower()
+        alias_map = {
+            "t_mean": "tmean",
+            "temperature": "tmean",
+            "t_min": "tmin",
+            "temp_min": "tmin",
+            "t_max": "tmax",
+            "temp_max": "tmax",
+        }
+        return alias_map.get(normalized, normalized)
+
     def _get_scale_for_variable(self, variable: str, frequency: Optional[str] = None) -> Dict[str, Any]:
-        scale = self.VARIABLE_CLASS_SCALES.get(variable)
+        variable_key = self._normalize_variable_for_scale(variable)
+        scale = self.VARIABLE_CLASS_SCALES.get(variable_key)
         if not scale:
             return None
 
-        if variable == "precip" and frequency:
+        if variable_key == "precip" and frequency:
             freq_key = frequency.upper()
             return scale.get(freq_key)
 
-        if variable == "precip":
+        if variable_key == "precip":
             return scale.get("M")
 
         return scale

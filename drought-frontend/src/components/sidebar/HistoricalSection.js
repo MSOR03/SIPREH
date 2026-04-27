@@ -176,7 +176,7 @@ export default function HistoricalSection({
                 <div className="mt-3">
                   <label className="flex items-center gap-1.5 text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
                     <Clock className="w-3.5 h-3.5 text-blue-500 dark:text-blue-400" />
-                    Escala temporal (meses)
+                    Nivel de Agregación (meses)
                   </label>
                   <div className="grid grid-cols-4 gap-2">
                     {[1, 3, 6, 12].map((s) => (

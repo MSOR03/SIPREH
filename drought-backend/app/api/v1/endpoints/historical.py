@@ -40,6 +40,7 @@ from app.services.tiered_storage import (
     encode_multi_keys,
     _parse_meta,
 )
+from app.services.historical_constants import COLOR_SCALE_VERSION
 
 
 # ============================================================================
@@ -565,7 +566,8 @@ def get_spatial_data(
         f"mode:{'interval' if interval_mode else 'single'}:"
         f"target:{request.target_date}:start:{request.start_date}:end:{request.end_date}:"
         f"scale:{request.scale}:source:{request.source}:freq:{request.frequency}:"
-        f"{request.min_lat}:{request.max_lat}:{request.min_lon}:{request.max_lon}:limit:{request.limit}"
+        f"{request.min_lat}:{request.max_lat}:{request.min_lon}:{request.max_lon}:limit:{request.limit}:"
+        f"palette:{COLOR_SCALE_VERSION}"
     )
     
     cached = cache_service.get(endpoint_cache_key)

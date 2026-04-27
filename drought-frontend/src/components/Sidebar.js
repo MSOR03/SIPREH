@@ -12,7 +12,6 @@ const hydrometeorologicalVariables = [
   { value: 'tmin', label: 'Temperatura Mínima' },
   { value: 'tmax', label: 'Temperatura Máxima' },
   { value: 'pet', label: 'Evapotranspiración Potencial (PET)' },
-  { value: 'balance', label: 'Balance Hídrico' },
 ];
 
 const hydrometIndices = [
