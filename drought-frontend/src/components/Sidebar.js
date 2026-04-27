@@ -97,7 +97,6 @@ export default function Sidebar({
     return [
       { value: 'grid', label: 'Celdas', icon: Grid3x3 },
       { value: 'cuencas', label: 'Cuencas', icon: Droplets },
-      { value: 'embalses', label: 'Embalses', icon: Database },
     ];
   }, [isHydrological]);
 

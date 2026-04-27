@@ -22,7 +22,7 @@ export default function Home() {
     dataCategory: 'hydromet',   // 'hydromet' | 'hydrological'
     visualizationType: '1D',    // '1D' = Serie Temporal, '2D' = Mapa Espacial
     spatialUnit: 'grid',        // 'grid' | 'cuencas' | 'embalses' | 'estaciones'
-    dataSource: 'ERA5',         // 'ERA5' | 'IMERG' | 'CHIRPS' (hydromet only)
+    dataSource: 'CHIRPS',        // 'ERA5' | 'IMERG' | 'CHIRPS' (hydromet only) — matches spatialResolution: 0.05
     spatialResolution: 0.05,    // Resolución para modo 2D (0.25, 0.1, 0.05)
     variable: '',
     droughtIndex: '',
@@ -232,7 +232,9 @@ export default function Home() {
 
         } else if (analysisState.spatialUnit === 'cuencas') {
           // ===== 2D CUENCAS: promedio ponderado por cuenca =====
-          const dataSource = analysisState.dataSource || 'ERA5';
+          // spatialResolution is kept in sync with the UI selector (RadioCard), so use it as primary truth
+          const SOURCE_BY_RES = { 0.25: 'ERA5', 0.1: 'IMERG', 0.05: 'CHIRPS' };
+          const dataSource = SOURCE_BY_RES[analysisState.spatialResolution] || analysisState.dataSource || 'CHIRPS';
           const sourceResMap = { ERA5: 0.25, IMERG: 0.1, CHIRPS: 0.05 };
           const targetResolution = sourceResMap[dataSource] || 0.05;
           const historicalFiles = files.filter(f => !f.dataset_type || f.dataset_type === 'historical');
@@ -471,7 +473,8 @@ export default function Home() {
           );
         } else if (selectedEntity?.type === 'cuenca') {
           // ===== 1D CUENCA: serie temporal ponderada =====
-          const dataSource = analysisState.dataSource || 'ERA5';
+          const SOURCE_BY_RES = { 0.25: 'ERA5', 0.1: 'IMERG', 0.05: 'CHIRPS' };
+          const dataSource = SOURCE_BY_RES[analysisState.spatialResolution] || analysisState.dataSource || 'CHIRPS';
           const sourceResMap = { ERA5: 0.25, IMERG: 0.1, CHIRPS: 0.05 };
           const targetResolution = sourceResMap[dataSource] || 0.05;
           const historicalFiles = files.filter(f => !f.dataset_type || f.dataset_type === 'historical');
@@ -1017,7 +1020,8 @@ export default function Home() {
       const variable = analysisState.droughtIndex || analysisState.variable;
       if (!variable) return;
 
-      const dataSource = plotData.dataSource || analysisState.dataSource || 'ERA5';
+      const SOURCE_BY_RES = { 0.25: 'ERA5', 0.1: 'IMERG', 0.05: 'CHIRPS' };
+      const dataSource = plotData.dataSource || SOURCE_BY_RES[analysisState.spatialResolution] || analysisState.dataSource || 'CHIRPS';
       const sourceResMap = { ERA5: 0.25, IMERG: 0.1, CHIRPS: 0.05 };
       const targetResolution = sourceResMap[dataSource] || 0.05;
 
