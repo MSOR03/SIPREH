@@ -377,7 +377,16 @@ export default function LeafletMap({
               });
             };
 
-            const cuencasLayer = L.geoJSON(cuencasGeoJSON, {
+            // Sort features largest-area-first so smaller sub-cuencas (e.g. Chisaca inside
+            // La Regadera) are rendered LAST (= on top) by Leaflet's painter algorithm,
+            // making them visible and clickable even when overlapping a larger parent polygon.
+            const cuencasSorted = {
+              ...cuencasGeoJSON,
+              features: [...cuencasGeoJSON.features].sort(
+                (a, b) => (b.properties['Area m2'] || 0) - (a.properties['Area m2'] || 0)
+              ),
+            };
+            const cuencasLayer = L.geoJSON(cuencasSorted, {
               pane: 'cuencasPane',
               style: () => ({ ...cuencaDefaultStyle }),
               onEachFeature: (feature, layer) => {
@@ -728,7 +737,22 @@ export default function LeafletMap({
       });
     }
 
-    if (!selectedEntity) return;
+    // Helper: re-establish area-based z-order — largest cuencas drawn first so
+    // smaller sub-cuencas (e.g. Chisaca inside La Regadera) always end on top.
+    const restoreCuencaZOrder = () => {
+      if (!cuencasLayerRef.current) return;
+      const arr = [];
+      cuencasLayerRef.current.eachLayer(l => {
+        arr.push({ l, area: l.feature?.properties?.['Area m2'] || 0 });
+      });
+      arr.sort((a, b) => b.area - a.area).forEach(({ l }) => l.bringToFront());
+    };
+
+    if (!selectedEntity) {
+      // Deselected: restore z-order so Chisaca stays on top of La Regadera
+      restoreCuencaZOrder();
+      return;
+    }
 
     // Highlight the selected entity
     const targetLayer = selectedEntity.type === 'cuenca'
@@ -747,6 +771,10 @@ export default function LeafletMap({
         layer.bringToFront();
       }
     });
+
+    // Re-apply area z-order so bringToFront on a large cuenca (e.g. La Regadera)
+    // doesn't permanently hide a smaller overlapping one (e.g. Chisaca)
+    if (selectedEntity.type === 'cuenca') restoreCuencaZOrder();
   }, [selectedEntity, cuencasLoaded]);
 
   // Update marker icons when selection changes
