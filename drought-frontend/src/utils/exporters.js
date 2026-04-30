@@ -277,7 +277,12 @@ function resolveSatelliteProductLabel(plotData, analysisState) {
   }
 
   // Si no llega dataSource explícito, inferir por resolución del resultado.
-  const resolution = Number(plotData?.resolution || analysisState?.spatialResolution);
+  // Usar también la resolución de la celda/localización si no viene en plotData.
+  const resolution = Number(
+    plotData?.resolution
+      || plotData?.location?.resolution
+      || analysisState?.spatialResolution
+  );
   if (Number.isFinite(resolution)) {
     if (Math.abs(resolution - 0.25) < 0.001) return productBySource.ERA5;
     if (Math.abs(resolution - 0.1) < 0.001) return productBySource.IMERG;
@@ -409,7 +414,7 @@ function build2DJson({ plotData, analysisState }) {
   };
 }
 
-export async function downloadAnalysisImage({ plotData, analysisState }) {
+export async function downloadAnalysisImage({ plotData, analysisState, selectedCell }) {
   const canvas = document.createElement('canvas');
   canvas.width = DEFAULT_IMAGE_WIDTH;
   canvas.height = DEFAULT_IMAGE_HEIGHT;
@@ -428,11 +433,17 @@ ctx.restore();
     // Dibuja el mapa 2D completo
     await draw2DMap(ctx, plotData, analysisState);
   } else {
-    // Para gráficos 1D: panel institucional + barra indicadora + encabezado + gráfico
+    // Para gráficos 1D: panel institucional + barra indicadora + gráfico
     await draw2DInstitutionalPanel(ctx, plotData);
     drawAnalysisTypeIndicator(ctx, plotData);
-    drawHeader(ctx, plotData);
-    draw1DChart(ctx, plotData);
+    const mapLayout = { x: 56, y: 170, w: 580, h: 860 };
+    const infoLayout  = { x: 656, y: 170, w: 540, h: 220 };
+    const statsLayout = { x: 1204, y: 170, w: 540, h: 220 };
+    const chartLayout = { x: 656, y: 410, w: 1088, h: 620 };
+    await draw1DSelectedCellMap(ctx, plotData, selectedCell, mapLayout);
+    draw1DConsultationInfo(ctx, plotData, analysisState, infoLayout);
+    draw1DStatsTable(ctx, plotData, statsLayout);
+    draw1DChart(ctx, plotData, chartLayout);
   }
 
   // Convierte el canvas a blob PNG y descarga
@@ -467,17 +478,6 @@ function drawCard(ctx, x, y, w, h, radius = 12) {
   ctx.fill();
   ctx.stroke();
 }
-
-function drawHeader(ctx, plotData) {
-  if (plotData?.type === '2D') {
-    return;
-  }
-
-  ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 34px Arial';
-  ctx.fillText(plotData?.title || 'Exportacion de grafico', 56, 68);
-} // <-- Cierra aquí la función
-
 // Ahora define draw2DInstitutionalPanel fuera
 async function draw2DInstitutionalPanel(ctx, plotData)  {
   const x = 56;
@@ -582,88 +582,558 @@ async function draw2DInstitutionalPanel(ctx, plotData)  {
 }
 
 
-function draw1DChart(ctx, plotData) {
-  const rows = Array.isArray(plotData?.data) ? plotData.data : [];
-  if (!rows.length) return;
+function draw1DChart(ctx, plotData, layout = {}) {
+  // --- Reset canvas state para evitar interferencia de operaciones previas ---
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0); // resetea cualquier transformación activa
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
 
-  const chartX = 56;
-  const chartY = 170;
-  const chartW = 980;
-  const chartH = 560;
+  const chartX = layout.x ?? 56;
+  const chartY = layout.y ?? 170;
+  const chartW = layout.w ?? 980;
+  const chartH = layout.h ?? 560;
 
+  // Reservas internas
+  const titleH      = 48;
+  const axisLabelH  = 28;
+  const legendH     = 50;
+  const plotLeftPad  = 76;
+  const plotRightPad = 28;
+  const plotTopPad   = titleH + 14;
+  const plotBottomPad = axisLabelH + legendH + 34;
+  const plotW = chartW - (plotLeftPad + plotRightPad);
+  const plotH = chartH - (plotTopPad + plotBottomPad);
+
+  // --- Fondo del panel (siempre se dibuja, incluso si no hay datos) ---
   ctx.fillStyle = '#f8fafc';
   ctx.strokeStyle = '#cbd5e1';
-  ctx.lineWidth = 1;
+  ctx.lineWidth = 1.5;
   drawCard(ctx, chartX, chartY, chartW, chartH, 14);
 
+  // --- Datos ---
+  const rows = Array.isArray(plotData?.data) ? plotData.data : [];
+  const varCode = String(plotData?.variable || plotData?.variable_name || 'INDICADOR').trim().toUpperCase();
+  const allDates = rows.map((r) => r?.date).filter(Boolean);
+  const dateStart = allDates.length ? formatISOtoDMY(allDates[0]) : 'N/A';
+  const dateEnd   = allDates.length ? formatISOtoDMY(allDates[allDates.length - 1]) : 'N/A';
+
+  // --- Título del gráfico ---
+  const chartTitle = `SERIE TEMPORAL DE ${varCode} | ${dateStart} - ${dateEnd}`;
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 18px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText(fitText(ctx, chartTitle, chartW - 32), chartX + chartW / 2, chartY + titleH - 6);
+  ctx.textAlign = 'left';
+
+  // --- Si no hay datos válidos, mensaje y salir ---
   const values = rows
     .map((item) => Number(item?.value))
     .filter((value) => Number.isFinite(value));
 
-  if (!values.length) return;
+  if (!values.length) {
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '16px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('Sin datos disponibles para este período', chartX + chartW / 2, chartY + chartH / 2);
+    ctx.textAlign = 'left';
+    ctx.restore();
+    return;
+  }
 
-  const minVal = Math.min(...values);
-  const maxVal = Math.max(...values);
-  const valRange = maxVal - minVal || 1;
+  const rawMin = Math.min(...values);
+  const rawMax = Math.max(...values);
+  const rawRange = rawMax - rawMin || 1;
+  const yPad = rawRange * 0.12; // 12 % de margen superior e inferior
+  const minVal = Math.min(rawMin - yPad, 0);
+  const maxVal = Math.max(rawMax + yPad, 0);
 
+  // Escala simétrica alrededor de 0 con 4 etiquetas hacia arriba y 4 hacia abajo.
+  const maxAbs = Math.max(Math.abs(minVal), Math.abs(maxVal), 0.5);
+  const rawStep = maxAbs / 4;
+  const step = Math.max(0.5, Math.ceil(rawStep * 2) / 2); // múltiplos de 0.5
+  const axisMax = step * 4;
+  const axisMin = -axisMax;
+  const axisRange = axisMax - axisMin;
+  const yTicks = Array.from({ length: 9 }, (_, i) => Number((axisMax - i * step).toFixed(6)));
+
+  const formatYAxisTick = (value) => {
+    const safe = Math.abs(value) < 1e-9 ? 0 : value;
+    return safe.toFixed(1).replace('.', ',');
+  };
+
+  // --- Área de trazado con clip ---
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(chartX + plotLeftPad, chartY + plotTopPad, plotW, plotH);
+  ctx.clip();
+
+  // Fondo del área de trazado
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(chartX + plotLeftPad, chartY + plotTopPad, plotW, plotH);
+  ctx.restore();
+
+  // --- Cuadrícula horizontal ---
   ctx.strokeStyle = '#e2e8f0';
-  for (let i = 0; i <= 5; i += 1) {
-    const y = chartY + 24 + ((chartH - 60) * i) / 5;
+  ctx.lineWidth = 1;
+  for (let i = 0; i < yTicks.length; i += 1) {
+    const py = chartY + plotTopPad + (1 - (yTicks[i] - axisMin) / axisRange) * plotH;
     ctx.beginPath();
-    ctx.moveTo(chartX + 56, y);
-    ctx.lineTo(chartX + chartW - 24, y);
+    ctx.moveTo(chartX + plotLeftPad, py);
+    ctx.lineTo(chartX + chartW - plotRightPad, py);
     ctx.stroke();
   }
 
+  // --- Etiquetas eje Y ---
+  ctx.fillStyle = '#64748b';
+  ctx.font = '13px Arial';
+  for (let i = 0; i < yTicks.length; i += 1) {
+    const py = chartY + plotTopPad + (1 - (yTicks[i] - axisMin) / axisRange) * plotH;
+    ctx.textAlign = 'right';
+    ctx.fillText(formatYAxisTick(yTicks[i]), chartX + plotLeftPad - 6, py + 5);
+  }
+  ctx.textAlign = 'left';
+
+  // --- Etiqueta eje Y (rotada) ---
+  const yLabel = `VALOR DE ${varCode} (ADIMENSIONAL)`;
+  ctx.save();
+  ctx.fillStyle = '#334155';
+  ctx.font = 'bold 14px Arial';
+  ctx.textAlign = 'center';
+  ctx.translate(chartX + 18, chartY + plotTopPad + plotH / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText(yLabel, 0, 0);
+  ctx.restore();
+
+  // --- Línea del gráfico con clip ---
   const points = rows
     .map((item, index) => {
       const value = Number(item?.value);
       if (!Number.isFinite(value)) return null;
-      const x = chartX + 56 + (index / Math.max(rows.length - 1, 1)) * (chartW - 92);
-      const y = chartY + 24 + (1 - (value - minVal) / valRange) * (chartH - 60);
+      const x = chartX + plotLeftPad + (index / Math.max(rows.length - 1, 1)) * plotW;
+      const y = chartY + plotTopPad + (1 - (value - axisMin) / axisRange) * plotH;
       return { x, y, value, date: item?.date };
     })
     .filter(Boolean);
 
-  if (!points.length) return;
+  if (points.length) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(chartX + plotLeftPad, chartY + plotTopPad, plotW, plotH);
+    ctx.clip();
 
-  ctx.strokeStyle = '#2563eb';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  points.forEach((point, index) => {
-    if (index === 0) ctx.moveTo(point.x, point.y);
-    else ctx.lineTo(point.x, point.y);
-  });
-  ctx.stroke();
+    ctx.strokeStyle = '#2563eb';
+    ctx.lineWidth = 2.5;
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    points.forEach((pt, i) => {
+      if (i === 0) ctx.moveTo(pt.x, pt.y);
+      else ctx.lineTo(pt.x, pt.y);
+    });
+    ctx.stroke();
+    ctx.restore();
+  }
 
-  const first = points[0];
-  const last = points[points.length - 1];
+  // --- Borde del área de trazado ---
+  ctx.strokeStyle = '#94a3b8';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(chartX + plotLeftPad, chartY + plotTopPad, plotW, plotH);
+
+  // --- Eje X: 5 fechas representativas ---
+  const xAxisBaseY = chartY + plotTopPad + plotH;
+  const xTickCount = 4;
+  ctx.fillStyle = '#64748b';
+  ctx.font = '13px Arial';
+  for (let i = 0; i <= xTickCount; i += 1) {
+    const rowIdx = Math.round((i / xTickCount) * (rows.length - 1));
+    const date = formatISOtoDMY(rows[rowIdx]?.date || '');
+    const px = chartX + plotLeftPad + (rowIdx / Math.max(rows.length - 1, 1)) * plotW;
+    ctx.strokeStyle = '#94a3b8';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(px, xAxisBaseY);
+    ctx.lineTo(px, xAxisBaseY + 6);
+    ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.fillText(date, px, xAxisBaseY + 20);
+  }
+  ctx.textAlign = 'left';
+
+  // --- Etiqueta eje X ---
+  ctx.fillStyle = '#334155';
+  ctx.font = 'bold 14px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('FECHA', chartX + plotLeftPad + plotW / 2, xAxisBaseY + axisLabelH + 6);
+  ctx.textAlign = 'left';
+
+  // --- Leyenda inferior ---
+  const legY = chartY + chartH - legendH + 10;
+  const legX = chartX + plotLeftPad;
+  ctx.fillStyle = '#eff6ff';
+  ctx.strokeStyle = '#bfdbfe';
+  ctx.lineWidth = 1;
+  ctx.fillRect(legX, legY, plotW, legendH - 12);
+  ctx.strokeRect(legX, legY, plotW, legendH - 12);
+
+  ctx.fillStyle = '#2563eb';
+  const legendLineY = legY + 20;
+  const swatchW = 28;
+  const swatchH = 5;
+  const gapAfterSwatch = 10;
+
+  ctx.font = 'bold 14px Arial';
+  const varWidth = ctx.measureText(varCode).width;
+
+  const totalLegendW = swatchW + gapAfterSwatch + varWidth;
+  const legendStartX = legX + (plotW - totalLegendW) / 2;
+
+  ctx.fillStyle = '#2563eb';
+  ctx.fillRect(legendStartX, legY + 13, swatchW, swatchH);
+
+  const varX = legendStartX + swatchW + gapAfterSwatch;
+  ctx.fillStyle = '#1e3a8a';
+  ctx.font = 'bold 14px Arial';
+  ctx.fillText(varCode, varX, legendLineY);
+
+  ctx.restore(); // restaura el estado inicial guardado al comienzo
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function fitText(ctx, text, maxWidth) {
+  const raw = String(text || '');
+  if (ctx.measureText(raw).width <= maxWidth) return raw;
+
+  const suffix = '...';
+  let out = raw;
+  while (out.length > 0 && ctx.measureText(out + suffix).width > maxWidth) {
+    out = out.slice(0, -1);
+  }
+  return out + suffix;
+}
+
+function formatExportTimestamp(date) {
+  const two = (value) => String(value).padStart(2, '0');
+  return `${two(date.getDate())}/${two(date.getMonth() + 1)}/${date.getFullYear()}, ${two(date.getHours())}:${two(date.getMinutes())}:${two(date.getSeconds())}`;
+}
+
+// Convierte 'YYYY-MM-DD' o 'YYYY/MM/DD' a 'dd/mm/aa'
+function formatISOtoDMY(dateStr) {
+  if (!dateStr) return '';
+  const s = String(dateStr).replace(/\//g, '-');
+  const parts = s.split('-');
+  if (parts.length < 3) return dateStr;
+  const [y, m, d] = parts;
+  return `${d.padStart(2,'0')}/${m.padStart(2,'0')}/${y.slice(-2)}`;
+}
+
+function draw1DConsultationInfo(ctx, plotData, analysisState, layout = {}) {
+  const x = layout.x ?? 916;
+  const y = layout.y ?? 690;
+  const w = layout.w ?? 828;
+  const h = layout.h ?? 240;
+  const contentX = x + 20;
+  const contentMaxW = w - 40;
+
+  ctx.fillStyle = '#f1f5f9';
+  ctx.strokeStyle = '#cbd5e1';
+  drawCard(ctx, x, y, w, h, 12);
+
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 20px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('INFORMACIÓN DE CONSULTA', x + w / 2, y + 30);
+  ctx.textAlign = 'left';
+
+  const selectedCode = resolveSelectedVariable(plotData, analysisState);
+  const dataKind = resolveDataKind(selectedCode);
+  const aggregationLevel = analysisState?.indexScale || plotData?.scale || 'N/A';
+  const precipitationFrequencyCode = resolvePrecipFrequencyCode(plotData, analysisState);
+  const frequencyLabel = precipitationFrequencyCode === 'D' ? 'Diaria' : 'Mensual';
+
+  // Usar fechas reales de los datos (igual que el título del gráfico) para consistencia.
+  const infoRows = Array.isArray(plotData?.data) ? plotData.data : [];
+  const infoAllDates = infoRows.map((r) => r?.date).filter(Boolean);
+  const infoDateStart = infoAllDates.length ? formatISOtoDMY(infoAllDates[0]) : 'N/A';
+  const infoDateEnd   = infoAllDates.length ? formatISOtoDMY(infoAllDates[infoAllDates.length - 1]) : 'N/A';
+  const timeWindow = infoAllDates.length ? `${infoDateStart} a ${infoDateEnd}` : resolveTimeInterval(plotData, analysisState).replace('->', 'a').replace(/-/g, '/');
+
+  const productLabel = resolveSatelliteProductLabel(plotData, analysisState);
+  const indexOrVariable = dataKind.family
+    ? `${dataKind.code} - ${dataKind.label}`
+    : dataKind.label;
+  const aggregationText = dataKind.family
+    ? `${aggregationLevel} meses`
+    : frequencyLabel;
 
   ctx.fillStyle = '#334155';
   ctx.font = '16px Arial';
-  ctx.fillText(first?.date || 'Inicio', chartX + 56, chartY + chartH - 14);
-  const lastLabel = last?.date || 'Fin';
-  const lastTextWidth = ctx.measureText(lastLabel).width;
-  ctx.fillText(lastLabel, chartX + chartW - 24 - lastTextWidth, chartY + chartH - 14);
 
-  ctx.font = '15px Arial';
-  ctx.fillText(`Max: ${maxVal.toFixed(2)}`, chartX + 8, chartY + 30);
-  ctx.fillText(`Min: ${minVal.toFixed(2)}`, chartX + 8, chartY + chartH - 30);
+  let infoY = y + 56;
+  infoY = wrapText(ctx, `Fecha de consulta: ${formatExportTimestamp(new Date())}`, contentX, infoY, contentMaxW, 22);
+  infoY = wrapText(ctx, `Fecha de visualización: ${timeWindow}`, contentX, infoY, contentMaxW, 22);
+  infoY = wrapText(ctx, `Tipo de dato: ${dataKind.group}`, contentX, infoY, contentMaxW, 22);
+  infoY = wrapText(ctx, `Nivel de Agregación: ${aggregationText}`, contentX, infoY, contentMaxW, 22);
+
+  if (dataKind.family) {
+    infoY = wrapText(ctx, `Tipo de índice: ${dataKind.family}`, contentX, infoY, contentMaxW, 22);
+    infoY = wrapText(ctx, `Índice: ${indexOrVariable}`, contentX, infoY, contentMaxW, 22);
+  } else {
+    infoY = wrapText(ctx, `Variable: ${indexOrVariable}`, contentX, infoY, contentMaxW, 22);
+  }
+
+  wrapText(ctx, `Producto de análisis satelital consultado: ${productLabel}`, contentX, infoY, contentMaxW, 22);
+}
+
+function draw1DStatsTable(ctx, plotData, layout = {}) {
+  const x = layout.x ?? 1260;
+  const y = layout.y ?? 170;
+  const w = layout.w ?? 484;
+  const h = layout.h ?? 220;
+  const contentX = x + 20;
+  const valueX = x + w - 20;
+
+  // Calcular estadísticas desde los datos reales
+  const rows = Array.isArray(plotData?.data) ? plotData.data : [];
+  const values = rows
+    .map((r) => Number(r?.value ?? r?.index_value ?? r?.spei ?? r?.spi))
+    .filter((v) => Number.isFinite(v));
+  const count = values.length;
+  const maxVal  = count ? Math.max(...values) : null;
+  const minVal  = count ? Math.min(...values) : null;
+  const meanVal = count ? values.reduce((a, b) => a + b, 0) / count : null;
+  const fmt = (v) => (v === null ? 'N/A' : v.toFixed(2));
+
+  // Tarjeta de fondo con el mismo estilo del cuadro de consulta
+  ctx.fillStyle = '#f1f5f9';
+  ctx.strokeStyle = '#cbd5e1';
+  drawCard(ctx, x, y, w, h, 12);
+
+  // Título con el mismo estilo
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 20px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('ESTADÍSTICAS DE LA SERIE', x + w / 2, y + 30);
+  ctx.textAlign = 'left';
+
+  // Separador
+  ctx.strokeStyle = '#cbd5e1';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x + 12, y + 44);
+  ctx.lineTo(x + w - 12, y + 44);
+  ctx.stroke();
+
+  // Filas de estadísticas en formato tabla simple
+  const stats = [
+    { label: 'Máximo',           value: fmt(maxVal)  },
+    { label: 'Mínimo',           value: fmt(minVal)  },
+    { label: 'Media',            value: fmt(meanVal) },
+    { label: 'N.º de registros', value: String(count) },
+  ];
+
+  const rowTop = y + 58;
+  const rowH = (h - 70) / stats.length;
+
+  stats.forEach((stat, i) => {
+    const ry = rowTop + i * rowH;
+    if (i > 0) {
+      ctx.strokeStyle = '#cbd5e1';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x + 12, ry - 6);
+      ctx.lineTo(x + w - 12, ry - 6);
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = '#334155';
+    ctx.font = '16px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText(stat.label, contentX, ry + rowH / 2 + 4);
+
+    ctx.fillStyle = '#334155';
+    ctx.font = 'bold 16px Arial';
+    ctx.textAlign = 'right';
+    ctx.fillText(stat.value, valueX, ry + rowH / 2 + 4);
+  });
+
+  ctx.textAlign = 'left';
+}
+
+function drawCellGridOverlay(ctx, bounds, frame, resolution) {
+  const lonRange = bounds.maxLon - bounds.minLon;
+  const latRange = bounds.maxLat - bounds.minLat;
+  if (lonRange <= 0 || latRange <= 0) return;
+
+  let lonStep = Number.isFinite(resolution) && resolution > 0 ? resolution : lonRange / 20;
+  let latStep = Number.isFinite(resolution) && resolution > 0 ? resolution : latRange / 20;
+
+  const base = projectToMap(bounds.minLon, bounds.minLat, bounds, frame);
+  const stepLonPoint = projectToMap(bounds.minLon + lonStep, bounds.minLat, bounds, frame);
+  const stepLatPoint = projectToMap(bounds.minLon, bounds.minLat + latStep, bounds, frame);
+
+  const lonPx = Math.abs(stepLonPoint.x - base.x);
+  const latPx = Math.abs(stepLatPoint.y - base.y);
+  const minPx = 14;
+
+  if (lonPx > 0 && lonPx < minPx) {
+    const factor = Math.ceil(minPx / lonPx);
+    lonStep *= factor;
+  }
+  if (latPx > 0 && latPx < minPx) {
+    const factor = Math.ceil(minPx / latPx);
+    latStep *= factor;
+  }
+
+  const startLon = Math.floor(bounds.minLon / lonStep) * lonStep;
+  const startLat = Math.floor(bounds.minLat / latStep) * latStep;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(frame.x + 1, frame.y + 1, frame.w - 2, frame.h - 2);
+  ctx.clip();
+
+  ctx.strokeStyle = 'rgba(37, 99, 235, 0.42)';
+  ctx.lineWidth = 1;
+
+  for (let lon = startLon; lon <= bounds.maxLon + lonStep; lon += lonStep) {
+    const top = projectToMap(lon, bounds.maxLat, bounds, frame);
+    const bottom = projectToMap(lon, bounds.minLat, bounds, frame);
+    ctx.beginPath();
+    ctx.moveTo(top.x, top.y);
+    ctx.lineTo(bottom.x, bottom.y);
+    ctx.stroke();
+  }
+
+  for (let lat = startLat; lat <= bounds.maxLat + latStep; lat += latStep) {
+    const left = projectToMap(bounds.minLon, lat, bounds, frame);
+    const right = projectToMap(bounds.maxLon, lat, bounds, frame);
+    ctx.beginPath();
+    ctx.moveTo(left.x, left.y);
+    ctx.lineTo(right.x, right.y);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+async function draw1DSelectedCellMap(ctx, plotData, selectedCell, layout = {}) {
+  const targetCell = selectedCell || plotData?.location || null;
+  const target = resolveLatLon(targetCell);
+  if (!target) return;
+
+  const panelX = layout.x ?? 1060;
+  const panelY = layout.y ?? 330;
+  const panelW = layout.w ?? 290;
+  const panelH = layout.h ?? 400;
 
   ctx.fillStyle = '#ffffff';
   ctx.strokeStyle = '#cbd5e1';
-  drawCard(ctx, 1060, 170, 290, 140, 12);
+  drawCard(ctx, panelX, panelY, panelW, panelH, 12);
+
   ctx.fillStyle = '#0f172a';
   ctx.font = 'bold 20px Arial';
-  ctx.fillText('Leyenda', 1082, 202);
-  ctx.fillStyle = '#2563eb';
-  ctx.fillRect(1082, 220, 24, 4);
-  ctx.fillStyle = '#334155';
-  ctx.font = '16px Arial';
-  ctx.fillText(plotData?.variable || 'Serie', 1116, 228);
+  ctx.textAlign = 'center';
+  ctx.fillText('MAPA DE CELDA CONSULTADA', panelX + panelW / 2, panelY + 32);
+  ctx.textAlign = 'left';
+
+  const metadataH = 88;
+  const metadataX = panelX + 14;
+  const metadataY = panelY + panelH - metadataH - 12;
+  const metadataW = panelW - 28;
+
+  const mapFrame = {
+    x: panelX + 14,
+    y: panelY + 48,
+    w: panelW - 28,
+    h: metadataY - (panelY + 48) - 10,
+    pad: 10,
+  };
+
+  ctx.fillStyle = '#f8fafc';
+  ctx.strokeStyle = '#cbd5e1';
+  drawCard(ctx, mapFrame.x, mapFrame.y, mapFrame.w, mapFrame.h, 10);
+
+  const boundaryCoords = await loadStudyAreaBoundary();
+  const boundaryLons = boundaryCoords.map((coord) => coord[0]);
+  const boundaryLats = boundaryCoords.map((coord) => coord[1]);
+
+  const basePad = 0.75;
+  const bounds = {
+    minLon: boundaryLons.length ? Math.min(...boundaryLons) : target.lon - basePad,
+    maxLon: boundaryLons.length ? Math.max(...boundaryLons) : target.lon + basePad,
+    minLat: boundaryLats.length ? Math.min(...boundaryLats) : target.lat - basePad,
+    maxLat: boundaryLats.length ? Math.max(...boundaryLats) : target.lat + basePad,
+  };
+
+  const lonPad = (bounds.maxLon - bounds.minLon) * 0.08;
+  const latPad = (bounds.maxLat - bounds.minLat) * 0.08;
+
+  bounds.minLon -= lonPad;
+  bounds.maxLon += lonPad;
+  bounds.minLat -= latPad;
+  bounds.maxLat += latPad;
+
+  const resolution = Number(
+    selectedCell?.resolution
+      || plotData?.resolution
+      || plotData?.location?.resolution
+      || 0.05
+  );
+
+  drawBasemapBackdrop(ctx, mapFrame, bounds);
+  await drawLeafletBasemapTiles(ctx, bounds, mapFrame);
+  drawProjectBoundary(ctx, boundaryCoords, bounds, mapFrame);
+  drawCellGridOverlay(ctx, bounds, mapFrame, resolution);
+
+  const halfRes = Number.isFinite(resolution) ? Math.max(resolution / 2, 0.0001) : 0.025;
+
+  const west = clamp(target.lon - halfRes, bounds.minLon, bounds.maxLon);
+  const east = clamp(target.lon + halfRes, bounds.minLon, bounds.maxLon);
+  const north = clamp(target.lat + halfRes, bounds.minLat, bounds.maxLat);
+  const south = clamp(target.lat - halfRes, bounds.minLat, bounds.maxLat);
+
+  const nw = projectToMap(west, north, bounds, mapFrame);
+  const se = projectToMap(east, south, bounds, mapFrame);
+
+  const boxX = Math.min(nw.x, se.x);
+  const boxY = Math.min(nw.y, se.y);
+  const boxW = Math.max(8, Math.abs(se.x - nw.x));
+  const boxH = Math.max(8, Math.abs(se.y - nw.y));
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(16, 185, 129, 0.4)';
+  ctx.strokeStyle = '#065f46';
+  ctx.lineWidth = 4;
+  ctx.fillRect(boxX, boxY, boxW, boxH);
+  ctx.strokeRect(boxX, boxY, boxW, boxH);
+
+  // Doble contorno para incrementar contraste frente a la grilla.
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(boxX + 1, boxY + 1, Math.max(2, boxW - 2), Math.max(2, boxH - 2));
+  ctx.restore();
+
+  const cellResolution = resolution;
+
+  ctx.fillStyle = '#f1f5f9';
+  ctx.strokeStyle = '#cbd5e1';
+  drawCard(ctx, metadataX, metadataY, metadataW, metadataH, 10);
+
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 14px Arial';
+  ctx.fillText('Metadatos', metadataX + 12, metadataY + 21);
+
+  ctx.font = '14px Arial';
   ctx.fillStyle = '#64748b';
-  ctx.fillText(`Registros: ${rows.length}`, 1082, 262);
-  ctx.fillText(`Unidad: ${plotData?.unit || 'N/A'}`, 1082, 286);
+  ctx.fillText('Latitud: ' + target.lat.toFixed(4), metadataX + 12, metadataY + 42);
+  ctx.fillText('Longitud: ' + target.lon.toFixed(4), metadataX + 12, metadataY + 62);
+  ctx.fillText('Resolución de celdas: ' + (Number.isFinite(cellResolution) ? `${cellResolution}°` : 'N/A'), metadataX + 250, metadataY + 42);
+  ctx.fillText('Sistema de referencias: WGS84 (EPSG:4326)', metadataX + 250, metadataY + 62);
 }
 
 function resolveLatLon(cell) {
@@ -970,17 +1440,23 @@ function drawBasemapBackdrop(ctx, frame, bounds) {
 function drawGraticule(ctx, bounds, frame) {
   const latLines = 5;
   const lonLines = 6;
-  const margin = 20; // píxeles para sobresalir fuera del frame
+  const labelInsetX = 10;
+  const labelInsetY = 8;
 
   const formatLon = (lon) => `${Math.abs(lon).toFixed(2)}°${lon >= 0 ? 'E' : 'W'}`;
   const formatLat = (lat) => `${Math.abs(lat).toFixed(2)}°${lat >= 0 ? 'N' : 'S'}`;
 
+  const lonTicks = [];
+  const latTicks = [];
+
   ctx.save();
-  ctx.strokeStyle = 'rgba(51, 65, 85, 0.55)';
-  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.rect(frame.x, frame.y, frame.w, frame.h);
+  ctx.clip();
+
+  ctx.strokeStyle = 'rgba(51, 65, 85, 0.75)';
+  ctx.lineWidth = 1.1;
   ctx.setLineDash([5, 4]);
-  ctx.fillStyle = '#64748b';
-  ctx.font = '14px Arial';
 
   // Líneas de longitud (verticales)
   for (let i = 0; i <= lonLines; i += 1) {
@@ -989,12 +1465,11 @@ function drawGraticule(ctx, bounds, frame) {
     const pBottom = projectToMap(lon, bounds.minLat, bounds, frame);
 
     ctx.beginPath();
-    ctx.moveTo(pTop.x, pTop.y - margin);
-    ctx.lineTo(pBottom.x, pBottom.y + margin);
+    ctx.moveTo(pTop.x, pTop.y);
+    ctx.lineTo(pBottom.x, pBottom.y);
     ctx.stroke();
 
-    // Etiqueta SOLO fuera del mapa (abajo, horizontal)
-    ctx.fillText(formatLon(lon), pBottom.x - 18, frame.y + frame.h + margin + 12);
+    lonTicks.push({ lon, x: pBottom.x });
   }
 
   // Líneas de latitud (horizontales)
@@ -1004,21 +1479,49 @@ function drawGraticule(ctx, bounds, frame) {
     const pRight = projectToMap(bounds.maxLon, lat, bounds, frame);
 
     ctx.beginPath();
-    ctx.moveTo(pLeft.x - margin, pLeft.y);
-    ctx.lineTo(pRight.x + margin, pRight.y);
+    ctx.moveTo(pLeft.x, pLeft.y);
+    ctx.lineTo(pRight.x, pRight.y);
     ctx.stroke();
 
-    // Etiqueta SOLO fuera del mapa (izquierda, rotada 90°)
-    ctx.save();
-    ctx.font = '14px Arial'; // Opcional, para mejor visibilidad
-    ctx.translate(frame.x - 8, pLeft.y + 4); // Ajusta -8 según necesidad
-    ctx.rotate(-Math.PI / 2);
-    ctx.fillText(formatLat(lat), 0, 0);
-    ctx.restore();
+    latTicks.push({ lat, y: pLeft.y });
   }
 
   ctx.setLineDash([]);
   ctx.restore();
+
+  const drawLabelChip = (text, x, y, align = 'left') => {
+    const textW = ctx.measureText(text).width;
+    const padX = 6;
+    const chipW = textW + padX * 2;
+    const chipH = 16;
+    const chipX = align === 'center' ? x - chipW / 2 : x;
+    const chipY = y - chipH + 4;
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(241, 245, 249, 0.97)';
+    ctx.strokeStyle = 'rgba(148, 163, 184, 0.98)';
+    ctx.lineWidth = 1;
+    drawCard(ctx, chipX, chipY, chipW, chipH, 4);
+    ctx.fillStyle = '#1e293b';
+    ctx.font = 'bold 12px Arial';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(text, chipX + padX, chipY + 2);
+    ctx.restore();
+  };
+
+  lonTicks.forEach(({ lon, x }) => {
+    const lonLabel = formatLon(lon);
+    const lonLabelX = clamp(x, frame.x + 40, frame.x + frame.w - 40);
+    const lonLabelY = frame.y + frame.h - labelInsetY;
+    drawLabelChip(lonLabel, lonLabelX, lonLabelY, 'center');
+  });
+
+  latTicks.forEach(({ lat, y }) => {
+    const latLabel = formatLat(lat);
+    const latLabelY = clamp(y + 6, frame.y + 18, frame.y + frame.h - 8);
+    drawLabelChip(latLabel, frame.x + labelInsetX, latLabelY, 'left');
+  });
 }
 
 function drawProjectBoundary(ctx, boundaryCoords, bounds, frame) {
@@ -1044,10 +1547,19 @@ function drawNorthArrow(ctx, x, y) {
   ctx.save();
 
   const scale = 1.65; // antes 0.7
+  const cardW = 56;
+  const cardH = 92;
+  const cardX = x - cardW / 2;
+  const cardY = y - 58;
+
+  ctx.fillStyle = 'rgba(241, 245, 249, 0.92)';
+  ctx.strokeStyle = '#cbd5e1';
+  drawCard(ctx, cardX, cardY, cardW, cardH, 10);
+
   ctx.fillStyle = '#0f172a';
   ctx.textAlign = 'center';
   ctx.font = `bold ${Math.round(16 * scale)}px Arial`;
-  ctx.fillText('N', x, y - 18 * scale);
+  ctx.fillText('N', x, y - 20 * scale);
 
   // Triangulo de la flecha
   ctx.beginPath();
@@ -1083,11 +1595,19 @@ function drawScaleBar(ctx, bounds, frame) {
   // Posición de la barra
   const x = frame.x + frame.w - barPx - 54;
   const y = frame.y + frame.h - 22 - frame.h * 0.025;
+  const panelX = x - 14;
+  const panelY = y - 24;
+  const panelW = barPx + 28;
+  const panelH = 64;
 
   ctx.save();
 
+  ctx.fillStyle = 'rgba(241, 245, 249, 0.92)';
+  ctx.strokeStyle = '#cbd5e1';
+  drawCard(ctx, panelX, panelY, panelW, panelH, 10);
+
   // Barra sólida
-  ctx.strokeStyle = '#232f3e';
+  ctx.strokeStyle = '#0f172a';
   ctx.lineWidth = 8;
   ctx.beginPath();
   ctx.moveTo(x, y);
@@ -1095,9 +1615,9 @@ function drawScaleBar(ctx, bounds, frame) {
   ctx.stroke();
 
   // Marcas y etiquetas
-  ctx.strokeStyle = '#232f3e';
+  ctx.strokeStyle = '#0f172a';
   ctx.lineWidth = 2;
-  ctx.fillStyle = '#232f3e';
+  ctx.fillStyle = '#0f172a';
   ctx.font = '14px Arial';
 
   divisions.forEach((km) => {
@@ -1172,8 +1692,8 @@ async function draw2DMap(ctx, plotData, analysisState) {
   // --- Cuadro informativo sobre la leyenda ---
   const infoBoxW = legendW;
   const infoBoxX = DEFAULT_IMAGE_WIDTH - infoBoxW - 56;
-  const infoBoxY = Math.round(DEFAULT_IMAGE_HEIGHT * 0.135) + 18;
-  const infoBoxH = legendY - infoBoxY - 16;
+  const infoBoxY = mapY + 12;
+  const infoBoxH = 250;
 
   ctx.save();
   ctx.fillStyle = '#f1f5f9';
@@ -1281,9 +1801,6 @@ drawBasemapBackdrop(ctx, frame, bounds);
   await drawLeafletBasemapTiles(ctx, bounds, frame);
   drawProjectBoundary(ctx, boundaryCoords, bounds, frame);
 
-  // --- DIBUJA LA GRILLA SIEMPRE AQUÍ, después del fondo y el contorno ---
-  drawGraticule(ctx, bounds, frame);
-
   // --- DIBUJA LA LEYENDA DE LA GRILLA FUERA DEL MAPA ---
   ctx.fillStyle = '#64748b';
   ctx.font = '20px Arial';
@@ -1319,6 +1836,9 @@ drawBasemapBackdrop(ctx, frame, bounds);
     ctx.strokeRect(left, top, cellWidth, cellHeight);
   });
   ctx.restore();
+
+  // Dibujar la grilla al final para que sea visible sobre las celdas.
+  drawGraticule(ctx, bounds, frame);
 
 drawNorthArrow(ctx, mapX + 36, mapY + 36 + 40);
 drawScaleBar(ctx, bounds, frame);

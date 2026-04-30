@@ -764,6 +764,7 @@ export default function Home() {
       const result = await downloadAnalysisImage({
         plotData,
         analysisState,
+        selectedCell,
       });
 
       showSuccess(`Imagen exportada: ${result.fileName}`, 'Exportacion completada');
@@ -771,7 +772,7 @@ export default function Home() {
       console.error('Error exporting analysis image:', error);
       showError(error.message || 'No se pudo exportar la imagen', 'Error de exportacion');
     }
-  }, [plotData, analysisState, showWarning, showSuccess, showError]);
+  }, [plotData, analysisState, selectedCell, showWarning, showSuccess, showError]);
 
 
   // Handle Prediction History Plot
