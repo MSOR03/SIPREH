@@ -13,6 +13,24 @@ const VARIABLE_LABELS = {
   pet: 'Evapotranspiración Potencial (PET)',
 };
 
+const CHART_TITLE_LABELS = {
+  precip: 'PRECIPITACIÓN',
+  tmean: 'TEMPERATURA MEDIA',
+  tmin: 'TEMPERATURA MÍNIMA',
+  tmax: 'TEMPERATURA MÁXIMA',
+  pet: 'EVAPOTRANSPIRACIÓN POTENCIAL',
+  balance: 'BALANCE HÍDRICO',
+};
+
+const CHART_YLABEL_UNITS = {
+  precip: 'PRECIPITACIÓN (mm)',
+  tmean: 'TEMPERATURA (°C)',
+  tmin: 'TEMPERATURA (°C)',
+  tmax: 'TEMPERATURA (°C)',
+  pet: 'EVAPOTRANSPIRACIÓN POTENCIAL (mm)',
+  balance: 'BALANCE HÍDRICO (mm)',
+};
+
 const INDEX_LABELS = {
   SPI: 'Índice de Precipitación Estandarizado',
   SPEI: 'Índice de Precipitación-Evapotranspiración Estandarizado',
@@ -581,6 +599,67 @@ async function draw2DInstitutionalPanel(ctx, plotData)  {
   ctx.restore();
 }
 
+  function niceNumber(value, round = true) {
+  if (!Number.isFinite(value) || value <= 0) return 1;
+  const exponent = Math.floor(Math.log10(value));
+  const fraction = value / (10 ** exponent);
+  let niceFraction;
+
+  if (round) {
+  if (fraction < 1.5) niceFraction = 1;
+  else if (fraction < 3) niceFraction = 2;
+  else if (fraction < 4) niceFraction = 2.5;
+  else if (fraction < 7) niceFraction = 5;
+  else niceFraction = 10;
+  } else {
+  if (fraction <= 1) niceFraction = 1;
+  else if (fraction <= 2) niceFraction = 2;
+  else if (fraction <= 2.5) niceFraction = 2.5;
+  else if (fraction <= 5) niceFraction = 5;
+  else niceFraction = 10;
+  }
+
+  return niceFraction * (10 ** exponent);
+  }
+
+  function buildYAxisScale(values, desiredSteps = 8, paddingRatio = 0.12) {
+  let rawMin = Math.min(...values);
+  let rawMax = Math.max(...values);
+
+  if (rawMin === rawMax) {
+  const base = Math.abs(rawMin) > 0 ? Math.abs(rawMin) : 1;
+  rawMin -= base * 0.5;
+  rawMax += base * 0.5;
+  }
+
+  const rawRange = rawMax - rawMin;
+  const pad = rawRange * paddingRatio;
+  const paddedMin = rawMin - pad;
+  const paddedMax = rawMax + pad;
+
+  const step = niceNumber((paddedMax - paddedMin) / desiredSteps, true);
+  let axisMin = Math.floor(paddedMin / step) * step;
+  let axisMax = Math.ceil(paddedMax / step) * step;
+
+  if (axisMin === axisMax) {
+  axisMin -= step;
+  axisMax += step;
+  }
+
+  const yTicks = [];
+  for (let v = axisMax; v >= axisMin - step * 0.5; v -= step) {
+  yTicks.push(Number(v.toFixed(10)));
+  if (yTicks.length > desiredSteps + 3) break;
+  }
+
+  return {
+  axisMin,
+  axisMax,
+  axisRange: axisMax - axisMin,
+  step,
+  yTicks,
+  };
+  }
 
 function draw1DChart(ctx, plotData, layout = {}) {
   // --- Reset canvas state para evitar interferencia de operaciones previas ---
@@ -616,12 +695,15 @@ function draw1DChart(ctx, plotData, layout = {}) {
   // --- Datos ---
   const rows = Array.isArray(plotData?.data) ? plotData.data : [];
   const varCode = String(plotData?.variable || plotData?.variable_name || 'INDICADOR').trim().toUpperCase();
+  const varKey = varCode.toLowerCase();
+  const chartDisplayName = CHART_TITLE_LABELS[varKey] || varCode;
+  const isIndex = METEOROLOGICAL_INDICES.has(varCode) || HYDROLOGICAL_INDICES.has(varCode);
   const allDates = rows.map((r) => r?.date).filter(Boolean);
   const dateStart = allDates.length ? formatISOtoDMY(allDates[0]) : 'N/A';
   const dateEnd   = allDates.length ? formatISOtoDMY(allDates[allDates.length - 1]) : 'N/A';
 
   // --- Título del gráfico ---
-  const chartTitle = `SERIE TEMPORAL DE ${varCode} | ${dateStart} - ${dateEnd}`;
+  const chartTitle = `SERIE TEMPORAL DE ${chartDisplayName} | ${dateStart} - ${dateEnd}`;
   ctx.fillStyle = '#0f172a';
   ctx.font = 'bold 18px Arial';
   ctx.textAlign = 'center';
@@ -643,25 +725,19 @@ function draw1DChart(ctx, plotData, layout = {}) {
     return;
   }
 
-  const rawMin = Math.min(...values);
-  const rawMax = Math.max(...values);
-  const rawRange = rawMax - rawMin || 1;
-  const yPad = rawRange * 0.12; // 12 % de margen superior e inferior
-  const minVal = Math.min(rawMin - yPad, 0);
-  const maxVal = Math.max(rawMax + yPad, 0);
-
-  // Escala simétrica alrededor de 0 con 4 etiquetas hacia arriba y 4 hacia abajo.
-  const maxAbs = Math.max(Math.abs(minVal), Math.abs(maxVal), 0.5);
-  const rawStep = maxAbs / 4;
-  const step = Math.max(0.5, Math.ceil(rawStep * 2) / 2); // múltiplos de 0.5
-  const axisMax = step * 4;
-  const axisMin = -axisMax;
+  // Escala dinámica: usa el rango real de los datos (no centra siempre en 0).
+  const { axisMin: rawAxisMin, axisMax, axisRange: rawAxisRange, step, yTicks: rawYTicks } = buildYAxisScale(values, 8, 0.12);
+  const clampToZero = varKey === 'precip' || varKey === 'pet';
+  const axisMin = clampToZero ? Math.max(0, rawAxisMin) : rawAxisMin;
   const axisRange = axisMax - axisMin;
-  const yTicks = Array.from({ length: 9 }, (_, i) => Number((axisMax - i * step).toFixed(6)));
+  const yTicks = clampToZero
+    ? rawYTicks.filter((v) => v >= axisMin - 1e-9)
+    : rawYTicks;
 
   const formatYAxisTick = (value) => {
     const safe = Math.abs(value) < 1e-9 ? 0 : value;
-    return safe.toFixed(1).replace('.', ',');
+    const decimals = step >= 10 ? 0 : step >= 1 ? 1 : step >= 0.1 ? 2 : 3;
+    return safe.toFixed(decimals).replace('.', ',');
   };
 
   // --- Área de trazado con clip ---
@@ -697,7 +773,9 @@ function draw1DChart(ctx, plotData, layout = {}) {
   ctx.textAlign = 'left';
 
   // --- Etiqueta eje Y (rotada) ---
-  const yLabel = `VALOR DE ${varCode} (ADIMENSIONAL)`;
+  const yLabel = isIndex
+  ? `VALOR DE ${varCode} (ADIMENSIONAL)`
+  : `VALOR DE ${CHART_YLABEL_UNITS[varKey] || varCode}`;
   ctx.save();
   ctx.fillStyle = '#334155';
   ctx.font = 'bold 14px Arial';
@@ -850,6 +928,9 @@ function draw1DConsultationInfo(ctx, plotData, analysisState, layout = {}) {
   ctx.textAlign = 'left';
 
   const selectedCode = resolveSelectedVariable(plotData, analysisState);
+  const varKey = selectedCode.trim().toLowerCase();
+  const chartDisplayName = CHART_TITLE_LABELS[varKey] || varKey;
+  const isIndex = METEOROLOGICAL_INDICES.has(varKey) || HYDROLOGICAL_INDICES.has(varKey);
   const dataKind = resolveDataKind(selectedCode);
   const aggregationLevel = analysisState?.indexScale || plotData?.scale || 'N/A';
   const precipitationFrequencyCode = resolvePrecipFrequencyCode(plotData, analysisState);
@@ -866,10 +947,6 @@ function draw1DConsultationInfo(ctx, plotData, analysisState, layout = {}) {
   const indexOrVariable = dataKind.family
     ? `${dataKind.code} - ${dataKind.label}`
     : dataKind.label;
-  const aggregationText = dataKind.family
-    ? `${aggregationLevel} meses`
-    : frequencyLabel;
-
   ctx.fillStyle = '#334155';
   ctx.font = '16px Arial';
 
@@ -877,7 +954,11 @@ function draw1DConsultationInfo(ctx, plotData, analysisState, layout = {}) {
   infoY = wrapText(ctx, `Fecha de consulta: ${formatExportTimestamp(new Date())}`, contentX, infoY, contentMaxW, 22);
   infoY = wrapText(ctx, `Fecha de visualización: ${timeWindow}`, contentX, infoY, contentMaxW, 22);
   infoY = wrapText(ctx, `Tipo de dato: ${dataKind.group}`, contentX, infoY, contentMaxW, 22);
-  infoY = wrapText(ctx, `Nivel de Agregación: ${aggregationText}`, contentX, infoY, contentMaxW, 22);
+  if (dataKind.family) {
+    infoY = wrapText(ctx, `Nivel de Agregación: ${aggregationLevel} meses`, contentX, infoY, contentMaxW, 22);
+  } else {
+    infoY = wrapText(ctx, `Frecuencia: ${frequencyLabel}`, contentX, infoY, contentMaxW, 22);
+  }
 
   if (dataKind.family) {
     infoY = wrapText(ctx, `Tipo de índice: ${dataKind.family}`, contentX, infoY, contentMaxW, 22);
@@ -1759,9 +1840,7 @@ infoY = wrapText(
       infoY = wrapText(ctx, 'Tipo de índice: ' + dataKind.family, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
       infoY = wrapText(ctx, 'Índice: ' + dataKind.code + ' - ' + dataKind.label, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
     } else {
-      if (dataKind.code === 'precip') {
-        infoY = wrapText(ctx, 'Frecuencia de precipitación: ' + frequencyLabel, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
-      }
+      infoY = wrapText(ctx, 'Frecuencia: ' + frequencyLabel, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
       infoY = wrapText(ctx, 'Variable: ' + dataKind.label, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
     }
     infoY = wrapText(
