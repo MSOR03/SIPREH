@@ -5,27 +5,29 @@ import Image from "next/image";
 import { Moon, Sun, Activity } from "lucide-react";
 import { useTheme } from "@/contexts/ThemeContext";
 
+const BP = process.env.NEXT_PUBLIC_BASE_PATH || '';
+
 const ENTITY_LOGOS = [
   {
-    src: "/logos/entidad1.png",
+    src: `${BP}/logos/entidad1.png`,
     alt: "Agencia Atenea",
     href: "https://www.agenciaatenea.gov.co/",
   },
   {
-    src: "/logos/entidad2.png",
+    src: `${BP}/logos/entidad2.png`,
     alt: "Universidad Nacional de Colombia",
     href: "https://bogota.unal.edu.co/",
   },
   {
-    src: "/logos/entidad3.png",
+    src: `${BP}/logos/entidad3.png`,
     alt: "Grupo de Investigación HERMES",
     href: "http://www.hermes.unal.edu.co/pages/Consultas/Grupo.xhtml?idGrupo=236&opcion=1",
   },
 ];
 
 const DASHBOARD_LOGOS = {
-  light: { src: "/logos/Logo_Dashboard_Diurno.png", alt: "Logo Dashboard Diurno" },
-  dark: { src: "/logos/Logo_Dashboard_Nocturno.png", alt: "Logo Dashboard Nocturno" },
+  light: { src: `${BP}/logos/Logo_Dashboard_Diurno.png`, alt: "Logo Dashboard Diurno" },
+  dark: { src: `${BP}/logos/Logo_Dashboard_Nocturno.png`, alt: "Logo Dashboard Nocturno" },
 };
 
 export default function Header() {

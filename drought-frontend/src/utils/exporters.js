@@ -513,8 +513,9 @@ async function draw2DInstitutionalPanel(ctx, plotData)  {
   ctx.strokeStyle = 'rgba(255,255,255,0.22)';
   drawCard(ctx, x, y, w, h, 14);
 
-  const primaryLogo = '/logos/Logo_Dashboard_Diurno.png';
-  const entityLogos = ['/logos/entidad1.png', '/logos/entidad2.png', '/logos/entidad3.png'];
+  const _bp = process.env.NEXT_PUBLIC_BASE_PATH || '';
+  const primaryLogo = `${_bp}/logos/Logo_Dashboard_Diurno.png`;
+  const entityLogos = [`${_bp}/logos/entidad1.png`, `${_bp}/logos/entidad2.png`, `${_bp}/logos/entidad3.png`];
 
   // Área grande para el logo a la izquierda
   const logoAreaX = x + 6; // pequeño margen izquierdo
@@ -1308,7 +1309,8 @@ function drawAnalysisTypeIndicator(ctx, plotData) {
 }
 async function loadStudyAreaBoundary() {
   try {
-    const response = await fetch(`/data/study-area.geojson?t=${Date.now()}`);
+    const _bp = process.env.NEXT_PUBLIC_BASE_PATH || '';
+    const response = await fetch(`${_bp}/data/study-area.geojson?t=${Date.now()}`);
     if (!response.ok) return [];
     const geojson = await response.json();
     return flattenFeatureCoordinates(geojson);

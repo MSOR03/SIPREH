@@ -298,9 +298,10 @@ export default function LeafletMap({
         map.getPane('embalsesPane').style.display = 'none';
 
         // Load cuencas & embalses from separate GeoJSON files
+        const _bp = process.env.NEXT_PUBLIC_BASE_PATH || '';
         Promise.all([
-          fetch('/data/Cuencas.geojson?t=' + Date.now()).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
-          fetch('/data/Embalses.geojson?t=' + Date.now()).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+          fetch(`${_bp}/data/Cuencas.geojson?t=` + Date.now()).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+          fetch(`${_bp}/data/Embalses.geojson?t=` + Date.now()).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
         ])
           .then(([cuencasGeoData, embalsesGeoData]) => {
             const cuencasFeatures = cuencasGeoData.features;
@@ -414,7 +415,7 @@ export default function LeafletMap({
           });
 
         // ✅ Load study area boundary from GeoJSON - configurado para estar debajo sin interferir
-        fetch('/data/study-area.geojson?t=' + Date.now())
+        fetch(`${_bp}/data/study-area.geojson?t=` + Date.now())
           .then(response => {
             if (!response.ok) {
               throw new Error(`HTTP error! status: ${response.status}`);
