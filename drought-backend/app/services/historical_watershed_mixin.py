@@ -14,7 +14,7 @@ import numpy as np
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import date
 
-from app.services.historical_constants import DROUGHT_INDEX_KEYS, DEFAULT_SOURCE, SOURCE_BY_INDEX
+from app.services.historical_constants import DROUGHT_INDEX_KEYS, DEFAULT_SOURCE, SOURCE_BY_INDEX, NO_SCALE_DROUGHT_INDICES, get_parquet_source
 from app.services.watershed_relations import (
     get_relations_for_source,
     get_cell_ids_for_source,
@@ -42,8 +42,8 @@ class WatershedMixin:
 
         is_drought_index = variable in DROUGHT_INDEX_KEYS
         # data_source (ERA5/IMERG/CHIRPS) selects resolution/file,
-        # but the parquet source column uses OBS_IDW, SAT_RAW, etc.
-        effective_source = SOURCE_BY_INDEX.get(variable, DEFAULT_SOURCE)
+        # and also determines the parquet source column: IMERG→SAT_LSCDF, CHIRPS→SAT_RAW, ERA5→OBS_IDW
+        effective_source = get_parquet_source(data_source, variable)
 
         source_info = self._resolve_parquet_source(parquet_url)
         parquet_source = source_info["source_expr"]
@@ -83,7 +83,7 @@ class WatershedMixin:
             base_clauses.append(f"{var_col} = '{variable}'")
             if has_source_col and effective_source:
                 base_clauses.append(f"source = '{effective_source}'")
-            if is_drought_index and scale is not None:
+            if is_drought_index and scale is not None and variable not in NO_SCALE_DROUGHT_INDICES:
                 base_clauses.append(f"scale = {scale}")
             value_expr = "value"
         else:

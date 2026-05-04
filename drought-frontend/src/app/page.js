@@ -517,6 +517,8 @@ export default function Home() {
             frequency: response.frequency,
             data: response.data,
             statistics: response.statistics,
+            cuencaDn: selectedEntity?.dn ?? null,
+            cuencaNombre: cuencaName,
             isCuencaTimeSeries: true,
           });
 
@@ -1067,6 +1069,8 @@ export default function Home() {
         frequency: response.frequency,
         data: response.data,
         statistics: response.statistics,
+        cuencaDn: entity?.dn ?? null,
+        cuencaNombre: cuencaName,
         isCuencaTimeSeries: true,
       });
 

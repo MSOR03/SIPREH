@@ -18,6 +18,9 @@ from app.services.historical_constants import (
     DEFAULT_SCALE,
     SOURCE_BY_INDEX,
     COLOR_SCALE_VERSION,
+    NO_SCALE_DROUGHT_INDICES,
+    get_parquet_source,
+    infer_data_source_from_url,
 )
 
 
@@ -97,9 +100,16 @@ class SpatialMixin:
 
         # Resolver scale y source
         is_drought_index = variable in DROUGHT_INDEX_KEYS
-        effective_scale = scale if is_drought_index else None
+        # PDSI no es escalado: IMERG/CHIRPS tiene scale=0, ERA5 tiene scale=1.
+        # No filtrar por scale para evitar 0 resultados según el dataset.
+        effective_scale = scale if (is_drought_index and variable not in NO_SCALE_DROUGHT_INDICES) else None
         # Source aplica a todas las variables (long format tiene source para todo)
-        effective_source = source or SOURCE_BY_INDEX.get(variable, DEFAULT_SOURCE)
+        # Si el cliente no envía source, se infiere de la URL: IMERG→SAT_LSCDF, CHIRPS→SAT_RAW, ERA5→OBS_IDW
+        if source is not None:
+            effective_source = source
+        else:
+            inferred_ds = infer_data_source_from_url(parquet_url)
+            effective_source = get_parquet_source(inferred_ds, variable)
         requested_freq = frequency
 
         # Cache key con protección
