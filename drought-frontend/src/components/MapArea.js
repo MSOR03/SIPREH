@@ -508,16 +508,20 @@ export default function MapArea({
                     </div>
                   </div>
                 )}
-                <div className="bg-white dark:bg-gray-900/50 rounded-xl p-6 shadow-inner">
-                  <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
-                    {plotData.type === 'prediction-history-2d' ? 'Prediccion Historica Espacial 2D' : 'Prediccion Espacial 2D'}
-                  </h4>
-                  <p className="text-xs text-gray-600 dark:text-gray-400 mb-4">
-                    Las 297 celdas CHIRPS muestran la prediccion de <strong>{plotData.variable}</strong> para el horizonte seleccionado.
-                    Los colores representan las categorias de sequia.
-                    <span className={`font-medium ${plotData.type === 'prediction-history-2d' ? 'text-purple-600 dark:text-purple-400' : 'text-green-600 dark:text-green-400'}`}> Haz click en una celda para ver el detalle 1D.</span>
-                  </p>
-                  {hasCategorizedCells && <DroughtLegend gridCells={plotData.gridCells} />}
+                <div className="bg-white dark:bg-gray-900/50 rounded-xl p-6 shadow-inner flex flex-col min-h-[420px] border border-gray-300 dark:border-gray-700" style={{height: '520px', maxHeight: '520px'}}>
+                  {/* INFORMACIÓN DE CONSULTA y LEYENDA en un solo recuadro */}
+                  <div className="flex flex-col justify-start" style={{height: '50%'}}>
+                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">INFORMACIÓN DE CONSULTA</h4>
+                    <p className="text-xs text-gray-600 dark:text-gray-400 mb-4">
+                      Las 297 celdas CHIRPS muestran la predicción de <strong>{plotData.variable}</strong> para el horizonte seleccionado.
+                      Los colores representan las categorías de sequía.
+                      <span className={`font-medium ${plotData.type === 'prediction-history-2d' ? 'text-purple-600 dark:text-purple-400' : 'text-green-600 dark:text-green-400'}`}> Haz click en una celda para ver el detalle 1D.</span>
+                    </p>
+                  </div>
+                  <div className="flex flex-col justify-end flex-1 mt-8">
+                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 mt-4">LEYENDA</h4>
+                    {hasCategorizedCells && <DroughtLegend gridCells={plotData.gridCells} />}
+                  </div>
                 </div>
               </div>
             ) : (plotData.type === 'prediction-1d' || plotData.type === 'prediction-history-1d') && plotData.data ? (
