@@ -93,6 +93,15 @@ export default function Home() {
     }
   }, [predictionOpen, predictionHistoryOpen]);
 
+  // Auto-update dataSource when spatialResolution changes
+  useEffect(() => {
+    const SOURCE_BY_RES = { 0.25: 'ERA5', 0.1: 'IMERG', 0.05: 'CHIRPS' };
+    const mappedSource = SOURCE_BY_RES[analysisState.spatialResolution];
+    if (mappedSource && analysisState.dataSource !== mappedSource) {
+      setAnalysisState(prev => ({ ...prev, dataSource: mappedSource }));
+    }
+  }, [analysisState.spatialResolution]);
+
   // Background: preload prediction CHIRPS cells on mount
   // The 297 CHIRPS cells are the same for all prediction files, so load once from any available file
   useEffect(() => {
@@ -508,6 +517,8 @@ export default function Home() {
             frequency: response.frequency,
             data: response.data,
             statistics: response.statistics,
+            cuencaDn: selectedEntity?.dn ?? null,
+            cuencaNombre: cuencaName,
             isCuencaTimeSeries: true,
           });
 
@@ -1058,6 +1069,8 @@ export default function Home() {
         frequency: response.frequency,
         data: response.data,
         statistics: response.statistics,
+        cuencaDn: entity?.dn ?? null,
+        cuencaNombre: cuencaName,
         isCuencaTimeSeries: true,
       });
 

@@ -12,17 +12,64 @@ HYDROMETEOROLOGICAL_KEYS = ["precip", "tmean", "tmin", "tmax", "pet", "balance"]
 VALID_SCALES = [1, 3, 6, 12]
 DEFAULT_SCALE = 1
 
-# Fuentes válidas de datos y fuente por defecto
+# Fuentes válidas de datos y fuente por defecto (ERA5)
 DEFAULT_SOURCE = "OBS_IDW"
 
 # Versión de paleta para invalidar caché cuando cambian colores de categorías.
 COLOR_SCALE_VERSION = "2026-04-25-temp-v5"
 
 # Fuente específica por índice (cuando difiere del default)
+# SOLO para variables cuya fuente es IGUAL en todos los datasets.
 SOURCE_BY_INDEX = {
     "EDDI": "PET_HARGREAVES",
-    "pet": "PET_HARGREAVES",
+    "pet":  "PET_HARGREAVES",
+    # PDSI NO va aquí: en ERA5 usa OBS_IDW, en IMERG/CHIRPS usa SAT_LSCDF
 }
+
+# Fuente parquet según dataset (IMERG/CHIRPS). ERA5 usa DEFAULT_SOURCE.
+SOURCE_BY_DATA_SOURCE = {
+    "IMERG": "SAT_LSCDF",
+    "CHIRPS": "SAT_RAW",
+}
+
+# Override variable+dataset (mayor precedencia que todo lo demás).
+# Usado cuando una variable tiene fuente distinta al default del dataset.
+# PDSI en CHIRPS usa SAT_LSCDF (no SAT_RAW como el resto de variables CHIRPS).
+SOURCE_BY_VAR_AND_DS: dict = {
+    ("PDSI", "CHIRPS"): "SAT_LSCDF",
+}
+
+# Índices de sequía que NO usan la columna 'scale' como filtro.
+# PDSI no es un índice escalado (no existe PDSI-1, PDSI-3…).
+# IMERG/CHIRPS lo almacenan con scale=0 y ERA5 con scale=1;
+# filtrar por scale produciría 0 resultados en el dataset equivocado.
+NO_SCALE_DROUGHT_INDICES = {"PDSI"}
+
+
+def get_parquet_source(data_source: str, variable: str) -> str:
+    """
+    Retorna el valor a filtrar en la columna 'source' del parquet.
+    Prioridad:
+      1. SOURCE_BY_VAR_AND_DS  (variable + dataset específico)
+      2. SOURCE_BY_INDEX       (variable siempre igual en todos los datasets)
+      3. SOURCE_BY_DATA_SOURCE (default del dataset)
+      4. DEFAULT_SOURCE        (ERA5 / fallback)
+    """
+    ds_upper = data_source.upper()
+    override = SOURCE_BY_VAR_AND_DS.get((variable, ds_upper))
+    if override:
+        return override
+    return SOURCE_BY_INDEX.get(variable) or SOURCE_BY_DATA_SOURCE.get(ds_upper, DEFAULT_SOURCE)
+
+
+def infer_data_source_from_url(parquet_url: str) -> str:
+    """Infiere ERA5/IMERG/CHIRPS a partir del cloud_key o URL del parquet."""
+    url_lower = (parquet_url or "").lower()
+    if "chirps" in url_lower:
+        return "CHIRPS"
+    if "imerg" in url_lower:
+        return "IMERG"
+    return "ERA5"
 
 # Mapeo de columnas reales en los archivos .parquet
 COLUMN_MAPPING = {

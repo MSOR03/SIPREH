@@ -211,24 +211,24 @@ export function getCellStyle(level, isSelected = false, isHovered = false) {
     return {
       color: '#10b981',
       weight: 3,
-      fillOpacity: 0.35,
+      fillOpacity: 0.18, // antes 0.35
       fillColor: '#10b981',
     };
   }
-  
+
   if (isHovered) {
     return {
       color: baseColor,
       weight: 2,
-      fillOpacity: 0.25,
+      fillOpacity: 0.13, // antes 0.25
       fillColor: baseColor,
     };
   }
-  
+
   return {
     color: baseColor,
     weight: 1,
-    fillOpacity: 0.08,
+    fillOpacity: 0.04, // antes 0.08
     fillColor: baseColor,
   };
 }

@@ -1,3 +1,15 @@
+
+  // Declarar dividerY después de definir infoBoxY y infoBoxH, dentro de draw2DMap
+  // fitLegendText debe estar antes de su uso
+  const fitLegendText = (ctx2, text, maxWidth) => {
+    if (ctx2.measureText(text).width <= maxWidth) return text;
+    const ellipsis = '...';
+    let out = text;
+    while (out.length > 0 && ctx2.measureText(out + ellipsis).width > maxWidth) {
+      out = out.slice(0, -1);
+    }
+    return out + ellipsis;
+  };
 const DEFAULT_IMAGE_WIDTH = 1800;
 const DEFAULT_IMAGE_HEIGHT = 1100;
 const LEAFLET_BASEMAP_TILE_URL = 'https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png';
@@ -275,43 +287,21 @@ function resolvePrecipFrequencyCode(plotData, analysisState) {
   return 'M';
 }
 
-function resolveSatelliteProductLabel(plotData, analysisState) {
-  const plotSourceCode = String(plotData?.dataSource || '')
-    .trim()
-    .toUpperCase();
-  const stateSourceCode = String(analysisState?.dataSource || '')
-    .trim()
-    .toUpperCase();
-
-  const productBySource = {
-    ERA5: 'ERA5 (ECMWF, 0.25°)',
-    IMERG: 'IMERG (GPM NASA, 0.10°)',
-    CHIRPS: 'CHIRPS (UCSB, 0.05°)',
-  };
-
-  // Priorizar fuente explícita asociada al resultado consultado.
-  if (productBySource[plotSourceCode]) {
-    return productBySource[plotSourceCode];
+function resolveSatelliteProductLabel(plotData, analysisState, forcedResolution = null) {
+  // Definir producto únicamente por la resolución de celdas, usando la misma lógica que draw2DMap
+  let resolution = null;
+  if (forcedResolution !== null) {
+    resolution = forcedResolution;
+  } else if (typeof plotData?.resolution !== 'undefined' && plotData?.resolution !== null) {
+    resolution = Number(plotData.resolution);
+  } else if (typeof analysisState?.spatialResolution !== 'undefined' && analysisState?.spatialResolution !== null) {
+    resolution = Number(analysisState.spatialResolution);
   }
-
-  // Si no llega dataSource explícito, inferir por resolución del resultado.
-  // Usar también la resolución de la celda/localización si no viene en plotData.
-  const resolution = Number(
-    plotData?.resolution
-      || plotData?.location?.resolution
-      || analysisState?.spatialResolution
-  );
-  if (Number.isFinite(resolution)) {
-    if (Math.abs(resolution - 0.25) < 0.001) return productBySource.ERA5;
-    if (Math.abs(resolution - 0.1) < 0.001) return productBySource.IMERG;
-    if (Math.abs(resolution - 0.05) < 0.001) return productBySource.CHIRPS;
-  }
-
-  if (productBySource[stateSourceCode]) {
-    return productBySource[stateSourceCode];
-  }
-
-  return plotSourceCode || stateSourceCode || 'N/A';
+  if (Math.abs(resolution - 0.25) < 0.001) return `ERA5 (ECMWF, 0.25°)`;
+  if (Math.abs(resolution - 0.10) < 0.001) return `IMERG (GPM NASA, 0.10°)`;
+  if (Math.abs(resolution - 0.05) < 0.001) return `CHIRPS (UCSB, 0.05°)`;
+  if (Number.isFinite(resolution)) return `Resolución desconocida (${resolution.toFixed(2)}°)`;
+  return 'N/A';
 }
 
 function sanitizeFilename(value) {
@@ -447,8 +437,11 @@ ctx.restore();
     const is2D = plotData.type === '2D' || plotData.type === 'prediction-2d' || plotData.type === 'prediction-history-2d';
 
   // Dibuja el contenido según el tipo de datos
-  if (is2D) {
-    // Dibuja el mapa 2D completo
+  if (is2D && plotData.isCuencas) {
+    // Mapa 2D de cuencas hidrográficas
+    await draw2DWatershedMap(ctx, plotData, analysisState);
+  } else if (is2D) {
+    // Dibuja el mapa 2D completo de celdas
     await draw2DMap(ctx, plotData, analysisState);
   } else {
     // Para gráficos 1D: panel institucional + barra indicadora + gráfico
@@ -458,8 +451,19 @@ ctx.restore();
     const infoLayout  = { x: 656, y: 170, w: 540, h: 220 };
     const statsLayout = { x: 1204, y: 170, w: 540, h: 220 };
     const chartLayout = { x: 656, y: 410, w: 1088, h: 620 };
-    await draw1DSelectedCellMap(ctx, plotData, selectedCell, mapLayout);
-    draw1DConsultationInfo(ctx, plotData, analysisState, infoLayout);
+    // Calcular resolución una sola vez
+    let resolucion = null;
+    if (typeof plotData?.resolution !== 'undefined' && plotData?.resolution !== null) {
+      resolucion = Number(plotData.resolution);
+    } else if (typeof analysisState?.spatialResolution !== 'undefined' && analysisState?.spatialResolution !== null) {
+      resolucion = Number(analysisState.spatialResolution);
+    }
+    if (plotData.isCuencaTimeSeries) {
+      await draw1DSelectedCuencaMap(ctx, plotData, mapLayout);
+    } else {
+      await draw1DSelectedCellMap(ctx, { ...plotData, resolution: resolucion }, selectedCell, mapLayout);
+    }
+    draw1DConsultationInfo(ctx, { ...plotData, resolution: resolucion }, analysisState, infoLayout);
     draw1DStatsTable(ctx, plotData, statsLayout);
     draw1DChart(ctx, plotData, chartLayout);
   }
@@ -944,7 +948,14 @@ function draw1DConsultationInfo(ctx, plotData, analysisState, layout = {}) {
   const infoDateEnd   = infoAllDates.length ? formatISOtoDMY(infoAllDates[infoAllDates.length - 1]) : 'N/A';
   const timeWindow = infoAllDates.length ? `${infoDateStart} a ${infoDateEnd}` : resolveTimeInterval(plotData, analysisState).replace('->', 'a').replace(/-/g, '/');
 
-  const productLabel = resolveSatelliteProductLabel(plotData, analysisState);
+  // Calcular resolución una sola vez y pasarla a resolveSatelliteProductLabel y a los metadatos
+  let resolucion = null;
+  if (typeof plotData?.resolution !== 'undefined' && plotData?.resolution !== null) {
+    resolucion = Number(plotData.resolution);
+  } else if (typeof analysisState?.spatialResolution !== 'undefined' && analysisState?.spatialResolution !== null) {
+    resolucion = Number(analysisState.spatialResolution);
+  }
+  const productLabel = resolveSatelliteProductLabel(plotData, analysisState, resolucion);
   const indexOrVariable = dataKind.family
     ? `${dataKind.code} - ${dataKind.label}`
     : dataKind.label;
@@ -968,7 +979,14 @@ function draw1DConsultationInfo(ctx, plotData, analysisState, layout = {}) {
     infoY = wrapText(ctx, `Variable: ${indexOrVariable}`, contentX, infoY, contentMaxW, 22);
   }
 
-  wrapText(ctx, `Producto de análisis satelital consultado: ${productLabel}`, contentX, infoY, contentMaxW, 22);
+  // Determinar producto según resolución
+  let producto = '';
+  if (Number.isFinite(resolucion)) {
+    if (Math.abs(resolucion - 0.05) < 0.001) producto = 'CHIRPS';
+    else if (Math.abs(resolucion - 0.10) < 0.001) producto = 'IMERG';
+    else if (Math.abs(resolucion - 0.25) < 0.001) producto = 'ERA5';
+  }
+  wrapText(ctx, `Producto de análisis satelital consultado: ${producto}`, contentX, infoY, contentMaxW, 22);
 }
 
 function draw1DStatsTable(ctx, plotData, layout = {}) {
@@ -1218,6 +1236,139 @@ async function draw1DSelectedCellMap(ctx, plotData, selectedCell, layout = {}) {
   ctx.fillText('Sistema de referencias: WGS84 (EPSG:4326)', metadataX + 250, metadataY + 62);
 }
 
+async function draw1DSelectedCuencaMap(ctx, plotData, layout = {}) {
+  const panelX = layout.x ?? 56;
+  const panelY = layout.y ?? 170;
+  const panelW = layout.w ?? 580;
+  const panelH = layout.h ?? 860;
+
+  ctx.fillStyle = '#ffffff';
+  ctx.strokeStyle = '#cbd5e1';
+  drawCard(ctx, panelX, panelY, panelW, panelH, 12);
+
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 20px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('MAPA DE CUENCA CONSULTADA', panelX + panelW / 2, panelY + 32);
+  ctx.textAlign = 'left';
+
+  const metadataH = 88;
+  const metadataX = panelX + 14;
+  const metadataY = panelY + panelH - metadataH - 12;
+  const metadataW = panelW - 28;
+
+  const mapFrame = {
+    x: panelX + 14,
+    y: panelY + 48,
+    w: panelW - 28,
+    h: metadataY - (panelY + 48) - 10,
+    pad: 10,
+  };
+
+  ctx.fillStyle = '#f8fafc';
+  ctx.strokeStyle = '#cbd5e1';
+  drawCard(ctx, mapFrame.x, mapFrame.y, mapFrame.w, mapFrame.h, 10);
+
+  // Resolve selected cuenca DN
+  const cuencaDn = plotData?.cuencaDn ?? plotData?.predictionMeta?.cuencaDn ?? null;
+  const cuencaNombre = plotData?.cuencaNombre ?? null;
+
+  const cuencasFeatures = await loadCuencasGeoJSON();
+  const boundaryCoords = await loadStudyAreaBoundary();
+  const allPts = flattenFeatureCoordinates({ features: cuencasFeatures });
+  const boundaryLons = boundaryCoords.map((c) => c[0]);
+  const boundaryLats = boundaryCoords.map((c) => c[1]);
+
+  const refPts = allPts.length ? allPts : boundaryCoords;
+  const ptLons = refPts.map((c) => c[0]);
+  const ptLats = refPts.map((c) => c[1]);
+
+  const bounds = {
+    minLon: Math.min(...ptLons, ...(boundaryLons.length ? boundaryLons : ptLons)),
+    maxLon: Math.max(...ptLons, ...(boundaryLons.length ? boundaryLons : ptLons)),
+    minLat: Math.min(...ptLats, ...(boundaryLats.length ? boundaryLats : ptLats)),
+    maxLat: Math.max(...ptLats, ...(boundaryLats.length ? boundaryLats : ptLats)),
+  };
+
+  const lonPad = (bounds.maxLon - bounds.minLon) * 0.08;
+  const latPad = (bounds.maxLat - bounds.minLat) * 0.08;
+  bounds.minLon -= lonPad;
+  bounds.maxLon += lonPad;
+  bounds.minLat -= latPad;
+  bounds.maxLat += latPad;
+
+  drawBasemapBackdrop(ctx, mapFrame, bounds);
+  await drawLeafletBasemapTiles(ctx, bounds, mapFrame);
+  drawProjectBoundary(ctx, boundaryCoords, bounds, mapFrame);
+
+  // Draw all cuencas, highlight the selected one
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(mapFrame.x + 1, mapFrame.y + 1, mapFrame.w - 2, mapFrame.h - 2);
+  ctx.clip();
+
+  cuencasFeatures.forEach((feature) => {
+    const dn = Number(feature?.properties?.DN);
+    const isSelected = cuencaDn !== null && dn === Number(cuencaDn);
+    if (isSelected) return; // draw selected last (on top)
+    ctx.globalAlpha = 0.45;
+    drawGeoJSONFeature(ctx, feature?.geometry, bounds, mapFrame, 'rgba(148, 163, 184, 0.55)');
+  });
+
+  // Draw selected cuenca on top
+  cuencasFeatures.forEach((feature) => {
+    const dn = Number(feature?.properties?.DN);
+    const isSelected = cuencaDn !== null && dn === Number(cuencaDn);
+    if (!isSelected) return;
+    ctx.globalAlpha = 0.82;
+    drawGeoJSONFeature(ctx, feature?.geometry, bounds, mapFrame, 'rgba(16, 185, 129, 0.65)');
+    // Thick highlight border
+    ctx.globalAlpha = 1;
+    if (feature?.geometry?.type === 'Polygon') {
+      feature.geometry.coordinates.forEach((ring) => {
+        ctx.beginPath();
+        drawGeoJSONPolygonRing(ctx, ring, bounds, mapFrame);
+        ctx.strokeStyle = '#065f46';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      });
+    } else if (feature?.geometry?.type === 'MultiPolygon') {
+      feature.geometry.coordinates.forEach((polygon) => {
+        polygon.forEach((ring) => {
+          ctx.beginPath();
+          drawGeoJSONPolygonRing(ctx, ring, bounds, mapFrame);
+          ctx.strokeStyle = '#065f46';
+          ctx.lineWidth = 3;
+          ctx.stroke();
+        });
+      });
+    }
+  });
+
+  ctx.globalAlpha = 1;
+  ctx.restore();
+
+  // Metadata card at the bottom of the panel
+  ctx.fillStyle = '#f1f5f9';
+  ctx.strokeStyle = '#cbd5e1';
+  drawCard(ctx, metadataX, metadataY, metadataW, metadataH, 10);
+
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 14px Arial';
+  ctx.fillText('Metadatos', metadataX + 12, metadataY + 21);
+
+  const resolvedNombre = cuencaNombre
+    || cuencasFeatures.find((f) => Number(f?.properties?.DN) === Number(cuencaDn))?.properties?.Nombre
+    || 'N/A';
+
+  ctx.font = '14px Arial';
+  ctx.fillStyle = '#64748b';
+  ctx.fillText('Cuenca: ' + resolvedNombre, metadataX + 12, metadataY + 42);
+  ctx.fillText('DN: ' + (cuencaDn !== null ? cuencaDn : 'N/A'), metadataX + 12, metadataY + 62);
+  ctx.fillText('Sistema de referencias: WGS84 (EPSG:4326)', metadataX + 250, metadataY + 42);
+  ctx.fillText('Unidad espacial: Cuenca hidrográfica', metadataX + 250, metadataY + 62);
+}
+
 function resolveLatLon(cell) {
   if (Array.isArray(cell?.center) && cell.center.length >= 2) {
     return { lat: Number(cell.center[0]), lon: Number(cell.center[1]) };
@@ -1314,6 +1465,18 @@ async function loadStudyAreaBoundary() {
     if (!response.ok) return [];
     const geojson = await response.json();
     return flattenFeatureCoordinates(geojson);
+  } catch (_error) {
+    return [];
+  }
+}
+
+async function loadCuencasGeoJSON() {
+  try {
+    const _bp = process.env.NEXT_PUBLIC_BASE_PATH || '';
+    const response = await fetch(`${_bp}/data/Cuencas.geojson?t=${Date.now()}`);
+    if (!response.ok) return [];
+    const geojson = await response.json();
+    return Array.isArray(geojson?.features) ? geojson.features : [];
   } catch (_error) {
     return [];
   }
@@ -1572,24 +1735,27 @@ function drawGraticule(ctx, bounds, frame) {
   ctx.setLineDash([]);
   ctx.restore();
 
-  const drawLabelChip = (text, x, y, align = 'left') => {
-    const textW = ctx.measureText(text).width;
-    const padX = 6;
-    const chipW = textW + padX * 2;
-    const chipH = 16;
-    const chipX = align === 'center' ? x - chipW / 2 : x;
-    const chipY = y - chipH + 4;
-
+  // Etiquetas de longitud (abajo, más separadas)
+  const drawLonLabel = (text, x, y) => {
     ctx.save();
-    ctx.fillStyle = 'rgba(241, 245, 249, 0.97)';
-    ctx.strokeStyle = 'rgba(148, 163, 184, 0.98)';
-    ctx.lineWidth = 1;
-    drawCard(ctx, chipX, chipY, chipW, chipH, 4);
     ctx.fillStyle = '#1e293b';
     ctx.font = 'bold 12px Arial';
-    ctx.textAlign = 'left';
+    ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
-    ctx.fillText(text, chipX + padX, chipY + 2);
+    ctx.fillText(text, x, y + 18); // +18px más abajo (antes +10)
+    ctx.restore();
+  };
+
+  // Etiquetas de latitud (rotadas 90° y más a la izquierda)
+  const drawLatLabel = (text, x, y) => {
+    ctx.save();
+    ctx.translate(x - 10, y - 10); // 10px más a la izquierda, 10px más arriba
+    ctx.rotate(-Math.PI / 2); // rotar 90° CCW
+    ctx.fillStyle = '#1e293b';
+    ctx.font = 'bold 12px Arial';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 0, 0);
     ctx.restore();
   };
 
@@ -1597,13 +1763,13 @@ function drawGraticule(ctx, bounds, frame) {
     const lonLabel = formatLon(lon);
     const lonLabelX = clamp(x, frame.x + 40, frame.x + frame.w - 40);
     const lonLabelY = frame.y + frame.h - labelInsetY;
-    drawLabelChip(lonLabel, lonLabelX, lonLabelY, 'center');
+    drawLonLabel(lonLabel, lonLabelX, lonLabelY);
   });
 
   latTicks.forEach(({ lat, y }) => {
     const latLabel = formatLat(lat);
     const latLabelY = clamp(y + 6, frame.y + 18, frame.y + frame.h - 8);
-    drawLabelChip(latLabel, frame.x + labelInsetX, latLabelY, 'left');
+    drawLatLabel(latLabel, frame.x + labelInsetX - 10, latLabelY);
   });
 }
 
@@ -1626,18 +1792,42 @@ function drawProjectBoundary(ctx, boundaryCoords, bounds, frame) {
   ctx.restore();
 }
 
+function drawGeoJSONPolygonRing(ctx, ring, bounds, frame) {
+  if (!Array.isArray(ring) || ring.length < 3) return;
+  const first = projectToMap(Number(ring[0][0]), Number(ring[0][1]), bounds, frame);
+  ctx.moveTo(first.x, first.y);
+  for (let i = 1; i < ring.length; i++) {
+    const pt = projectToMap(Number(ring[i][0]), Number(ring[i][1]), bounds, frame);
+    ctx.lineTo(pt.x, pt.y);
+  }
+  ctx.closePath();
+}
+
+function drawGeoJSONFeature(ctx, geometry, bounds, frame, fillColor) {
+  if (!geometry) return;
+  const { type, coordinates } = geometry;
+  ctx.fillStyle = fillColor || 'rgba(156, 163, 175, 0.5)';
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+  ctx.lineWidth = 1.5;
+  if (type === 'Polygon') {
+    ctx.beginPath();
+    coordinates.forEach((ring) => drawGeoJSONPolygonRing(ctx, ring, bounds, frame));
+    ctx.fill('evenodd');
+    ctx.stroke();
+  } else if (type === 'MultiPolygon') {
+    coordinates.forEach((polygon) => {
+      ctx.beginPath();
+      polygon.forEach((ring) => drawGeoJSONPolygonRing(ctx, ring, bounds, frame));
+      ctx.fill('evenodd');
+      ctx.stroke();
+    });
+  }
+}
+
 function drawNorthArrow(ctx, x, y) {
   ctx.save();
 
-  const scale = 1.65; // antes 0.7
-  const cardW = 56;
-  const cardH = 92;
-  const cardX = x - cardW / 2;
-  const cardY = y - 58;
-
-  ctx.fillStyle = 'rgba(241, 245, 249, 0.92)';
-  ctx.strokeStyle = '#cbd5e1';
-  drawCard(ctx, cardX, cardY, cardW, cardH, 10);
+  const scale = 1.65;
 
   ctx.fillStyle = '#0f172a';
   ctx.textAlign = 'center';
@@ -1684,10 +1874,6 @@ function drawScaleBar(ctx, bounds, frame) {
   const panelH = 64;
 
   ctx.save();
-
-  ctx.fillStyle = 'rgba(241, 245, 249, 0.92)';
-  ctx.strokeStyle = '#cbd5e1';
-  drawCard(ctx, panelX, panelY, panelW, panelH, 10);
 
   // Barra sólida
   ctx.strokeStyle = '#0f172a';
@@ -1770,18 +1956,34 @@ async function draw2DMap(ctx, plotData, analysisState) {
   const legendW = 370;
   const legendH = Math.floor((mapH - 24) / 2);
   const legendX = DEFAULT_IMAGE_WIDTH - legendW - 56;
-  const legendY = DEFAULT_IMAGE_HEIGHT - legendH - 40;
+  // const legendY = DEFAULT_IMAGE_HEIGHT - legendH - 40; // Eliminado: ahora legendY es mutable y se asigna más abajo
 
-  // --- Cuadro informativo sobre la leyenda ---
+  // --- Cuadro informativo extendido con leyenda ---
   const infoBoxW = legendW;
   const infoBoxX = DEFAULT_IMAGE_WIDTH - infoBoxW - 56;
   const infoBoxY = mapY + 12;
-  const infoBoxH = 250;
+
+
+  // --- El recuadro se extiende hasta el final de la página ---
+  const infoBoxMaxWidth = infoBoxW - 44;
+  const infoBoxH = DEFAULT_IMAGE_HEIGHT - infoBoxY - 40;
+
 
   ctx.save();
   ctx.fillStyle = '#f1f5f9';
   ctx.strokeStyle = '#cbd5e1';
   drawCard(ctx, infoBoxX, infoBoxY, infoBoxW, infoBoxH, 10);
+
+  // Declarar dividerY justo antes de su uso
+  const dividerY = infoBoxY + Math.floor(infoBoxH / 2);
+
+  // Línea divisoria horizontal en la mitad del recuadro
+  ctx.beginPath();
+  ctx.moveTo(infoBoxX + 8, dividerY);
+  ctx.lineTo(infoBoxX + infoBoxW - 8, dividerY);
+  ctx.strokeStyle = '#cbd5e1';
+  ctx.lineWidth = 2;
+  ctx.stroke();
 
   // Título
   ctx.fillStyle = '#0f172a';
@@ -1792,70 +1994,187 @@ async function draw2DMap(ctx, plotData, analysisState) {
   ctx.font = '18px Arial';
   ctx.fillStyle = '#334155';
 
-    let infoY = infoBoxY + 60;
-      const infoBoxMaxWidth = infoBoxW - 44; // 22px de margen a cada lado
+  let infoY = infoBoxY + 60;
 
-      // Función para formatear fecha de YYYY-MM-DD a YYYY/MM/DD
-      const formatDate = (dateStr) => {
-        if (!dateStr || dateStr === 'N/A') return dateStr;
-        return String(dateStr).replace(/-/g, '/');
-      };
+  // Función para formatear fecha de YYYY-MM-DD a YYYY/MM/DD
+  const formatDate = (dateStr) => {
+    if (!dateStr || dateStr === 'N/A') return dateStr;
+    return String(dateStr).replace(/-/g, '/');
+  };
 
-      infoY = wrapText(ctx, 'Fecha de consulta: ' + new Date().toLocaleString(), infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
-      infoY = wrapText(
-      ctx,
-      'Fecha de visualización: ' +
+  infoY = wrapText(ctx, 'Fecha de consulta: ' + new Date().toLocaleString(), infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
+  infoY = wrapText(
+    ctx,
+    'Fecha de visualización: ' +
       (plotData?.isInterval && plotData?.period?.start_date && plotData?.period?.end_date
-      ? formatDate(plotData.period.start_date) + ' a ' + formatDate(plotData.period.end_date)
-      : formatDate(plotData?.date || 'N/A')),
-      infoBoxX + 22,
-      infoY,
-      infoBoxMaxWidth,
-      22
-      );
+        ? formatDate(plotData.period.start_date) + ' a ' + formatDate(plotData.period.end_date)
+        : formatDate(plotData?.date || 'N/A')),
+    infoBoxX + 22,
+    infoY,
+    infoBoxMaxWidth,
+    22
+  );
 
-      // Nivel de Agregación
-      // Nivel de Agregación / Frecuencia (según tipo de dato)
-      const aggregationLevel = analysisState?.indexScale || plotData?.scale || 'N/A';
-      const precipitationFrequencyCode = resolvePrecipFrequencyCode(plotData, analysisState);
-      const frequencyLabel = precipitationFrequencyCode === 'D' ? 'Diaria' : 'Mensual';
+  // Nivel de Agregación / Frecuencia
+  const aggregationLevel = analysisState?.indexScale || plotData?.scale || 'N/A';
+  const precipitationFrequencyCode = resolvePrecipFrequencyCode(plotData, analysisState);
+  const frequencyLabel = precipitationFrequencyCode === 'D' ? 'Diaria' : 'Mensual';
 
-const selectedCode = analysisState?.droughtIndex || analysisState?.variable || plotData?.variable || plotData?.variable_name || 'N/A';
-const dataKind = resolveDataKind(selectedCode);
-const satelliteProductLabel = resolveSatelliteProductLabel(plotData, analysisState);
-const legendVariableCode = String(dataKind?.code || selectedCode || '')
-.trim()
-.split(/\s*-\s*|\s+/)[0]
-.toLowerCase();
-const legendFrequencyCode = resolvePrecipFrequencyCode(plotData, analysisState);
+  const selectedCode = analysisState?.droughtIndex || analysisState?.variable || plotData?.variable || plotData?.variable_name || 'N/A';
+  const dataKind = resolveDataKind(selectedCode);
+  // Calcular resolución una sola vez y pasarla a resolveSatelliteProductLabel y a los metadatos
+  let resolucion = null;
+  if (typeof plotData?.resolution !== 'undefined' && plotData?.resolution !== null) {
+    resolucion = Number(plotData.resolution);
+  } else if (typeof analysisState?.spatialResolution !== 'undefined' && analysisState?.spatialResolution !== null) {
+    resolucion = Number(analysisState.spatialResolution);
+  }
+  const satelliteProductLabel = resolveSatelliteProductLabel(plotData, analysisState, resolucion);
+  const legendVariableCode = String(dataKind?.code || selectedCode || '')
+    .trim()
+    .split(/\s*-\s*|\s+/)[0]
+    .toLowerCase();
+  const legendFrequencyCode = resolvePrecipFrequencyCode(plotData, analysisState);
 
-infoY = wrapText(
-  ctx,
-  'Tipo de dato: ' + dataKind.group,
-  infoBoxX + 22,
-  infoY,
-  infoBoxMaxWidth,
-  22
-);
-    if (dataKind.family) {
-      infoY = wrapText(ctx, 'Nivel de Agregación: ' + aggregationLevel + ' meses', infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
-      infoY = wrapText(ctx, 'Tipo de índice: ' + dataKind.family, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
-      infoY = wrapText(ctx, 'Índice: ' + dataKind.code + ' - ' + dataKind.label, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
-    } else {
-      infoY = wrapText(ctx, 'Frecuencia: ' + frequencyLabel, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
-      infoY = wrapText(ctx, 'Variable: ' + dataKind.label, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
+  infoY = wrapText(
+    ctx,
+    'Tipo de dato: ' + dataKind.group,
+    infoBoxX + 22,
+    infoY,
+    infoBoxMaxWidth,
+    22
+  );
+  if (dataKind.family) {
+    infoY = wrapText(ctx, 'Nivel de Agregación: ' + aggregationLevel + ' meses', infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
+    infoY = wrapText(ctx, 'Tipo de índice: ' + dataKind.family, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
+    infoY = wrapText(ctx, 'Índice: ' + dataKind.code + ' - ' + dataKind.label, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
+  } else {
+    infoY = wrapText(ctx, 'Frecuencia: ' + frequencyLabel, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
+    infoY = wrapText(ctx, 'Variable: ' + dataKind.label, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
+  }
+  // Determinar producto según resolución
+  let producto = '';
+  if (Number.isFinite(resolucion)) {
+    if (Math.abs(resolucion - 0.05) < 0.001) producto = 'CHIRPS';
+    else if (Math.abs(resolucion - 0.10) < 0.001) producto = 'IMERG';
+    else if (Math.abs(resolucion - 0.25) < 0.001) producto = 'ERA5';
+  }
+  infoY = wrapText(
+    ctx,
+    'Producto de análisis satelital consultado: ' + producto,
+    infoBoxX + 22,
+    infoY,
+    infoBoxMaxWidth,
+    22
+  );
+
+  // --- LEYENDA DENTRO DEL MISMO RECUADRO ---
+  // Construcción de groupedLegend y mapLegend antes de su uso
+  // La leyenda comienza justo debajo de la línea divisoria
+  let legendY = dividerY + 24;
+  const groupedLegend = [];
+  const mapLegend = new Map();
+  cells.forEach((cell) => {
+    const key = `${cell?.category || 'Sin categoría'}|${cell?.color || '#CCCCCC'}`;
+    const v = Number(cell?.value);
+    if (!mapLegend.has(key)) {
+      mapLegend.set(key, {
+        label: cell?.category || 'Sin categoría',
+        color: cell?.color || '#CCCCCC',
+        severity: Number.isFinite(Number(cell?.severity)) ? Number(cell.severity) : 999,
+        min: Number.POSITIVE_INFINITY,
+        max: Number.NEGATIVE_INFINITY,
+        hasValue: false,
+      });
     }
-    infoY = wrapText(
-      ctx,
-      'Producto de análisis satelital consultado: ' + satelliteProductLabel,
-      infoBoxX + 22,
-      infoY,
-      infoBoxMaxWidth,
-      22
-    );
-      // --- Fin cuadro informativo ---
+    if (Number.isFinite(v)) {
+      const item = mapLegend.get(key);
+      item.min = Math.min(item.min, v);
+      item.max = Math.max(item.max, v);
+      item.hasValue = true;
+    }
+  });
+  groupedLegend.push(...mapLegend.values());
+  groupedLegend.sort((a, b) => a.severity - b.severity);
 
-      ctx.restore();
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 20px Arial';
+  ctx.fillText('LEYENDA', infoBoxX + 22, legendY);
+  legendY += 28;
+
+  if (!groupedLegend.length) {
+    const values = cells
+      .map((cell) => Number(cell?.value))
+      .filter((value) => Number.isFinite(value));
+    const minVal = values.length ? Math.min(...values) : null;
+    const maxVal = values.length ? Math.max(...values) : null;
+    ctx.fillStyle = '#334155';
+    ctx.font = '14px Arial';
+    // Calcular resolución y fuente una sola vez y mostrarlas juntas
+    const resolucion = Number(plotData?.resolution || analysisState?.spatialResolution);
+    let fuente = 'N/A';
+    if (Math.abs(resolucion - 0.25) < 0.001) fuente = 'ERA5';
+    else if (Math.abs(resolucion - 0.10) < 0.001) fuente = 'IMERG';
+    else if (Math.abs(resolucion - 0.05) < 0.001) fuente = 'CHIRPS';
+    const sistemaCoord = 'WGS84 (EPSG:4326)';
+
+    ctx.fillText(`Fuente de datos: ${fuente}`, metaX, metaY + 22);
+    ctx.fillText(`Tamaño de celda: ${Number.isFinite(resolucion) ? resolucion.toFixed(2) : 'N/A'}°`, metaX, metaY + 42);
+    ctx.fillText(`Sistema de coordenadas: ${sistemaCoord}`, metaX, metaY + 62);
+    ctx.save();
+    ctx.strokeStyle = 'rgba(30, 64, 175, 0.9)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.rect(infoBoxX + 22, legendY, 32, 18);
+    ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = '#334155';
+    ctx.font = '15px Arial';
+    ctx.fillText('Área de interés', infoBoxX + 64, legendY + 14);
+    legendY += 28;
+  } else {
+    const rowStep = 28;
+    for (let index = 0; index < groupedLegend.length; index += 1) {
+      const legendEntry = groupedLegend[index];
+      if (!legendEntry) continue;
+      const fixedRangeText = resolveFixedBackendRange(
+        legendVariableCode,
+        legendFrequencyCode,
+        legendEntry.label
+      );
+      const indexCode = String(dataKind?.code || legendVariableCode || '').trim().toUpperCase();
+      const isIndex =
+        METEOROLOGICAL_INDICES.has(indexCode) ||
+        HYDROLOGICAL_INDICES.has(indexCode);
+      const rangeText = fixedRangeText || (
+        isIndex
+          ? 'Clasificación backend'
+          : (legendEntry.hasValue
+              ? legendEntry.min.toFixed(2) + ' a ' + legendEntry.max.toFixed(2)
+              : 'N/A')
+      );
+      ctx.fillStyle = legendEntry.color;
+      ctx.fillRect(infoBoxX + 22, legendY, 32, 18);
+      ctx.fillStyle = '#334155';
+      ctx.font = '13px Arial';
+      const rawText = legendEntry.label + ': ' + rangeText;
+      const safeText = fitLegendText(ctx, rawText, infoBoxW - 90);
+      ctx.fillText(safeText, infoBoxX + 62, legendY + 14);
+      legendY += rowStep;
+    }
+    ctx.save();
+    ctx.strokeStyle = 'rgba(30, 64, 175, 0.9)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.rect(infoBoxX + 22, legendY, 32, 18);
+    ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = '#334155';
+    ctx.font = '15px Arial';
+    ctx.fillText('Área de interés', infoBoxX + 64, legendY + 14);
+    legendY += 28;
+  }
+  ctx.restore();
       const frame = { x: mapX, y: mapY, w: mapW, h: mapH, pad: 12 };
 
   ctx.fillStyle = '#f8fafc';
@@ -1903,7 +2222,7 @@ drawBasemapBackdrop(ctx, frame, bounds);
   const cellHeight = Math.max(5, Math.abs(stepLat.y - base.y) * 0.92);
 
   ctx.save();
-  ctx.globalAlpha = 0.9;
+  ctx.globalAlpha = 0.75;
   points.forEach((point) => {
     const { x, y } = projectToMap(point.lon, point.lat, bounds, frame);
     const left = x - cellWidth / 2;
@@ -1918,160 +2237,17 @@ drawBasemapBackdrop(ctx, frame, bounds);
   });
   ctx.restore();
 
-  // Dibujar la grilla al final para que sea visible sobre las celdas.
-  drawGraticule(ctx, bounds, frame);
-
-drawNorthArrow(ctx, mapX + 36, mapY + 36 + 40);
 drawScaleBar(ctx, bounds, frame);
+  // Restaurar elementos de lat/lon, norte y escala, pero sin recuadro de fondo.
+  drawGraticule(ctx, bounds, frame);
+  drawNorthArrow(ctx, mapX + 36, mapY + 36 + 40);
+  drawScaleBar(ctx, bounds, frame);
 
   ctx.fillStyle = '#334155';
   ctx.font = '15px Arial';
-
-const groupedLegend = [];
-const mapLegend = new Map();
-
-cells.forEach((cell) => {
-  const key = `${cell?.category || 'Sin categoría'}|${cell?.color || '#CCCCCC'}`;
-  const v = Number(cell?.value);
-
-  if (!mapLegend.has(key)) {
-    mapLegend.set(key, {
-      label: cell?.category || 'Sin categoría',
-      color: cell?.color || '#CCCCCC',
-      severity: Number.isFinite(Number(cell?.severity)) ? Number(cell.severity) : 999,
-      min: Number.POSITIVE_INFINITY,
-      max: Number.NEGATIVE_INFINITY,
-      hasValue: false,
-    });
-  }
-
-  if (Number.isFinite(v)) {
-    const item = mapLegend.get(key);
-    item.min = Math.min(item.min, v);
-    item.max = Math.max(item.max, v);
-    item.hasValue = true;
-  }
-});
 
 groupedLegend.push(...mapLegend.values());
 groupedLegend.sort((a, b) => a.severity - b.severity);
-
-const fitLegendText = (ctx2, text, maxWidth) => {
-  if (ctx2.measureText(text).width <= maxWidth) return text;
-  const ellipsis = '...';
-  let out = text;
-  while (out.length > 0 && ctx2.measureText(out + ellipsis).width > maxWidth) {
-    out = out.slice(0, -1);
-  }
-  return out + ellipsis;
-};
-
-ctx.fillStyle = '#ffffff';
-ctx.strokeStyle = '#cbd5e1';
-drawCard(ctx, legendX, legendY, legendW, legendH, 12);
-
-ctx.fillStyle = '#0f172a';
-ctx.font = 'bold 20px Arial';
-ctx.fillText('LEYENDA', legendX + 22, legendY + 32);
-
-if (!groupedLegend.length) {
-  const values = cells
-    .map((cell) => Number(cell?.value))
-    .filter((value) => Number.isFinite(value));
-
-  const minVal = values.length ? Math.min(...values) : null;
-  const maxVal = values.length ? Math.max(...values) : null;
-
-  ctx.fillStyle = '#334155';
-  ctx.font = '20px Arial';
-  ctx.fillText('Escala continua', legendX + 22, legendY + 66);
-  ctx.fillText('Min: ' + (minVal?.toFixed(2) ?? 'N/A'), legendX + 22, legendY + 92);
-  ctx.fillText('Max: ' + (maxVal?.toFixed(2) ?? 'N/A'), legendX + 22, legendY + 116);
-
-  const fallbackBaseY = legendY + 66;
-  const fallbackLineH = 26;
-  const fallbackOffsetY = fallbackBaseY + (2 * fallbackLineH) + 24;
-  ctx.save();
-  ctx.strokeStyle = 'rgba(30, 64, 175, 0.9)';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.rect(legendX + 22, fallbackOffsetY, 32, 18);
-  ctx.stroke();
-  ctx.restore();
-
-  ctx.fillStyle = '#334155';
-  ctx.font = '15px Arial';
-  ctx.fillText('Área de interés', legendX + 64, fallbackOffsetY + 14);
-} else {
-  let offsetY = legendY + 60;
-  const rowStep = 28;
-  const legendBottomLimit = legendY + legendH - 24;
-  let hiddenCount = 0;
-
-  for (let index = 0; index < groupedLegend.length; index += 1) {
-    const legendEntry = groupedLegend[index];
-    if (!legendEntry) continue;
-
-    const nextRowY = offsetY + rowStep;
-    const needsAreaRow = rowStep;
-
-    if (nextRowY + needsAreaRow > legendBottomLimit) {
-      hiddenCount = groupedLegend.length - index;
-      break;
-    }
-
-const fixedRangeText = resolveFixedBackendRange(
-  legendVariableCode,
-  legendFrequencyCode,
-  legendEntry.label
-);
-
-const indexCode = String(dataKind?.code || legendVariableCode || '').trim().toUpperCase();
-const isIndex =
-METEOROLOGICAL_INDICES.has(indexCode) ||
-HYDROLOGICAL_INDICES.has(indexCode);
-
-const rangeText = fixedRangeText || (
-  isIndex
-    ? 'Clasificación backend'
-    : (legendEntry.hasValue
-        ? legendEntry.min.toFixed(2) + ' a ' + legendEntry.max.toFixed(2)
-        : 'N/A')
-);
-    ctx.fillStyle = legendEntry.color;
-    ctx.fillRect(legendX + 22, offsetY, 32, 18);
-
-    ctx.fillStyle = '#334155';
-    ctx.font = '13px Arial';
-    const rawText = legendEntry.label + ': ' + rangeText;
-    const safeText = fitLegendText(ctx, rawText, legendW - 90);
-    ctx.fillText(safeText, legendX + 62, offsetY + 14);
-
-    offsetY += rowStep;
-  }
-
-  if (hiddenCount > 0) {
-    ctx.fillStyle = '#64748b';
-    ctx.font = '12px Arial';
-    ctx.fillText('... +' + hiddenCount + ' categorías más', legendX + 22, offsetY + 12);
-    offsetY += 20;
-  }
-
-  ctx.save();
-  ctx.strokeStyle = 'rgba(30, 64, 175, 0.9)';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  const areaY = Math.min(offsetY, legendBottomLimit - 20);
-  ctx.rect(legendX + 22, areaY, 32, 18);
-  ctx.stroke();
-  ctx.restore();
-
-  ctx.fillStyle = '#334155';
-  ctx.font = '15px Arial';
-  ctx.fillText('Área de interés', legendX + 64, areaY + 14);
-}
-  ctx.fillStyle = '#64748b';
-  ctx.font = '14px Arial';
 
   // --- Metadatos cartográficos en la esquina inferior izquierda ---
   ctx.save();
@@ -2079,29 +2255,314 @@ const rangeText = fixedRangeText || (
   ctx.font = 'bold 15px Arial';
 
   const metaX = 56;
-const metaY = DEFAULT_IMAGE_HEIGHT - 54;
+  const metaY = DEFAULT_IMAGE_HEIGHT - 54;
   ctx.fillText('Metadatos', metaX, metaY);
 
   ctx.font = '14px Arial';
-  const resolucion = plotData?.resolution || analysisState?.spatialResolution || 'N/A';
   const sistemaCoord = 'WGS84 (EPSG:4326)';
 
-  ctx.fillText(`Resolución: ${resolucion}°`, metaX, metaY + 22);
+  ctx.fillText(`Resolución de celdas: ${Number.isFinite(resolucion) ? resolucion.toFixed(2) : 'N/A'}°`, metaX, metaY + 22);
   ctx.fillText(`Sistema de coordenadas: ${sistemaCoord}`, metaX, metaY + 42);
   ctx.restore();
 }
+
+async function draw2DWatershedMap(ctx, plotData, analysisState) {
+  const cuencasData = Array.isArray(plotData?.cuencasData) ? plotData.cuencasData : [];
+  if (!cuencasData.length) return;
+
+  const colorByDn = new Map(cuencasData.map((c) => [Number(c.dn), c]));
+
+  await draw2DInstitutionalPanel(ctx, plotData);
+  drawAnalysisTypeIndicator(ctx, plotData);
+
+  const mapX = 56;
+  const mapY = 172;
+  const mapW = 1300;
+  const footerReserve = 90;
+  const mapH = DEFAULT_IMAGE_HEIGHT - footerReserve - mapY;
+
+  const legendW = 370;
+  const legendH = Math.floor((mapH - 24) / 2);
+  const legendX = DEFAULT_IMAGE_WIDTH - legendW - 56;
+  const legendY = DEFAULT_IMAGE_HEIGHT - legendH - 40;
+  const infoBoxW = legendW;
+  const infoBoxX = DEFAULT_IMAGE_WIDTH - infoBoxW - 56;
+  const infoBoxY = mapY + 12;
+  const infoBoxH = 250;
+
+  // Info box
+  ctx.save();
+  ctx.fillStyle = '#f1f5f9';
+  ctx.strokeStyle = '#cbd5e1';
+  drawCard(ctx, infoBoxX, infoBoxY, infoBoxW, infoBoxH, 10);
+
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 20px Arial';
+  ctx.fillText('INFORMACIÓN DE CONSULTA', infoBoxX + 22, infoBoxY + 32);
+
+  ctx.font = '18px Arial';
+  ctx.fillStyle = '#334155';
+
+  const selectedCode = analysisState?.droughtIndex || analysisState?.variable || plotData?.variable || plotData?.variable_name || 'N/A';
+  const dataKind = resolveDataKind(selectedCode);
+  const satelliteProductLabel = resolveSatelliteProductLabel(plotData, analysisState);
+  const aggregationLevel = analysisState?.indexScale || plotData?.scale || 'N/A';
+  const precipitationFrequencyCode = resolvePrecipFrequencyCode(plotData, analysisState);
+  const frequencyLabel = precipitationFrequencyCode === 'D' ? 'Diaria' : 'Mensual';
+  const infoBoxMaxWidth = infoBoxW - 44;
+
+  const formatDate = (dateStr) => {
+    if (!dateStr || dateStr === 'N/A') return dateStr;
+    return String(dateStr).replace(/-/g, '/');
+  };
+
+  let infoY = infoBoxY + 60;
+  infoY = wrapText(ctx, 'Fecha de consulta: ' + new Date().toLocaleString(), infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
+  infoY = wrapText(
+    ctx,
+    'Fecha de visualización: ' +
+      (plotData?.isInterval && plotData?.period?.start_date && plotData?.period?.end_date
+        ? formatDate(plotData.period.start_date) + ' a ' + formatDate(plotData.period.end_date)
+        : formatDate(plotData?.date || 'N/A')),
+    infoBoxX + 22, infoY, infoBoxMaxWidth, 22,
+  );
+  infoY = wrapText(ctx, 'Tipo de dato: ' + dataKind.group, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
+  if (dataKind.family) {
+    infoY = wrapText(ctx, 'Nivel de Agregación: ' + aggregationLevel + ' meses', infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
+    infoY = wrapText(ctx, 'Tipo de índice: ' + dataKind.family, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
+    infoY = wrapText(ctx, 'Índice: ' + dataKind.code + ' - ' + dataKind.label, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
+  } else {
+    infoY = wrapText(ctx, 'Frecuencia: ' + frequencyLabel, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
+    infoY = wrapText(ctx, 'Variable: ' + dataKind.label, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
+  }
+  wrapText(ctx, 'Producto de análisis satelital consultado: ' + satelliteProductLabel, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
+  ctx.restore();
+
+  // Map frame
+  const frame = { x: mapX, y: mapY, w: mapW, h: mapH, pad: 12 };
+  ctx.fillStyle = '#f8fafc';
+  ctx.strokeStyle = '#cbd5e1';
+  drawCard(ctx, mapX, mapY, mapW, mapH, 14);
+
+  // Load cuencas GeoJSON and compute bounds
+  const cuencasFeatures = await loadCuencasGeoJSON();
+  const allCuencaPoints = flattenFeatureCoordinates({ features: cuencasFeatures });
+  const boundaryCoords = await loadStudyAreaBoundary();
+  const boundaryLons = boundaryCoords.map((c) => c[0]);
+  const boundaryLats = boundaryCoords.map((c) => c[1]);
+
+  const refPts = allCuencaPoints.length ? allCuencaPoints : boundaryCoords;
+  const ptLons = refPts.map((c) => c[0]);
+  const ptLats = refPts.map((c) => c[1]);
+
+  const bounds = {
+    minLon: Math.min(...ptLons, ...(boundaryLons.length ? boundaryLons : ptLons)),
+    maxLon: Math.max(...ptLons, ...(boundaryLons.length ? boundaryLons : ptLons)),
+    minLat: Math.min(...ptLats, ...(boundaryLats.length ? boundaryLats : ptLats)),
+    maxLat: Math.max(...ptLats, ...(boundaryLats.length ? boundaryLats : ptLats)),
+  };
+
+  const lonPad = (bounds.maxLon - bounds.minLon) * 0.05;
+  const latPad = (bounds.maxLat - bounds.minLat) * 0.05;
+  bounds.minLon -= lonPad;
+  bounds.maxLon += lonPad;
+  bounds.minLat -= latPad;
+  bounds.maxLat += latPad;
+
+  drawBasemapBackdrop(ctx, frame, bounds);
+  await drawLeafletBasemapTiles(ctx, bounds, frame);
+  drawProjectBoundary(ctx, boundaryCoords, bounds, frame);
+
+  // Draw cuenca polygons clipped to map frame
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(frame.x + 1, frame.y + 1, frame.w - 2, frame.h - 2);
+  ctx.clip();
+
+  ctx.globalAlpha = 0.85;
+  cuencasFeatures.forEach((feature) => {
+    const dn = Number(feature?.properties?.DN);
+    const cuencaInfo = colorByDn.get(dn);
+    const fillColor = cuencaInfo?.color || 'rgba(156, 163, 175, 0.4)';
+    drawGeoJSONFeature(ctx, feature?.geometry, bounds, frame, fillColor);
+  });
+
+  // Draw cuenca name labels
+  ctx.globalAlpha = 1;
+  ctx.font = 'bold 13px Arial';
+  ctx.textAlign = 'center';
+  cuencasFeatures.forEach((feature) => {
+    const dn = Number(feature?.properties?.DN);
+    const cuencaInfo = colorByDn.get(dn);
+    const nombre = feature?.properties?.Nombre || cuencaInfo?.nombre || '';
+    if (!nombre) return;
+    const pts = flattenFeatureCoordinates({ features: [feature] });
+    if (!pts.length) return;
+    const cx = pts.reduce((sum, p) => sum + p[0], 0) / pts.length;
+    const cy = pts.reduce((sum, p) => sum + p[1], 0) / pts.length;
+    const { x, y } = projectToMap(cx, cy, bounds, frame);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.lineWidth = 3;
+    ctx.strokeText(nombre, x, y);
+    ctx.fillStyle = '#1e293b';
+    ctx.fillText(nombre, x, y);
+  });
+  ctx.textAlign = 'left';
+  ctx.restore();
+
+  drawGraticule(ctx, bounds, frame);
+  drawNorthArrow(ctx, mapX + 36, mapY + 36 + 40);
+  drawScaleBar(ctx, bounds, frame);
+
+  // Legend
+  const legendVariableCode = String(dataKind?.code || selectedCode || '').trim().split(/\s*-\s*|\s+/)[0].toLowerCase();
+  const legendFrequencyCode = resolvePrecipFrequencyCode(plotData, analysisState);
+  const indexCode = String(dataKind?.code || legendVariableCode || '').trim().toUpperCase();
+  const isIndex = METEOROLOGICAL_INDICES.has(indexCode) || HYDROLOGICAL_INDICES.has(indexCode);
+
+  const mapLegend = new Map();
+  cuencasData.forEach((c) => {
+    const key = `${c?.category || 'Sin categoría'}|${c?.color || '#CCCCCC'}`;
+    const v = Number(c?.value);
+    if (!mapLegend.has(key)) {
+      mapLegend.set(key, {
+        label: c?.category || 'Sin categoría',
+        color: c?.color || '#CCCCCC',
+        severity: Number.isFinite(Number(c?.severity)) ? Number(c.severity) : 999,
+        min: Number.POSITIVE_INFINITY,
+        max: Number.NEGATIVE_INFINITY,
+        hasValue: false,
+      });
+    }
+    if (Number.isFinite(v)) {
+      const item = mapLegend.get(key);
+      item.min = Math.min(item.min, v);
+      item.max = Math.max(item.max, v);
+      item.hasValue = true;
+    }
+  });
+
+  const groupedLegend = [...mapLegend.values()].sort((a, b) => a.severity - b.severity);
+
+  const fitLegendText = (ctx2, text, maxWidth) => {
+    if (ctx2.measureText(text).width <= maxWidth) return text;
+    const ellipsis = '...';
+    let out = text;
+    while (out.length > 0 && ctx2.measureText(out + ellipsis).width > maxWidth) {
+      out = out.slice(0, -1);
+    }
+    return out + ellipsis;
+  };
+
+  ctx.fillStyle = '#ffffff';
+  ctx.strokeStyle = '#cbd5e1';
+  drawCard(ctx, legendX, legendY, legendW, legendH, 12);
+
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 20px Arial';
+  ctx.fillText('LEYENDA', legendX + 22, legendY + 32);
+
+  if (groupedLegend.length) {
+    let offsetY = legendY + 60;
+    const rowStep = 28;
+    const legendBottomLimit = legendY + legendH - 24;
+    let hiddenCount = 0;
+
+    for (let i = 0; i < groupedLegend.length; i++) {
+      const legendEntry = groupedLegend[i];
+      if (!legendEntry) continue;
+      if (offsetY + rowStep + rowStep > legendBottomLimit) {
+        hiddenCount = groupedLegend.length - i;
+        break;
+      }
+      const fixedRangeText = resolveFixedBackendRange(legendVariableCode, legendFrequencyCode, legendEntry.label);
+      const rangeText = fixedRangeText || (
+        isIndex
+          ? 'Clasificación backend'
+          : (legendEntry.hasValue ? legendEntry.min.toFixed(2) + ' a ' + legendEntry.max.toFixed(2) : 'N/A')
+      );
+      ctx.fillStyle = legendEntry.color;
+      ctx.fillRect(legendX + 22, offsetY, 32, 18);
+      ctx.fillStyle = '#334155';
+      ctx.font = '13px Arial';
+      ctx.fillText(fitLegendText(ctx, legendEntry.label + ': ' + rangeText, legendW - 90), legendX + 62, offsetY + 14);
+      offsetY += rowStep;
+    }
+
+    if (hiddenCount > 0) {
+      ctx.fillStyle = '#64748b';
+      ctx.font = '12px Arial';
+      ctx.fillText('... +' + hiddenCount + ' categorías más', legendX + 22, offsetY + 12);
+      offsetY += 20;
+    }
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(30, 64, 175, 0.9)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    const areaY = Math.min(offsetY, legendBottomLimit - 20);
+    ctx.rect(legendX + 22, areaY, 32, 18);
+    ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = '#334155';
+    ctx.font = '15px Arial';
+    ctx.fillText('Área de interés', legendX + 64, areaY + 14);
+  }
+
+  // Footer metadata
+  ctx.save();
+  ctx.fillStyle = '#334155';
+  ctx.font = 'bold 15px Arial';
+  const wMetaX = 56;
+  const wMetaY = DEFAULT_IMAGE_HEIGHT - 54;
+  ctx.fillText('Metadatos', wMetaX, wMetaY);
+  ctx.font = '14px Arial';
+  ctx.fillText('Unidad espacial: Cuencas hidrográficas', wMetaX, wMetaY + 22);
+  ctx.fillText('Sistema de coordenadas: WGS84 (EPSG:4326)', wMetaX, wMetaY + 42);
+  ctx.restore();
+}
+
+function buildWatershedSpatialJson({ plotData, analysisState }) {
+  const variable = resolveSelectedVariable(plotData, analysisState);
+  const cuencas = Array.isArray(plotData?.cuencasData) ? plotData.cuencasData : [];
+  const rows = cuencas.map((c) => ({
+    Cuenca_DN: c?.dn ?? null,
+    Nombre_Cuenca: c?.nombre ?? null,
+    Valor: c?.value ?? null,
+    Categoria: c?.category ?? null,
+  }));
+  return {
+    tipo: '2D-cuencas',
+    metadata: {
+      variable_o_indice: variable,
+      fecha_intervalo: resolveTimeInterval(plotData, analysisState),
+      fecha: plotData?.date || 'N/A',
+      fuente: plotData?.dataSource || analysisState?.dataSource || 'N/A',
+    },
+    columnas: ['Cuenca_DN', 'Nombre_Cuenca', 'Valor', 'Categoria'],
+    datos: rows,
+  };
+}
+
 export function downloadAnalysisJson({ plotData, analysisState, selectedCell }) {
   const is2D = plotData.type === '2D' || plotData.type === 'prediction-2d' || plotData.type === 'prediction-history-2d';
-  const data = is2D
-    ? build2DJson({ plotData, analysisState })
-    : build1DJson({ plotData, analysisState, selectedCell });
+  let data;
+  if (is2D && plotData.isCuencas) {
+    data = buildWatershedSpatialJson({ plotData, analysisState });
+  } else if (is2D) {
+    data = build2DJson({ plotData, analysisState });
+  } else {
+    data = build1DJson({ plotData, analysisState, selectedCell });
+  }
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   triggerFileDownload(blob, sanitizeFilename(plotData?.title) + '.json');
   return {
     fileName: sanitizeFilename(plotData?.title) + '.json',
-    rows: is2D
-      ? (Array.isArray(plotData?.gridCells) ? plotData.gridCells.length : 0)
-      : (Array.isArray(plotData?.data) ? plotData.data.length : 0),
+    rows: is2D && plotData.isCuencas
+      ? (Array.isArray(plotData?.cuencasData) ? plotData.cuencasData.length : 0)
+      : is2D
+        ? (Array.isArray(plotData?.gridCells) ? plotData.gridCells.length : 0)
+        : (Array.isArray(plotData?.data) ? plotData.data.length : 0),
     type: 'json',
   };
 }
