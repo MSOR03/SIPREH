@@ -11,7 +11,11 @@ import numpy as np
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import date
 
-from app.services.hydro_constants import HYDRO_STATIONS, INDICES_WITHOUT_SCALE
+from app.services.hydro_constants import (
+    HYDRO_STATIONS,
+    INDICES_WITHOUT_SCALE,
+    HYDRO_PERCENTILE_SEVERITY_INDICES,
+)
 
 
 class HydroSpatialMixin:
@@ -52,7 +56,7 @@ class HydroSpatialMixin:
         cache_key = None
         try:
             cache_key = self.cache._generate_key(
-                "hydro_spatial",
+                "hydro_spatial_v2",
                 url=parquet_url,
                 index=index_name,
                 scale=scale,
@@ -257,6 +261,14 @@ class HydroSpatialMixin:
                 "valid_stations": valid_stations,
                 "null_stations": total_stations - valid_stations,
             }
+            if index_name in HYDRO_PERCENTILE_SEVERITY_INDICES and valid_stations > 0:
+                p20, p40, p60, p80 = np.nanpercentile(valid_vals, [20, 40, 60, 80])
+                statistics["percentiles"] = {
+                    "p20": float(p20),
+                    "p40": float(p40),
+                    "p60": float(p60),
+                    "p80": float(p80),
+                }
 
             # Bounds reales
             actual_bounds = {}
