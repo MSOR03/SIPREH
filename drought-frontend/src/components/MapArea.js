@@ -7,7 +7,6 @@ import { useTheme } from '@/contexts/ThemeContext';
 import dynamic from 'next/dynamic';
 const TimeSeriesChart = dynamic(() => import('./TimeSeriesChart'), { ssr: false });
 const PredictionTimeSeriesChart = dynamic(() => import('./PredictionTimeSeriesChart'), { ssr: false });
-const DroughtEventTimeline = dynamic(() => import('./DroughtEventTimeline'), { ssr: false });
 const AiSummaryModal = dynamic(() => import('./AiSummaryModal'), { ssr: false });
 import { useGridNavigation } from '../hooks/useGridNavigation';
 import { formatLevelLabel, parseCellIds } from '../utils/gridLevels';
@@ -358,6 +357,8 @@ export default function MapArea({
             showBoundary={mapLayers?.boundary ?? true}
             showCuencas={mapLayers?.cuencas ?? false}
             showEmbalses={mapLayers?.embalses ?? false}
+            showPerimetroUrbano={mapLayers?.perimetroUrbano ?? false}
+            showMunicipioBogota={mapLayers?.municipioBogota ?? false}
             cuencasSpatialData={plotData?.isCuencas ? plotData.cuencasData : null}
             selectedEntity={selectedEntity}
             onEntitySelect={handleEntitySelect}
@@ -382,7 +383,9 @@ export default function MapArea({
                   { key: 'stations', label: 'Estaciones', icon: Navigation, color: 'text-green-500' },
                   { key: 'cuencas', label: 'Cuencas', icon: Droplets, color: 'text-teal-500' },
                   { key: 'embalses', label: 'Embalses', icon: Database, color: 'text-purple-500' },
-                  { key: 'boundary', label: 'Límite área de estudio', icon: MapIcon, color: 'text-gray-500' },
+                  { key: 'boundary', label: 'Límite de área de estudio', icon: MapIcon, color: 'text-gray-500' },
+                  { key: 'perimetroUrbano', label: 'Perímetro urbano', icon: MapIcon, color: 'text-pink-500' },
+                  { key: 'municipioBogota', label: 'Municipio', icon: MapIcon, color: 'text-orange-500' },
                 ].map(({ key, label, icon: Icon, color }) => (
                   <label
                     key={key}
@@ -726,10 +729,6 @@ export default function MapArea({
                   />
                 </div>
 
-                {/* Timeline de eventos de sequía con duración */}
-                {plotData.hasDuration && (plotData.rawData || plotData.data) && (
-                  <DroughtEventTimeline data={plotData.rawData || plotData.data} />
-                )}
               </div>
             ) : (
               <div className="relative h-80 bg-gradient-to-br from-blue-50/30 via-blue-50/20 to-blue-50/30 dark:from-[#1a1f2e] dark:via-[#141920] dark:to-blue-950/20 rounded-2xl flex items-center justify-center border-2 border-dashed border-gray-300 dark:border-gray-600 shadow-inner overflow-hidden">

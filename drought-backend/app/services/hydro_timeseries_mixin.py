@@ -11,7 +11,12 @@ import numpy as np
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import date
 
-from app.services.hydro_constants import HYDRO_INDEX_KEYS, HYDRO_STATIONS, INDICES_WITHOUT_SCALE
+from app.services.hydro_constants import (
+    HYDRO_INDEX_KEYS,
+    HYDRO_STATIONS,
+    INDICES_WITHOUT_SCALE,
+    HYDRO_PERCENTILE_SEVERITY_INDICES,
+)
 
 
 class HydroTimeseriesMixin:
@@ -46,7 +51,7 @@ class HydroTimeseriesMixin:
         cache_key = None
         try:
             cache_key = self.cache._generate_key(
-                "hydro_ts",
+                "hydro_ts_v2",
                 url=parquet_url,
                 station=station_code,
                 index=index_name,
@@ -163,6 +168,14 @@ class HydroTimeseriesMixin:
                     "count": n_valid,
                     "missing": len(stat_vals) - n_valid,
                 }
+                if index_name in HYDRO_PERCENTILE_SEVERITY_INDICES and n_valid > 0:
+                    p20, p40, p60, p80 = np.nanpercentile(valid_arr, [20, 40, 60, 80])
+                    statistics["percentiles"] = {
+                        "p20": float(p20),
+                        "p40": float(p40),
+                        "p60": float(p60),
+                        "p80": float(p80),
+                    }
             else:
                 statistics = {"mean": None, "min": None, "max": None, "std": None, "count": 0, "missing": 0}
 

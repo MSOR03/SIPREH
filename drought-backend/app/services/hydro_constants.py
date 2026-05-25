@@ -50,6 +50,23 @@ HYDRO_DEFAULT_SCALE = 1
 # Fecha_Final + Duracion (son eventos de sequía con rango temporal).
 INDICES_WITHOUT_SCALE = {"DDI", "HDI"}
 
+# Índices hidrológicos cuya severidad se clasifica por percentiles del período consultado.
+# Se usan P20/P40/P60/P80 con 5 categorías (opción 1).
+HYDRO_PERCENTILE_SEVERITY_INDICES = {"DDI", "HDI", "MFI"}
+
+# Categorías para clasificación por percentiles (valor alto = más seco).
+# P20 < x <= P40: Moderadamente Húmedo
+# P40 < x <= P60: Normal
+# P60 < x <= P80: Moderadamente Seco
+# x > P80: Severamente Seco
+HYDRO_PERCENTILE_SEVERITY_CATEGORIES = [
+    {"label": "Muy Húmedo",           "color": "#0000FF", "severity": 1},
+    {"label": "Moderadamente Húmedo", "color": "#00FFFF", "severity": 2},
+    {"label": "Normal",               "color": "#00FF00", "severity": 3},
+    {"label": "Moderadamente Seco",   "color": "#FFFF00", "severity": 4},
+    {"label": "Severamente Seco",     "color": "#FFA500", "severity": 5},
+]
+
 # Mapeo de índices hidrológicos
 HYDRO_COLUMN_MAPPING = {
     "SDI": {"name": "SDI - Índice de Sequía de Caudales",        "unit": "adimensional", "category": "hydrological"},
@@ -60,8 +77,32 @@ HYDRO_COLUMN_MAPPING = {
 }
 
 # Escalas de severidad para índices hidrológicos
-# Usa los mismos bins estándar que los índices meteorológicos (DEFAULT)
+# SDI y SRI tienen escalas específicas con umbrales definidos
 HYDRO_INDEX_DROUGHT_SCALES = {
+    "SDI": {
+        "bins": [-np.inf, -2.0, -1.5, -1.0, 1.0, 1.5, 2.0, np.inf],
+        "categories": [
+            {"label": "Extremadamente Seco",   "color": "#FF0000", "severity": 6},
+            {"label": "Severamente Seco",      "color": "#FFA500", "severity": 5},
+            {"label": "Moderadamente Seco",    "color": "#FFFF00", "severity": 4},
+            {"label": "Normal",                "color": "#00FF00", "severity": 3},
+            {"label": "Moderadamente Húmedo",  "color": "#00FFFF", "severity": 2},
+            {"label": "Muy Húmedo",            "color": "#0000FF", "severity": 1},
+            {"label": "Extremadamente Húmedo", "color": "#000080", "severity": 0},
+        ],
+    },
+    "SRI": {
+        "bins": [-np.inf, -2.0, -1.5, -1.0, 1.0, 1.5, 2.0, np.inf],
+        "categories": [
+            {"label": "Extremadamente Seco",   "color": "#FF0000", "severity": 6},
+            {"label": "Severamente Seco",      "color": "#FFA500", "severity": 5},
+            {"label": "Moderadamente Seco",    "color": "#FFFF00", "severity": 4},
+            {"label": "Normal",                "color": "#00FF00", "severity": 3},
+            {"label": "Moderadamente Húmedo",  "color": "#00FFFF", "severity": 2},
+            {"label": "Muy Húmedo",            "color": "#0000FF", "severity": 1},
+            {"label": "Extremadamente Húmedo", "color": "#000080", "severity": 0},
+        ],
+    },
     "DEFAULT": {
         "bins": [-np.inf, -2.0, -1.5, -1.0, 1.0, 1.5, 2.0, np.inf],
         "categories": [

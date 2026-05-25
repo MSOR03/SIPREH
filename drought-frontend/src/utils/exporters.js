@@ -448,9 +448,9 @@ ctx.restore();
     await draw2DInstitutionalPanel(ctx, plotData);
     drawAnalysisTypeIndicator(ctx, plotData);
     const mapLayout = { x: 56, y: 170, w: 580, h: 860 };
-    const infoLayout  = { x: 656, y: 170, w: 540, h: 220 };
-    const statsLayout = { x: 1204, y: 170, w: 540, h: 220 };
-    const chartLayout = { x: 656, y: 410, w: 1088, h: 620 };
+    const infoLayout  = { x: 656, y: 170, w: 540, h: 260 };
+    const statsLayout = { x: 1204, y: 170, w: 540, h: 260 };
+    const chartLayout = { x: 656, y: 450, w: 1088, h: 580 };
     // Calcular resolución una sola vez
     let resolucion = null;
     if (typeof plotData?.resolution !== 'undefined' && plotData?.resolution !== null) {
@@ -934,8 +934,10 @@ function draw1DConsultationInfo(ctx, plotData, analysisState, layout = {}) {
 
   const selectedCode = resolveSelectedVariable(plotData, analysisState);
   const varKey = selectedCode.trim().toLowerCase();
+  const selectedCodeUpper = String(selectedCode || '').trim().split(/\s*-\s*|\s+/)[0].toUpperCase();
   const chartDisplayName = CHART_TITLE_LABELS[varKey] || varKey;
-  const isIndex = METEOROLOGICAL_INDICES.has(varKey) || HYDROLOGICAL_INDICES.has(varKey);
+  const isIndex = METEOROLOGICAL_INDICES.has(selectedCodeUpper) || HYDROLOGICAL_INDICES.has(selectedCodeUpper);
+  const isHydroIndex = HYDROLOGICAL_INDICES.has(selectedCodeUpper);
   const dataKind = resolveDataKind(selectedCode);
   const aggregationLevel = analysisState?.indexScale || plotData?.scale || 'N/A';
   const precipitationFrequencyCode = resolvePrecipFrequencyCode(plotData, analysisState);
@@ -963,6 +965,13 @@ function draw1DConsultationInfo(ctx, plotData, analysisState, layout = {}) {
   ctx.font = '16px Arial';
 
   let infoY = y + 56;
+  if (isHydroIndex) {
+    const stationName = plotData?.location?.name || plotData?.location?.station_name || 'N/A';
+    const stationCode = plotData?.location?.codigo || plotData?.location?.code || 'N/A';
+    infoY = wrapText(ctx, `Estación: ${stationName}`, contentX, infoY, contentMaxW, 22);
+    infoY = wrapText(ctx, `Código: ${stationCode}`, contentX, infoY, contentMaxW, 22);
+  }
+
   infoY = wrapText(ctx, `Fecha de consulta: ${formatExportTimestamp(new Date())}`, contentX, infoY, contentMaxW, 22);
   infoY = wrapText(ctx, `Fecha de visualización: ${timeWindow}`, contentX, infoY, contentMaxW, 22);
   infoY = wrapText(ctx, `Tipo de dato: ${dataKind.group}`, contentX, infoY, contentMaxW, 22);
@@ -1125,6 +1134,7 @@ async function draw1DSelectedCellMap(ctx, plotData, selectedCell, layout = {}) {
   const targetCell = selectedCell || plotData?.location || null;
   const target = resolveLatLon(targetCell);
   if (!target) return;
+  const isHydroStation = Boolean(plotData?.isHydro || targetCell?.codigo || plotData?.location?.codigo);
 
   const panelX = layout.x ?? 1060;
   const panelY = layout.y ?? 330;
@@ -1138,7 +1148,7 @@ async function draw1DSelectedCellMap(ctx, plotData, selectedCell, layout = {}) {
   ctx.fillStyle = '#0f172a';
   ctx.font = 'bold 20px Arial';
   ctx.textAlign = 'center';
-  ctx.fillText('MAPA DE CELDA CONSULTADA', panelX + panelW / 2, panelY + 32);
+  ctx.fillText(isHydroStation ? 'MAPA DE ESTACION CONSULTADA' : 'MAPA DE CELDA CONSULTADA', panelX + panelW / 2, panelY + 32);
   ctx.textAlign = 'left';
 
   const metadataH = 88;
@@ -1188,35 +1198,58 @@ async function draw1DSelectedCellMap(ctx, plotData, selectedCell, layout = {}) {
   drawBasemapBackdrop(ctx, mapFrame, bounds);
   await drawLeafletBasemapTiles(ctx, bounds, mapFrame);
   drawProjectBoundary(ctx, boundaryCoords, bounds, mapFrame);
-  drawCellGridOverlay(ctx, bounds, mapFrame, resolution);
+  if (!isHydroStation) {
+    drawCellGridOverlay(ctx, bounds, mapFrame, resolution);
+  }
 
-  const halfRes = Number.isFinite(resolution) ? Math.max(resolution / 2, 0.0001) : 0.025;
+  if (isHydroStation) {
+    const { x, y } = projectToMap(target.lon, target.lat, bounds, mapFrame);
+    const radius = 11;
+    ctx.save();
+    ctx.fillStyle = '#1d4ed8';
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
 
-  const west = clamp(target.lon - halfRes, bounds.minLon, bounds.maxLon);
-  const east = clamp(target.lon + halfRes, bounds.minLon, bounds.maxLon);
-  const north = clamp(target.lat + halfRes, bounds.minLat, bounds.maxLat);
-  const south = clamp(target.lat - halfRes, bounds.minLat, bounds.maxLat);
+    // Halo externo para dar el mismo énfasis visual del mapa online.
+    ctx.strokeStyle = 'rgba(29, 78, 216, 0.45)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x, y, radius + 5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  } else {
+    const halfRes = Number.isFinite(resolution) ? Math.max(resolution / 2, 0.0001) : 0.025;
 
-  const nw = projectToMap(west, north, bounds, mapFrame);
-  const se = projectToMap(east, south, bounds, mapFrame);
+    const west = clamp(target.lon - halfRes, bounds.minLon, bounds.maxLon);
+    const east = clamp(target.lon + halfRes, bounds.minLon, bounds.maxLon);
+    const north = clamp(target.lat + halfRes, bounds.minLat, bounds.maxLat);
+    const south = clamp(target.lat - halfRes, bounds.minLat, bounds.maxLat);
 
-  const boxX = Math.min(nw.x, se.x);
-  const boxY = Math.min(nw.y, se.y);
-  const boxW = Math.max(8, Math.abs(se.x - nw.x));
-  const boxH = Math.max(8, Math.abs(se.y - nw.y));
+    const nw = projectToMap(west, north, bounds, mapFrame);
+    const se = projectToMap(east, south, bounds, mapFrame);
 
-  ctx.save();
-  ctx.fillStyle = 'rgba(16, 185, 129, 0.4)';
-  ctx.strokeStyle = '#065f46';
-  ctx.lineWidth = 4;
-  ctx.fillRect(boxX, boxY, boxW, boxH);
-  ctx.strokeRect(boxX, boxY, boxW, boxH);
+    const boxX = Math.min(nw.x, se.x);
+    const boxY = Math.min(nw.y, se.y);
+    const boxW = Math.max(8, Math.abs(se.x - nw.x));
+    const boxH = Math.max(8, Math.abs(se.y - nw.y));
 
-  // Doble contorno para incrementar contraste frente a la grilla.
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
-  ctx.lineWidth = 1.5;
-  ctx.strokeRect(boxX + 1, boxY + 1, Math.max(2, boxW - 2), Math.max(2, boxH - 2));
-  ctx.restore();
+    ctx.save();
+    ctx.fillStyle = 'rgba(16, 185, 129, 0.4)';
+    ctx.strokeStyle = '#065f46';
+    ctx.lineWidth = 4;
+    ctx.fillRect(boxX, boxY, boxW, boxH);
+    ctx.strokeRect(boxX, boxY, boxW, boxH);
+
+    // Doble contorno para incrementar contraste frente a la grilla.
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(boxX + 1, boxY + 1, Math.max(2, boxW - 2), Math.max(2, boxH - 2));
+    ctx.restore();
+  }
 
   const cellResolution = resolution;
 
@@ -1232,7 +1265,9 @@ async function draw1DSelectedCellMap(ctx, plotData, selectedCell, layout = {}) {
   ctx.fillStyle = '#64748b';
   ctx.fillText('Latitud: ' + target.lat.toFixed(4), metadataX + 12, metadataY + 42);
   ctx.fillText('Longitud: ' + target.lon.toFixed(4), metadataX + 12, metadataY + 62);
-  ctx.fillText('Resolución de celdas: ' + (Number.isFinite(cellResolution) ? `${cellResolution}°` : 'N/A'), metadataX + 250, metadataY + 42);
+  if (!isHydroStation) {
+    ctx.fillText('Resolución de celdas: ' + (Number.isFinite(cellResolution) ? `${cellResolution}°` : 'N/A'), metadataX + 250, metadataY + 42);
+  }
   ctx.fillText('Sistema de referencias: WGS84 (EPSG:4326)', metadataX + 250, metadataY + 62);
 }
 
@@ -2022,6 +2057,8 @@ async function draw2DMap(ctx, plotData, analysisState) {
 
   const selectedCode = analysisState?.droughtIndex || analysisState?.variable || plotData?.variable || plotData?.variable_name || 'N/A';
   const dataKind = resolveDataKind(selectedCode);
+  const selectedCodeUpper = String(selectedCode || '').trim().split(/\s*-\s*|\s+/)[0].toUpperCase();
+  const isHydroIndex = HYDROLOGICAL_INDICES.has(selectedCodeUpper);
   // Calcular resolución una sola vez y pasarla a resolveSatelliteProductLabel y a los metadatos
   let resolucion = null;
   if (typeof plotData?.resolution !== 'undefined' && plotData?.resolution !== null) {
@@ -2052,6 +2089,7 @@ async function draw2DMap(ctx, plotData, analysisState) {
     infoY = wrapText(ctx, 'Frecuencia: ' + frequencyLabel, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
     infoY = wrapText(ctx, 'Variable: ' + dataKind.label, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
   }
+
   // Determinar producto según resolución
   let producto = '';
   if (Number.isFinite(resolucion)) {
@@ -2148,7 +2186,7 @@ async function draw2DMap(ctx, plotData, analysisState) {
         HYDROLOGICAL_INDICES.has(indexCode);
       const rangeText = fixedRangeText || (
         isIndex
-          ? 'Clasificación backend'
+          ? ''
           : (legendEntry.hasValue
               ? legendEntry.min.toFixed(2) + ' a ' + legendEntry.max.toFixed(2)
               : 'N/A')
@@ -2157,7 +2195,7 @@ async function draw2DMap(ctx, plotData, analysisState) {
       ctx.fillRect(infoBoxX + 22, legendY, 32, 18);
       ctx.fillStyle = '#334155';
       ctx.font = '13px Arial';
-      const rawText = legendEntry.label + ': ' + rangeText;
+      const rawText = rangeText ? (legendEntry.label + ': ' + rangeText) : legendEntry.label;
       const safeText = fitLegendText(ctx, rawText, infoBoxW - 90);
       ctx.fillText(safeText, infoBoxX + 62, legendY + 14);
       legendY += rowStep;
@@ -2220,20 +2258,30 @@ drawBasemapBackdrop(ctx, frame, bounds);
 
   const cellWidth = Math.max(5, Math.abs(stepLon.x - base.x) * 0.92);
   const cellHeight = Math.max(5, Math.abs(stepLat.y - base.y) * 0.92);
+  const isHydro2D = Boolean(plotData?.isHydro);
 
   ctx.save();
   ctx.globalAlpha = 0.75;
   points.forEach((point) => {
     const { x, y } = projectToMap(point.lon, point.lat, bounds, frame);
-    const left = x - cellWidth / 2;
-    const top = y - cellHeight / 2;
-
     ctx.fillStyle = point.cell?.color || '#2563eb';
-    ctx.fillRect(left, top, cellWidth, cellHeight);
 
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
-    ctx.lineWidth = 0.5;
-    ctx.strokeRect(left, top, cellWidth, cellHeight);
+    if (isHydro2D) {
+      const radius = 8;
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    } else {
+      const left = x - cellWidth / 2;
+      const top = y - cellHeight / 2;
+      ctx.fillRect(left, top, cellWidth, cellHeight);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+      ctx.lineWidth = 0.5;
+      ctx.strokeRect(left, top, cellWidth, cellHeight);
+    }
   });
   ctx.restore();
 
@@ -2261,7 +2309,7 @@ groupedLegend.sort((a, b) => a.severity - b.severity);
   ctx.font = '14px Arial';
   const sistemaCoord = 'WGS84 (EPSG:4326)';
 
-  ctx.fillText(`Resolución de celdas: ${Number.isFinite(resolucion) ? resolucion.toFixed(2) : 'N/A'}°`, metaX, metaY + 22);
+  ctx.fillText(isHydro2D ? 'Símbolo espacial: Estación (círculo)' : `Resolución de celdas: ${Number.isFinite(resolucion) ? resolucion.toFixed(2) : 'N/A'}°`, metaX, metaY + 22);
   ctx.fillText(`Sistema de coordenadas: ${sistemaCoord}`, metaX, metaY + 42);
   ctx.restore();
 }
@@ -2282,19 +2330,26 @@ async function draw2DWatershedMap(ctx, plotData, analysisState) {
   const mapH = DEFAULT_IMAGE_HEIGHT - footerReserve - mapY;
 
   const legendW = 370;
-  const legendH = Math.floor((mapH - 24) / 2);
-  const legendX = DEFAULT_IMAGE_WIDTH - legendW - 56;
-  const legendY = DEFAULT_IMAGE_HEIGHT - legendH - 40;
   const infoBoxW = legendW;
   const infoBoxX = DEFAULT_IMAGE_WIDTH - infoBoxW - 56;
   const infoBoxY = mapY + 12;
-  const infoBoxH = 250;
+  const infoBoxH = DEFAULT_IMAGE_HEIGHT - infoBoxY - 40;
+  const infoBoxMaxWidth = infoBoxW - 44;
+  const dividerY = infoBoxY + Math.floor(infoBoxH / 2);
 
-  // Info box
+  // Panel único: información + leyenda
   ctx.save();
   ctx.fillStyle = '#f1f5f9';
   ctx.strokeStyle = '#cbd5e1';
   drawCard(ctx, infoBoxX, infoBoxY, infoBoxW, infoBoxH, 10);
+
+  // Divisor horizontal en la mitad del panel
+  ctx.beginPath();
+  ctx.moveTo(infoBoxX + 8, dividerY);
+  ctx.lineTo(infoBoxX + infoBoxW - 8, dividerY);
+  ctx.strokeStyle = '#cbd5e1';
+  ctx.lineWidth = 2;
+  ctx.stroke();
 
   ctx.fillStyle = '#0f172a';
   ctx.font = 'bold 20px Arial';
@@ -2309,7 +2364,6 @@ async function draw2DWatershedMap(ctx, plotData, analysisState) {
   const aggregationLevel = analysisState?.indexScale || plotData?.scale || 'N/A';
   const precipitationFrequencyCode = resolvePrecipFrequencyCode(plotData, analysisState);
   const frequencyLabel = precipitationFrequencyCode === 'D' ? 'Diaria' : 'Mensual';
-  const infoBoxMaxWidth = infoBoxW - 44;
 
   const formatDate = (dateStr) => {
     if (!dateStr || dateStr === 'N/A') return dateStr;
@@ -2336,7 +2390,6 @@ async function draw2DWatershedMap(ctx, plotData, analysisState) {
     infoY = wrapText(ctx, 'Variable: ' + dataKind.label, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
   }
   wrapText(ctx, 'Producto de análisis satelital consultado: ' + satelliteProductLabel, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
-  ctx.restore();
 
   // Map frame
   const frame = { x: mapX, y: mapY, w: mapW, h: mapH, pad: 12 };
@@ -2414,7 +2467,7 @@ async function draw2DWatershedMap(ctx, plotData, analysisState) {
   drawNorthArrow(ctx, mapX + 36, mapY + 36 + 40);
   drawScaleBar(ctx, bounds, frame);
 
-  // Legend
+  // Leyenda dentro del mismo panel derecho
   const legendVariableCode = String(dataKind?.code || selectedCode || '').trim().split(/\s*-\s*|\s+/)[0].toLowerCase();
   const legendFrequencyCode = resolvePrecipFrequencyCode(plotData, analysisState);
   const indexCode = String(dataKind?.code || legendVariableCode || '').trim().toUpperCase();
@@ -2454,18 +2507,16 @@ async function draw2DWatershedMap(ctx, plotData, analysisState) {
     return out + ellipsis;
   };
 
-  ctx.fillStyle = '#ffffff';
-  ctx.strokeStyle = '#cbd5e1';
-  drawCard(ctx, legendX, legendY, legendW, legendH, 12);
-
   ctx.fillStyle = '#0f172a';
   ctx.font = 'bold 20px Arial';
-  ctx.fillText('LEYENDA', legendX + 22, legendY + 32);
+  let legendY = dividerY + 24;
+  const legendBottomLimit = infoBoxY + infoBoxH - 24;
+  ctx.fillText('LEYENDA', infoBoxX + 22, legendY);
+  legendY += 28;
 
   if (groupedLegend.length) {
-    let offsetY = legendY + 60;
+    let offsetY = legendY;
     const rowStep = 28;
-    const legendBottomLimit = legendY + legendH - 24;
     let hiddenCount = 0;
 
     for (let i = 0; i < groupedLegend.length; i++) {
@@ -2478,21 +2529,22 @@ async function draw2DWatershedMap(ctx, plotData, analysisState) {
       const fixedRangeText = resolveFixedBackendRange(legendVariableCode, legendFrequencyCode, legendEntry.label);
       const rangeText = fixedRangeText || (
         isIndex
-          ? 'Clasificación backend'
+          ? ''
           : (legendEntry.hasValue ? legendEntry.min.toFixed(2) + ' a ' + legendEntry.max.toFixed(2) : 'N/A')
       );
       ctx.fillStyle = legendEntry.color;
-      ctx.fillRect(legendX + 22, offsetY, 32, 18);
+      ctx.fillRect(infoBoxX + 22, offsetY, 32, 18);
       ctx.fillStyle = '#334155';
       ctx.font = '13px Arial';
-      ctx.fillText(fitLegendText(ctx, legendEntry.label + ': ' + rangeText, legendW - 90), legendX + 62, offsetY + 14);
+      const legendText = rangeText ? (legendEntry.label + ': ' + rangeText) : legendEntry.label;
+      ctx.fillText(fitLegendText(ctx, legendText, infoBoxW - 90), infoBoxX + 62, offsetY + 14);
       offsetY += rowStep;
     }
 
     if (hiddenCount > 0) {
       ctx.fillStyle = '#64748b';
       ctx.font = '12px Arial';
-      ctx.fillText('... +' + hiddenCount + ' categorías más', legendX + 22, offsetY + 12);
+      ctx.fillText('... +' + hiddenCount + ' categorías más', infoBoxX + 22, offsetY + 12);
       offsetY += 20;
     }
 
@@ -2501,13 +2553,14 @@ async function draw2DWatershedMap(ctx, plotData, analysisState) {
     ctx.lineWidth = 2;
     ctx.beginPath();
     const areaY = Math.min(offsetY, legendBottomLimit - 20);
-    ctx.rect(legendX + 22, areaY, 32, 18);
+    ctx.rect(infoBoxX + 22, areaY, 32, 18);
     ctx.stroke();
     ctx.restore();
     ctx.fillStyle = '#334155';
     ctx.font = '15px Arial';
-    ctx.fillText('Área de interés', legendX + 64, areaY + 14);
+    ctx.fillText('Área de interés', infoBoxX + 64, areaY + 14);
   }
+  ctx.restore();
 
   // Footer metadata
   ctx.save();

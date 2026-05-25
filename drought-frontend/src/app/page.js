@@ -74,6 +74,8 @@ export default function Home() {
     cuencas: false,    // Cuencas hidrográficas
     embalses: false,   // Embalses
     boundary: true,    // Límite del área de estudio
+    perimetroUrbano: false, // Perímetro urbano de Bogotá
+    municipioBogota: false, // Municipio de Bogotá
   });
 
   // Auto-switch visible layers when data category changes
