@@ -19,6 +19,8 @@ from app.services.hydro_constants import (
     HYDRO_INDEX_KEYS,
     HYDRO_COLUMN_MAPPING,
     HYDRO_INDEX_DROUGHT_SCALES,
+    HYDRO_PERCENTILE_SEVERITY_INDICES,
+    HYDRO_PERCENTILE_SEVERITY_CATEGORIES,
 )
 
 
@@ -51,12 +53,24 @@ class HydroDataService(HydroTimeseriesMixin, HydroSpatialMixin):
         Aplica escala de severidad de sequía para índices hidrológicos.
         Mismo algoritmo vectorizado que HistoricalDataService._apply_drought_scale.
         """
-        scale_config = HYDRO_INDEX_DROUGHT_SCALES.get(index_name,
-                       HYDRO_INDEX_DROUGHT_SCALES["DEFAULT"])
-        bins = scale_config["bins"]
-        cats = scale_config["categories"]
-
         vals = df["value"].values
+
+        if index_name in HYDRO_PERCENTILE_SEVERITY_INDICES:
+            valid_vals = vals[np.isfinite(vals)]
+            if len(valid_vals) > 0:
+                p20, p40, p60, p80 = np.nanpercentile(valid_vals, [20, 40, 60, 80])
+                bins = [-np.inf, float(p20), float(p40), float(p60), float(p80), np.inf]
+                cats = HYDRO_PERCENTILE_SEVERITY_CATEGORIES
+            else:
+                bins = [-np.inf, np.inf]
+                cats = [{"label": "Normal", "color": "#00FF00", "severity": 3}]
+        else:
+            scale_config = HYDRO_INDEX_DROUGHT_SCALES.get(
+                index_name, HYDRO_INDEX_DROUGHT_SCALES["DEFAULT"]
+            )
+            bins = scale_config["bins"]
+            cats = scale_config["categories"]
+
         finite_bins = np.array(bins[1:-1], dtype=np.float64)
         indices = np.searchsorted(finite_bins, vals, side="right")
 

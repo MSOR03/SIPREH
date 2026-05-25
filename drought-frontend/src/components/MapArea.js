@@ -7,7 +7,6 @@ import { useTheme } from '@/contexts/ThemeContext';
 import dynamic from 'next/dynamic';
 const TimeSeriesChart = dynamic(() => import('./TimeSeriesChart'), { ssr: false });
 const PredictionTimeSeriesChart = dynamic(() => import('./PredictionTimeSeriesChart'), { ssr: false });
-const DroughtEventTimeline = dynamic(() => import('./DroughtEventTimeline'), { ssr: false });
 const AiSummaryModal = dynamic(() => import('./AiSummaryModal'), { ssr: false });
 import { useGridNavigation } from '../hooks/useGridNavigation';
 import { formatLevelLabel, parseCellIds } from '../utils/gridLevels';
@@ -730,10 +729,6 @@ export default function MapArea({
                   />
                 </div>
 
-                {/* Timeline de eventos de sequía con duración */}
-                {plotData.hasDuration && (plotData.rawData || plotData.data) && (
-                  <DroughtEventTimeline data={plotData.rawData || plotData.data} />
-                )}
               </div>
             ) : (
               <div className="relative h-80 bg-gradient-to-br from-blue-50/30 via-blue-50/20 to-blue-50/30 dark:from-[#1a1f2e] dark:via-[#141920] dark:to-blue-950/20 rounded-2xl flex items-center justify-center border-2 border-dashed border-gray-300 dark:border-gray-600 shadow-inner overflow-hidden">
