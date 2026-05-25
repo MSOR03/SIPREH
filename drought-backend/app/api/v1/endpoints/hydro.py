@@ -109,7 +109,7 @@ def get_hydro_timeseries(
 
     # Cache a nivel de endpoint
     endpoint_cache_key = (
-        f"endpoint:hydro_ts:{request.parquet_file_id}:{request.station_code}:"
+        f"endpoint:hydro_ts:v2:{request.parquet_file_id}:{request.station_code}:"
         f"{request.index_name}:{request.scale or 'none'}:{request.start_date}:{request.end_date}:{request.limit}"
     )
     cached = cache_service.get(endpoint_cache_key)
@@ -200,7 +200,7 @@ def get_hydro_spatial(
 
     # Cache a nivel de endpoint
     endpoint_cache_key = (
-        f"endpoint:hydro_sp:{request.parquet_file_id}:{request.index_name}:{request.scale or 'none'}:"
+        f"endpoint:hydro_sp:v2:{request.parquet_file_id}:{request.index_name}:{request.scale or 'none'}:"
         f"mode:{'interval' if interval_mode else 'single'}:"
         f"target:{request.target_date}:start:{request.start_date}:end:{request.end_date}"
     )
