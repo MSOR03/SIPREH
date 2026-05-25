@@ -12,6 +12,27 @@ import {
 import { historicalApi } from '../services/api';
 
 /**
+ * Infiere la resolución de un archivo desde su campo resolution o desde el nombre del archivo.
+ * Los archivos registrados vía admin_cloud.py siempre tienen resolution set,
+ * pero como fallback se usa el filename por si acaso.
+ */
+function getEffectiveResolution(f) {
+  // 1. Use explicit data_source from backend metadata (most reliable)
+  const dsResMap = { 'ERA5': 0.25, 'IMERG': 0.1, 'CHIRPS': 0.05 };
+  if (f.data_source && dsResMap[f.data_source] != null) return dsResMap[f.data_source];
+  // 2. Use resolution_level from backend metadata
+  const lvlResMap = { 'LOW': 0.25, 'MEDIUM': 0.1, 'HIGH': 0.05 };
+  if (f.resolution_level && lvlResMap[f.resolution_level] != null) return lvlResMap[f.resolution_level];
+  // 3. Filename-based fallback — only match files with explicit dataset keyword in name
+  // Do NOT fall back to f.resolution: prediction files with resolution=0.1 would match IMERG
+  const name = (f.filename || '').toLowerCase();
+  if (name.includes('imerg')) return 0.1;
+  if (name.includes('era5')) return 0.25;
+  if (name.includes('chirps')) return 0.05;
+  return null;
+}
+
+/**
  * Hook para manejar navegación jerárquica de grid
  * Gestiona el estado de niveles, drill-down, drill-up y selección de celdas
  * 
@@ -53,9 +74,15 @@ export function useGridNavigation(initialLevel = 'LOW') {
         for (const level of ['LOW', 'MEDIUM', 'HIGH']) {
           const resolution = GRID_LEVELS[level].resolution;
           
-          // Buscar archivo con esta resolución
+          // Buscar archivo con esta resolución — REQUIERE que el archivo tenga
+          // data_source o resolution_level identificable para evitar falsos positivos
+          // (p.ej. archivos de predicción con resolution=0.1 pero sin fuente conocida)
           const file = files.find(f => {
-            const fileResolution = f.resolution || f.metadata?.resolution || 0.1;
+            const hasKnownSource = f.data_source ||
+              (f.resolution_level && f.resolution_level !== 'UNKNOWN');
+            if (!hasKnownSource) return false;
+            const fileResolution = getEffectiveResolution(f);
+            if (fileResolution === null) return false;
             return Math.abs(fileResolution - resolution) < 0.01;
           });
           
@@ -72,8 +99,10 @@ export function useGridNavigation(initialLevel = 'LOW') {
         
         setAllCells(cellsData);
         
-        // Inicializar con las celdas del nivel inicial
-        setGridCells(cellsData[initialLevel]);
+        // Inicializar en el nivel más bajo con datos disponibles (no necesariamente LOW)
+        const startLevel = ['LOW', 'MEDIUM', 'HIGH'].find(l => cellsData[l].length > 0) || initialLevel;
+        setCurrentLevel(startLevel);
+        setGridCells(cellsData[startLevel]);
         
       } catch (err) {
         console.error('Error loading cells from backend:', err);
@@ -160,11 +189,12 @@ export function useGridNavigation(initialLevel = 'LOW') {
   }, [currentLevel, navigationHistory]);
   
   /**
-   * Resetea a la vista inicial
+   * Resetea a la vista inicial (nivel más bajo disponible, no necesariamente LOW)
    */
   const resetToRoot = useCallback(() => {
-    setCurrentLevel('LOW');
-    setGridCells(allCells.LOW);
+    const rootLevel = ['LOW', 'MEDIUM', 'HIGH'].find(l => allCells[l]?.length > 0) || 'LOW';
+    setCurrentLevel(rootLevel);
+    setGridCells(allCells[rootLevel] || []);
     setSelectedCell(null);
     setNavigationHistory([]);
   }, [allCells]);

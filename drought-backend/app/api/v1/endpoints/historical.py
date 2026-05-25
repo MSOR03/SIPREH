@@ -40,7 +40,7 @@ from app.services.tiered_storage import (
     encode_multi_keys,
     _parse_meta,
 )
-from app.services.historical_constants import COLOR_SCALE_VERSION
+from app.services.historical_constants import COLOR_SCALE_VERSION, infer_data_source_from_url, get_parquet_source
 
 
 # ============================================================================
@@ -101,6 +101,56 @@ def _resolve_cloud_keys(file_id: int, db) -> str:
     result = file.cloud_key
     cache_service.set(cache_key_for_file, result, expire=3600)
     return result
+
+
+def _resolve_effective_source(file_id: int, variable: str, request_source: Optional[str], cloud_key: str, db) -> Optional[str]:
+    """
+    Determina la fuente efectiva (valor de columna 'source' en el parquet) para filtrar.
+
+    Prioridad:
+    1. Si el cliente envió request.source explícitamente, lo usa tal cual.
+    2. Si el archivo tiene 'data_source' en metadata (ej. "IMERG", "CHIRPS"), lo convierte.
+    3. Si metadata tiene 'resolution_level' (LOW/MEDIUM/HIGH), lo mapea a data_source.
+    4. Último recurso: infiere desde cloud_key + nombre del archivo.
+    """
+    if request_source is not None:
+        return request_source
+
+    # Intentar desde metadata del archivo (cache de 24h)
+    ds_cache_key = f"file_datasource_v2:{file_id}"
+    cached_ds = cache_service.get(ds_cache_key)
+
+    if cached_ds is None:
+        # Query DB para obtener metadata
+        _file = db.query(ParquetFile).filter(
+            ParquetFile.id == file_id,
+            ParquetFile.status == "active"
+        ).first()
+
+        data_source = None
+        if _file:
+            _meta = get_file_metadata(_file)
+            # 1: campo explícito "data_source"
+            data_source = _meta.get("data_source")
+            # 2: mapear resolution_level
+            if not data_source:
+                _rl = (_meta.get("resolution_level") or "").upper()
+                data_source = {"LOW": "ERA5", "MEDIUM": "IMERG", "HIGH": "CHIRPS"}.get(_rl)
+            # 3: inferir desde cloud_key + filenames
+            if not data_source:
+                _combined = (cloud_key or "") + "|" + (_file.original_filename or "") + "|" + (_file.filename or "")
+                data_source = infer_data_source_from_url(_combined)
+
+        cached_ds = data_source if data_source else None
+        cache_service.set(ds_cache_key, cached_ds or '', expire=86400)
+
+    # Si no pudimos inferir ningun data_source, devolver None para que
+    # el servicio use su propia inferencia desde la URL del parquet
+    # (mismo comportamiento que antes de este endpoint wrapper).
+    if not cached_ds:
+        return None
+
+    return get_parquet_source(cached_ds, variable)
 
 
 # ============================================================================
@@ -266,6 +316,88 @@ def validate_file_structure(
 # INFORMACIÓN DE ARCHIVOS
 # ============================================================================
 
+@router.get("/files/integrity")
+def check_files_integrity(
+    db: Session = Depends(get_db)
+):
+    """
+    Diagnóstico de integridad de archivos parquet registrados.
+    Muestra qué archivos tienen metadata ambigua (sin data_source reconocido)
+    y cuáles tendrían conflictos de resolución.
+    Útil para detectar archivos mal registrados antes de que causen errores.
+    """
+    files = db.query(ParquetFile).filter(ParquetFile.status == "active").all()
+    _lvl_to_ds = {"low": "ERA5", "medium": "IMERG", "high": "CHIRPS"}
+
+    by_resolution: dict = {}
+    issues = []
+    summary = []
+
+    for file in files:
+        metadata = get_file_metadata(file)
+        fname = file.original_filename or file.filename or ""
+
+        ds = metadata.get("data_source", "")
+        if ds and ds.upper() in ("ERA5", "IMERG", "CHIRPS"):
+            data_source = ds.upper()
+        else:
+            rl = (metadata.get("resolution_level") or "").lower()
+            data_source = _lvl_to_ds.get(rl)
+            if not data_source:
+                nm = fname.lower()
+                if "imerg" in nm:
+                    data_source = "IMERG"
+                elif "chirps" in nm:
+                    data_source = "CHIRPS"
+                elif "era5" in nm:
+                    data_source = "ERA5"
+
+        res = metadata.get("resolution") or infer_resolution_from_filename(fname)
+        rl_stored = metadata.get("resolution_level", "")
+
+        file_entry = {
+            "file_id": file.id,
+            "filename": fname,
+            "data_source": data_source,
+            "resolution": res,
+            "resolution_level": rl_stored,
+            "dataset_type": metadata.get("dataset_type"),
+            "status": file.status,
+        }
+
+        # Track conflicts: multiple files claiming same resolution without clear data_source
+        if res is not None:
+            key = str(res)
+            if key not in by_resolution:
+                by_resolution[key] = []
+            by_resolution[key].append(file_entry)
+
+        if not data_source:
+            issues.append({**file_entry, "problem": "no_data_source — will be excluded from /files queries"})
+        elif res is None:
+            issues.append({**file_entry, "problem": "no_resolution — may not match grid level"})
+
+        summary.append(file_entry)
+
+    # Check if multiple files map to the same resolution with different data_sources
+    conflicts = []
+    for res_key, entries in by_resolution.items():
+        sources = set(e["data_source"] for e in entries if e["data_source"])
+        if len(sources) > 1:
+            conflicts.append({
+                "resolution": res_key,
+                "competing_files": [{"file_id": e["file_id"], "filename": e["filename"], "data_source": e["data_source"]} for e in entries]
+            })
+
+    return {
+        "total_active_files": len(files),
+        "files_with_issues": len(issues),
+        "resolution_conflicts": conflicts,
+        "issues": issues,
+        "all_files": summary,
+    }
+
+
 @router.get("/files", response_model=List[FileInfoResponse])
 def list_available_files(
     dataset_type: str = None,
@@ -287,24 +419,69 @@ def list_available_files(
         ParquetFile.status == "active"
     ).all()
 
+    # Helper: infer data_source from metadata + filename (pure function, no DB)
+    _lvl_to_ds = {"low": "ERA5", "medium": "IMERG", "high": "CHIRPS"}
+
+    def _resolve_file_data_source(meta: dict, fname: str) -> str | None:
+        """Returns 'ERA5'|'IMERG'|'CHIRPS' or None if truly ambiguous."""
+        ds = meta.get("data_source")
+        if ds and ds.upper() in ("ERA5", "IMERG", "CHIRPS"):
+            return ds.upper()
+        rl = (meta.get("resolution_level") or "").lower()
+        if rl in _lvl_to_ds:
+            return _lvl_to_ds[rl]
+        nm = (fname or "").lower()
+        if "imerg" in nm:
+            return "IMERG"
+        if "chirps" in nm:
+            return "CHIRPS"
+        if "era5" in nm:
+            return "ERA5"
+        return None
+
     result = []
     for file in files:
         metadata = get_file_metadata(file)
+        fname = file.original_filename or file.filename or ""
+
+        data_source_meta = _resolve_file_data_source(metadata, fname)
 
         # Filtrar por dataset_type si se especificó
         if dataset_type:
             file_dataset_type = metadata.get("dataset_type")
-            if file_dataset_type and file_dataset_type != dataset_type:
+            if file_dataset_type:
+                # Tipo explícito en metadata: debe coincidir
+                if file_dataset_type != dataset_type:
+                    continue
+            else:
+                # Sin tipo explícito: solo incluir si la fuente de datos es identificable.
+                # Esto evita que archivos de predicción o desconcocidos aparezcan como históricos.
+                if not data_source_meta:
+                    continue
+        else:
+            # Sin filtro de dataset_type: siempre excluir archivos completamente ambiguos
+            # (sin data_source, sin resolution_level reconocido, sin keyword en filename).
+            # Estos solo deben aparecer en la vista admin, nunca mezclados con archivos de datos.
+            file_dataset_type = metadata.get("dataset_type")
+            if not file_dataset_type and not data_source_meta:
                 continue
 
         resolution = metadata.get("resolution")
         if resolution is None:
             resolution = infer_resolution_from_filename(file.original_filename) or infer_resolution_from_filename(file.filename)
 
+        # Normalize resolution_level to uppercase
+        raw_level = metadata.get("resolution_level")
+        resolution_level = raw_level.upper() if raw_level else None
+        if resolution_level == "UNKNOWN":
+            resolution_level = None  # Expose as null — do not pretend we know the level
+
         file_info = {
             "file_id": file.id,
             "filename": file.filename,
             "resolution": resolution,
+            "resolution_level": resolution_level,
+            "data_source": data_source_meta,
             "dataset_type": metadata.get("dataset_type"),
             "date_range": {"start": None, "end": None},
             "spatial_bounds": {},
@@ -473,6 +650,9 @@ def get_timeseries(
     
     # Consultar datos con DuckDB
     try:
+        effective_source = _resolve_effective_source(
+            request.parquet_file_id, request.variable, request.source, cloud_key, db
+        )
         data_points, statistics, coordinates, returned_freq = historical_service.query_timeseries(
             parquet_url=cloud_key,
             variable=request.variable,
@@ -482,7 +662,7 @@ def get_timeseries(
             lon=request.lon,
             cell_id=request.cell_id,
             scale=request.scale,
-            source=request.source,
+            source=effective_source,
             frequency=request.frequency,
             limit=request.limit
         )
@@ -599,6 +779,9 @@ def get_spatial_data(
     
     # Consultar datos
     try:
+        effective_source = _resolve_effective_source(
+            request.parquet_file_id, request.variable, request.source, cloud_key, db
+        )
         grid_cells, statistics, used_date, actual_bounds = historical_service.query_spatial_data(
             parquet_url=cloud_key,  # Usar cloud_key cacheado
             variable=request.variable,
@@ -608,7 +791,7 @@ def get_spatial_data(
             use_interval=interval_mode,
             bounds=bounds,
             scale=request.scale,
-            source=request.source,
+            source=effective_source,
             frequency=request.frequency,
             limit=request.limit
         )
