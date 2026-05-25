@@ -34,9 +34,9 @@ jobs:
         working-directory: ./drought-frontend
         # GITHUB_ACTIONS=true is already set automatically — next.config.mjs reads it
         # to inject basePath=/DroughtMonitor so images and routes work on Pages.
-        # NEXT_PUBLIC_API_URL must be set as a repository secret named RENDER_BACKEND_URL.
+        # NEXT_PUBLIC_API_URL is set as a repository variable named RENDER_BACKEND_URL.
         env:
-          NEXT_PUBLIC_API_URL: ${{ secrets.RENDER_BACKEND_URL }}
+          NEXT_PUBLIC_API_URL: ${{ vars.RENDER_BACKEND_URL }}
         run: npm run build
 
       - name: Upload Pages artifact
