@@ -358,6 +358,8 @@ export default function MapArea({
             showBoundary={mapLayers?.boundary ?? true}
             showCuencas={mapLayers?.cuencas ?? false}
             showEmbalses={mapLayers?.embalses ?? false}
+            showPerimetroUrbano={mapLayers?.perimetroUrbano ?? false}
+            showMunicipioBogota={mapLayers?.municipioBogota ?? false}
             cuencasSpatialData={plotData?.isCuencas ? plotData.cuencasData : null}
             selectedEntity={selectedEntity}
             onEntitySelect={handleEntitySelect}
@@ -382,7 +384,9 @@ export default function MapArea({
                   { key: 'stations', label: 'Estaciones', icon: Navigation, color: 'text-green-500' },
                   { key: 'cuencas', label: 'Cuencas', icon: Droplets, color: 'text-teal-500' },
                   { key: 'embalses', label: 'Embalses', icon: Database, color: 'text-purple-500' },
-                  { key: 'boundary', label: 'Límite área de estudio', icon: MapIcon, color: 'text-gray-500' },
+                  { key: 'boundary', label: 'Límite de área de estudio', icon: MapIcon, color: 'text-gray-500' },
+                  { key: 'perimetroUrbano', label: 'Perímetro urbano', icon: MapIcon, color: 'text-pink-500' },
+                  { key: 'municipioBogota', label: 'Municipio', icon: MapIcon, color: 'text-orange-500' },
                 ].map(({ key, label, icon: Icon, color }) => (
                   <label
                     key={key}

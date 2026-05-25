@@ -16,7 +16,7 @@ const stations = HYDRO_STATIONS.map(s => ({
   type: 'secundaria',
 }));
 
-export default function LeafletMap({ 
+export default function LeafletMap({
   onStationSelect, 
   selectedStation, 
   onGridCellClick, 
@@ -36,10 +36,15 @@ export default function LeafletMap({
   showBoundary = true,   // Visibilidad del límite del área de estudio
   showCuencas = false,   // Visibilidad de cuencas
   showEmbalses = false,  // Visibilidad de embalses
+  showPerimetroUrbano = false, // Visibilidad del perímetro urbano de Bogotá
+  showMunicipioBogota = false, // Visibilidad del municipio de Bogotá
   cuencasSpatialData = null, // Datos espaciales por cuenca [{dn, nombre, value, color, ...}]
   selectedEntity = null,  // Entidad seleccionada (cuenca o embalse) { layer, type, dn, area }
   onEntitySelect,         // Callback al seleccionar una entidad
 }) {
+  // ...existing code...
+  const perimetroUrbanoLayerRef = useRef(null);
+  const municipioBogotaLayerRef = useRef(null);
   const mapRef = useRef(null);
   const containerRef = useRef(null);
   const markersRef = useRef([]);
@@ -61,16 +66,41 @@ export default function LeafletMap({
   const onCellDoubleClickRef = useRef(onCellDoubleClick);
   const onCellMouseOverRef = useRef(onCellMouseOver);
   const onCellMouseOutRef = useRef(onCellMouseOut);
-  
   // ✅ Refs para evitar closures stale en event listeners
   const selectedCellRef = useRef(selectedCell);
   const hoveredCellRef = useRef(hoveredCell);
   const currentLevelRef = useRef(currentLevel);
-  
   const initAttemptedRef = useRef(false);
   const fitBoundsDoneRef = useRef(false); // ✅ Para evitar múltiples fitBounds que destruyen event listeners
   const [mapReady, setMapReady] = useState(false);
   const [cuencasLoaded, setCuencasLoaded] = useState(false); // Flag para saber si las capas ya se cargaron
+
+  // --- HOOKS DE VISIBILIDAD DE CAPAS VECTORIALES ---
+  useEffect(() => {
+    if (!mapRef.current || !perimetroUrbanoLayerRef.current) return;
+    if (showPerimetroUrbano) {
+      if (!mapRef.current.hasLayer(perimetroUrbanoLayerRef.current)) {
+        perimetroUrbanoLayerRef.current.addTo(mapRef.current);
+      }
+    } else {
+      if (mapRef.current.hasLayer(perimetroUrbanoLayerRef.current)) {
+        perimetroUrbanoLayerRef.current.remove();
+      }
+    }
+  }, [showPerimetroUrbano, mapReady]);
+
+  useEffect(() => {
+    if (!mapRef.current || !municipioBogotaLayerRef.current) return;
+    if (showMunicipioBogota) {
+      if (!mapRef.current.hasLayer(municipioBogotaLayerRef.current)) {
+        municipioBogotaLayerRef.current.addTo(mapRef.current);
+      }
+    } else {
+      if (mapRef.current.hasLayer(municipioBogotaLayerRef.current)) {
+        municipioBogotaLayerRef.current.remove();
+      }
+    }
+  }, [showMunicipioBogota, mapReady]);
 
   useEffect(() => {
     onStationSelectRef.current = onStationSelect;
@@ -169,40 +199,30 @@ export default function LeafletMap({
           className: 'drought-cell-tooltip',
         });
 
-        L.control.zoom({ position: 'topright' }).addTo(map);
-        L.control.scale({ position: 'bottomleft', metric: true, imperial: false, maxWidth: 200 }).addTo(map);
-
-        // Coordenadas del cursor junto a la escala (abajo a la izquierda)
+        // Definir MousePosition antes de usarlo
         const MousePosition = L.Control.extend({
           options: { position: 'bottomright' },
           onAdd() {
             const div = L.DomUtil.create('div', 'leaflet-control-mousepos');
             div.style.marginTop = '4px';
-
-            // Estilo compatible con escala Leaflet
             div.style.background = 'rgba(255, 255, 255, 0.8)';
             div.style.color = '#333';
             div.style.font = '11px/1.1 "Helvetica Neue", Arial, Helvetica, sans-serif';
-
-            // Caja completa (cerrada)
             div.style.border = '2px solid #777';
             div.style.padding = '2px 5px';
             div.style.minWidth = 'unset';
             div.style.width = 'auto';
             div.style.display = 'inline-block';
-
             div.textContent = 'Latitud: -- | Longitud: --';
             this._div = div;
             return div;
           },
           update(latlng) {
             if (!this._div) return;
-
             if (!latlng) {
               this._div.textContent = 'Latitud: -- | Longitud: --';
               return;
             }
-
             const lat = latlng.lat.toFixed(5);
             const lon = latlng.lng.toFixed(5);
             this._div.textContent = `Latitud: ${lat} | Longitud: ${lon}`;
@@ -302,8 +322,12 @@ export default function LeafletMap({
         Promise.all([
           fetch(`${_bp}/data/Cuencas.geojson?t=` + Date.now()).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
           fetch(`${_bp}/data/Embalses.geojson?t=` + Date.now()).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+          fetch(`${_bp}/data/Perimetro_urb.geojson?t=` + Date.now()).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+          fetch(`${_bp}/data/Municipio.geojson?t=` + Date.now()).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
         ])
-          .then(([cuencasGeoData, embalsesGeoData]) => {
+          .then(([cuencasGeoData, embalsesGeoData, perimetroUrbanoGeoData, municipioBogotaGeoData]) => {
+            console.log('Perímetro Urbano GeoJSON:', perimetroUrbanoGeoData);
+            console.log('Municipio Bogotá GeoJSON:', municipioBogotaGeoData);
             const cuencasFeatures = cuencasGeoData.features;
             const embalsesFeatures = embalsesGeoData.features;
 
@@ -408,6 +432,77 @@ export default function LeafletMap({
             });
             embalsesLayerRef.current = embalsesLayer;
             // Don't add to map yet — visibility controlled by showEmbalses prop
+            // Perímetro Urbano de Bogotá
+            // Perímetro Urbano: azul institucional, opacidad baja, borde delgado
+            const perimetroUrbanoLayer = L.geoJSON(perimetroUrbanoGeoData, {
+              style: {
+                color: '#b08d57', // Marrón claro
+                weight: 3,
+                opacity: 1,
+                fill: false,
+                fillOpacity: 0,
+                dashArray: '4 2',
+              },
+              interactive: true,
+              onEachFeature: (feature, layer) => {
+                // Cambiar nombre a 'Perímetro urbano'
+                const nombre = feature.properties?.Nombre || 'Perímetro urbano';
+                layer.bindTooltip(nombre, {sticky: true, direction: 'top', className: 'perimetro-tooltip'});
+              }
+            });
+            perimetroUrbanoLayerRef.current = perimetroUrbanoLayer;
+            // Municipio de Bogotá: naranja institucional, opacidad baja, borde delgado
+            const municipioBogotaLayer = L.geoJSON(municipioBogotaGeoData, {
+              style: {
+                color: '#6b4f27', // Café
+                weight: 3,
+                opacity: 1,
+                fill: false,
+                fillOpacity: 0,
+                dashArray: '4 2',
+              },
+              interactive: true,
+              onEachFeature: (feature, layer) => {
+                // Cambiar nombre a 'Municipio'
+                const nombre = feature.properties?.Nombre || 'Municipio';
+                layer.bindTooltip(nombre, {sticky: true, direction: 'top', className: 'municipio-tooltip'});
+              }
+            });
+            municipioBogotaLayerRef.current = municipioBogotaLayer;
+            // Fit bounds al primer polígono que se cargue
+            if (perimetroUrbanoLayer.getBounds().isValid()) {
+              map.fitBounds(perimetroUrbanoLayer.getBounds(), { padding: [30, 30], animate: false });
+            } else if (municipioBogotaLayer.getBounds().isValid()) {
+              map.fitBounds(municipioBogotaLayer.getBounds(), { padding: [30, 30], animate: false });
+            }
+            // Estilos de tooltip para mejor visibilidad
+            if (!document.getElementById('leaflet-custom-tooltip-style')) {
+              const style = document.createElement('style');
+              style.id = 'leaflet-custom-tooltip-style';
+              style.textContent = `
+                .perimetro-tooltip {
+                  background: #2563eb;
+                  color: #fff;
+                  border-radius: 6px;
+                  font-size: 13px;
+                  padding: 4px 10px;
+                  border: 2px solid #1e40af;
+                  box-shadow: 0 2px 8px rgba(37,99,235,0.15);
+                }
+                .municipio-tooltip {
+                  background: #ea580c;
+                  color: #fff;
+                  border-radius: 6px;
+                  font-size: 13px;
+                  padding: 4px 10px;
+                  border: 2px solid #b45309;
+                  box-shadow: 0 2px 8px rgba(234,88,12,0.15);
+                }
+              `;
+              document.head.appendChild(style);
+            }
+
+
             setCuencasLoaded(true); // Trigger toggle effects
           })
           .catch(err => {
