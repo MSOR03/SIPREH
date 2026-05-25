@@ -9,6 +9,21 @@ import GuidedTour from '@/components/GuidedTour';
 import { useToast } from '@/contexts/ToastContext';
 import { downloadAnalysisImage, downloadAnalysisJson } from '@/utils/exporters';
 
+// Helper: resolve effective resolution for a file object, preferring backend metadata fields
+function getFileResolution(f) {
+  const dsResMap = { ERA5: 0.25, IMERG: 0.1, CHIRPS: 0.05 };
+  if (f.data_source && dsResMap[f.data_source] != null) return dsResMap[f.data_source];
+  const lvlResMap = { LOW: 0.25, MEDIUM: 0.1, HIGH: 0.05 };
+  if (f.resolution_level && lvlResMap[f.resolution_level] != null) return lvlResMap[f.resolution_level];
+  // Filename-based fallback — only match files with explicit dataset keyword in name
+  const nm = (f.filename || '').toLowerCase();
+  if (nm.includes('imerg')) return 0.1;
+  if (nm.includes('era5')) return 0.25;
+  if (nm.includes('chirps')) return 0.05;
+  // Do NOT fall back to f.resolution: prediction files with resolution=0.1 would match IMERG
+  return null;
+}
+
 export default function Home() {
   const { showError, showSuccess, showInfo, showWarning } = useToast();
   
@@ -249,7 +264,10 @@ export default function Home() {
           const sourceResMap = { ERA5: 0.25, IMERG: 0.1, CHIRPS: 0.05 };
           const targetResolution = sourceResMap[dataSource] || 0.05;
           const historicalFiles = files.filter(f => !f.dataset_type || f.dataset_type === 'historical');
-          const file = historicalFiles.find(f => Math.abs((f.resolution || 0.1) - targetResolution) < 0.01);
+          const file = historicalFiles.find(f => {
+            const eff = getFileResolution(f);
+            return eff != null && Math.abs(eff - targetResolution) < 0.01;
+          });
 
           if (!file) {
             showError(`No se encontró archivo para ${dataSource} (${targetResolution}°)`, 'Error');
@@ -298,14 +316,17 @@ export default function Home() {
         // Usar la resolución seleccionada por el usuario (solo archivos historicos)
         const targetResolution = analysisState.spatialResolution || 0.05;
         const historicalFiles = files.filter(f => !f.dataset_type || f.dataset_type === 'historical');
-        const file = historicalFiles.find(f => Math.abs((f.resolution || 0.1) - targetResolution) < 0.01);
+        const file = historicalFiles.find(f => {
+          const eff = getFileResolution(f);
+          return eff != null && Math.abs(eff - targetResolution) < 0.01;
+        });
         
         if (!file) {
-          showError(`No se encontró archivo para resolución ${targetResolution}°`, 'Error');
+          showError(`No se encontró archivo para resolución ${targetResolution}°. Verifica que el archivo esté cargado en el panel admin.`, 'Error');
           return;
         }
         
-        const fileResolution = file.resolution || 0.1;
+        const fileResolution = file.resolution;
         
         // Llamar API para datos espaciales
         const response = await historicalApi.getSpatialData({
@@ -371,7 +392,10 @@ export default function Home() {
           // Si hay celda seleccionada, buscar archivo con la resolución de la celda
           const resolution = selectedCell.resolution || 0.1;
           const historicalOnly = files.filter(f => !f.dataset_type || f.dataset_type === 'historical');
-          const file = historicalOnly.find(f => Math.abs((f.resolution || 0.1) - resolution) < 0.01);
+          const file = historicalOnly.find(f => {
+            const eff = getFileResolution(f);
+            return eff != null && Math.abs(eff - resolution) < 0.01;
+          });
           
           if (!file) {
             showError(`No se encontró archivo para resolución ${resolution}°`, 'Error');
@@ -489,7 +513,10 @@ export default function Home() {
           const sourceResMap = { ERA5: 0.25, IMERG: 0.1, CHIRPS: 0.05 };
           const targetResolution = sourceResMap[dataSource] || 0.05;
           const historicalFiles = files.filter(f => !f.dataset_type || f.dataset_type === 'historical');
-          const file = historicalFiles.find(f => Math.abs((f.resolution || 0.1) - targetResolution) < 0.01);
+          const file = historicalFiles.find(f => {
+            const eff = getFileResolution(f);
+            return eff != null && Math.abs(eff - targetResolution) < 0.01;
+          });
 
           if (!file) {
             showError(`No se encontró archivo para ${dataSource} (${targetResolution}°)`, 'Error');

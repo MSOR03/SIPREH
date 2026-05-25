@@ -350,7 +350,7 @@ export default function MapArea({
             currentLevel={effectiveLevel}
             hoveredCell={gridNav.hoveredCell}
             spatialDataCells={(plotData?.type === '2D' || plotData?.type === 'prediction-2d' || plotData?.type === 'prediction-history-2d') ? plotData.gridCells : null}
-            spatialResolution={(plotData?.type === '2D' || plotData?.type === 'prediction-2d' || plotData?.type === 'prediction-history-2d') ? (plotData.resolution || 0.05) : 0.05}
+            spatialResolution={(plotData?.type === '2D' || plotData?.type === 'prediction-2d' || plotData?.type === 'prediction-history-2d') ? (plotData.resolution ?? { ERA5: 0.25, IMERG: 0.1, CHIRPS: 0.05 }[plotData.dataSource] ?? 0.05) : 0.05}
             onSpatialCellClick={handleSpatialCellClick}
             showGrid={mapLayers?.grid ?? true}
             showStations={mapLayers?.stations ?? true}
