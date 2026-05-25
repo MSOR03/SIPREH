@@ -509,5 +509,6 @@ def detect_resolution_from_filename(filename: str) -> tuple[str, float]:
     elif 'chirps' in filename_lower:
         return ('high', 0.05)
     else:
-        # Default: intentar adivinar por tamano o usar medium como default
-        return ('unknown', 0.10)
+        # Cannot determine source — return None resolution to avoid false matches.
+        # Storing 0.10 as default would make unknown files match IMERG queries.
+        return ('unknown', None)

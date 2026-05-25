@@ -96,6 +96,9 @@ async def upload_parquet_file(
         metadata["resolution"] = resolution
         metadata["resolution_level"] = resolution_level
         metadata["resolution_source"] = "filename_inference"
+        # Store data_source so file-matching logic is unambiguous downstream
+        _ds_by_level = {"high": "CHIRPS", "medium": "IMERG", "low": "ERA5"}
+        metadata["data_source"] = _ds_by_level.get(resolution_level)
     
     # Generate unique filename
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

@@ -88,10 +88,12 @@ def register_external_parquet_file(
 
     # Preparar metadata enriquecida
     enriched_metadata = file_data.metadata or {}
+    _ds_by_level = {"low": "ERA5", "medium": "IMERG", "high": "CHIRPS"}
     enriched_metadata.update({
         "resolution": resolution,
         "resolution_level": level_name,
         "resolution_degrees": resolution,
+        "data_source": _ds_by_level.get((level_name or "").lower()) if level_name else None,
         "auto_detected": True,
         "last_modified_cloud": last_modified.isoformat() if isinstance(last_modified, datetime) else str(last_modified)
     })
@@ -261,6 +263,7 @@ def sync_cloudflare_files(
             try:
                 level_name, resolution = detect_resolution_from_filename(filename)
 
+                _ds_by_level_sync = {"low": "ERA5", "medium": "IMERG", "high": "CHIRPS"}
                 metadata = {
                     "source": "cloudflare_sync",
                     "last_modified_cloud": cloud_file['last_modified'].isoformat(),
@@ -268,6 +271,7 @@ def sync_cloudflare_files(
                     "resolution": resolution,
                     "resolution_level": level_name,
                     "resolution_degrees": resolution,
+                    "data_source": _ds_by_level_sync.get((level_name or "").lower()),
                     "auto_detected": True
                 }
 
