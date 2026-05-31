@@ -1052,6 +1052,9 @@ export default function LeafletMap({
           // Estaciones hidrológicas: colorear el marcador de la estación directamente
           // en vez de dibujar un buffer circular que queda oculto detrás del punto.
           const cellValue = typeof cell.value === 'number' ? cell.value : parseFloat(cell.value);
+          const anomalyValue = typeof cell.anomaly_value === 'number'
+            ? cell.anomaly_value
+            : parseFloat(cell.anomaly_value);
           const color = cell.color || '#3b82f6';
 
           // Buscar el marcador existente por código de estación
@@ -1077,6 +1080,7 @@ export default function LeafletMap({
                 <strong style="color:#1f2937">${cell.station_name || cell.codigo}</strong><br/>
                 Código: <b>${cell.codigo}</b><br/>
                 Valor: <b>${!isNaN(cellValue) && cellValue !== null ? cellValue.toFixed(3) : 'N/A'}</b><br/>
+                ${!isNaN(anomalyValue) && anomalyValue !== null ? `Anomalía: <b>${anomalyValue.toFixed(3)}</b><br/>` : ''}
                 ${cell.category ? `Categoría: ${cell.category}<br/>` : ''}
                 ${cell.severity != null ? `Severidad: ${cell.severity}` : ''}
               </div>`,
@@ -1112,6 +1116,9 @@ export default function LeafletMap({
         if (cell.lon + halfRes > maxLon) maxLon = cell.lon + halfRes;
 
         const cellValue = typeof cell.value === 'number' ? cell.value : parseFloat(cell.value);
+        const anomalyValue = typeof cell.anomaly_value === 'number'
+          ? cell.anomaly_value
+          : parseFloat(cell.anomaly_value);
 
         const rect = L.rectangle(cellBounds, {
           fillColor: cell.color || '#3b82f6',
@@ -1128,6 +1135,9 @@ export default function LeafletMap({
           sharedTooltip.setContent(
           '<div style="font-size:12px;line-height:1.4">' +
           'Valor: <b>' + (!isNaN(cellValue) && cellValue !== null ? cellValue.toFixed(3) : 'N/A') + '</b><br/>' +
+          (!isNaN(anomalyValue) && anomalyValue !== null
+            ? 'Anomalía: <b>' + anomalyValue.toFixed(3) + '</b><br/>'
+            : '') +
           (cell.category ? ('Categoría: ' + cell.category) : 'Categoría: N/A') +
           '<br/><span style="font-size:10px;color:#6b7280">Click para detalle 1D</span>' +
           '</div>'
