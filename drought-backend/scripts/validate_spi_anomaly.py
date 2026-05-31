@@ -1,274 +1,302 @@
-"""Validate SPI anomaly calculation against a manual DuckDB aggregation.
+"""Validate SPI anomaly using API response vs manual PyArrow computation.
 
-Usage:
-  python scripts/validate_spi_anomaly.py
-
-Optional arguments:
-  --prediction-file-id 15
-  --cell-id -74.075000_5.275000
-  --scale 1
-  --start-year 1991
-  --end-year 2020
-  --var SPI
-
-The script compares:
-  1) the backend service output for the selected cell, and
-  2) a manual anomaly computation from the historical CHIRPS parquet
-     restricted to source = SAT_RAW.
+This script avoids duckdb/pandas and is safe in environments where only
+sqlite3 + pyarrow are available.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
-import sys
+import math
+import sqlite3
+import urllib.error
+import urllib.request
+from datetime import date, datetime
 from pathlib import Path
 
-import duckdb
-import pandas as pd
-from sqlalchemy import or_
+import pyarrow.compute as pc
+import pyarrow.parquet as pq
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
-if str(BACKEND_ROOT) not in sys.path:
-    sys.path.insert(0, str(BACKEND_ROOT))
-
-from app.api.v1.endpoints.prediction import (
-    _resolve_historical_cloud_key_for_prediction,
-    _resolve_prediction_cloud_key,
-)
-from app.db.session import SessionLocal
-from app.models.parquet_file import ParquetFile
-from app.services.historical_data_service import HistoricalDataService
-from app.services.prediction_data_service import PredictionDataService
-from app.services.cache import cache_service
+DB_PATH = BACKEND_ROOT / "droughtmonitor.db"
+CACHE_DIR = BACKEND_ROOT / ".cache_parquet"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Validate SPI anomaly calculation")
+    parser.add_argument("--api-url", default="http://127.0.0.1:8000/api/v1/prediction/spatial")
     parser.add_argument("--prediction-file-id", type=int, default=None)
-    parser.add_argument("--cell-id", default="-74.075000_5.275000")
-    parser.add_argument("--scale", type=int, default=1)
-    parser.add_argument("--horizon", type=int, default=1)
-    parser.add_argument("--month", type=int, default=None)
-    parser.add_argument("--start-year", type=int, default=1991)
-    parser.add_argument("--end-year", type=int, default=2020)
+    parser.add_argument("--historical-file-id", type=int, default=13)
+    parser.add_argument("--cell-id", default="-74.375000_3.675000")
+    parser.add_argument("--scale", type=int, default=6)
+    parser.add_argument("--horizon", type=int, default=12)
     parser.add_argument("--var", default="SPI")
+    parser.add_argument("--clim-start-year", type=int, default=1991)
+    parser.add_argument("--clim-end-year", type=int, default=2020)
+    parser.add_argument("--consultation-date", default=None)
     return parser.parse_args()
 
 
-def find_latest_prediction_file(db_session) -> ParquetFile:
-    files = db_session.query(ParquetFile).filter(
-        ParquetFile.status.in_(["active", "archived"]),
-    ).all()
-
-    for file in files:
-        meta = {}
-        if file.file_metadata:
-            try:
-                meta = json.loads(file.file_metadata)
-            except (json.JSONDecodeError, TypeError):
-                pass
-        if meta.get("dataset_key") == "prediction_main" and file.cloud_key:
-            if file.status == "active":
-                return file
-
-    for file in files:
-        meta = {}
-        if file.file_metadata:
-            try:
-                meta = json.loads(file.file_metadata)
-            except (json.JSONDecodeError, TypeError):
-                pass
-        if meta.get("dataset_key") == "prediction_main" and file.cloud_key:
-            return file
-
-    raise RuntimeError("No se encontró un archivo de predicción_main")
+def cloud_cache_path(cloud_key: str) -> Path:
+    digest = hashlib.md5(cloud_key.encode("utf-8")).hexdigest()
+    path = CACHE_DIR / f"{digest}.parquet"
+    if not path.exists():
+        raise RuntimeError(f"Parquet no disponible en cache local: {path}")
+    return path
 
 
-def manual_anomaly(conn, hist_source_expr: str, cell_id: str, scale: int, start_year: int, end_year: int, target_month: int):
-    query = f"""
-        SELECT
-            COALESCE(
-                STDDEV_SAMP(CAST(value AS DOUBLE)),
-                STDDEV_POP(CAST(value AS DOUBLE))
-            ) AS climatology_std_spi,
-            COUNT(*) AS n_rows
-        FROM {hist_source_expr}
-        WHERE var = 'SPI'
-          AND scale = {scale}
-          AND UPPER(CAST(source AS VARCHAR)) = 'SAT_RAW'
-          AND (freq IS NULL OR UPPER(CAST(freq AS VARCHAR)) IN ('M', 'MON', 'MONTH', 'MONTHLY'))
-          AND CAST(EXTRACT(YEAR FROM CAST(date AS DATE)) AS INTEGER) BETWEEN {start_year} AND {end_year}
-          AND CAST(EXTRACT(MONTH FROM CAST(date AS DATE)) AS INTEGER) = {target_month}
-          AND cell_id = '{cell_id}'
-          AND value IS NOT NULL
-          AND isfinite(CAST(value AS DOUBLE))
-          AND ABS(CAST(value AS DOUBLE)) <= 50
-    """
-    return conn.execute(query).fetchdf().iloc[0].to_dict()
+def resolve_prediction_row(conn: sqlite3.Connection, prediction_file_id: int | None) -> tuple[int, str, dict]:
+    cur = conn.cursor()
+    if prediction_file_id is not None:
+        row = cur.execute(
+            "SELECT id, cloud_key, file_metadata FROM parquet_files WHERE id = ?",
+            (prediction_file_id,),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError(f"No existe parquet_files.id={prediction_file_id}")
+        meta = json.loads(row[2]) if row[2] else {}
+        return int(row[0]), str(row[1]), meta
+
+    rows = cur.execute(
+        """
+        SELECT id, cloud_key, file_metadata, status
+        FROM parquet_files
+        WHERE cloud_key IS NOT NULL
+        ORDER BY CASE WHEN status='active' THEN 0 ELSE 1 END, id DESC
+        """
+    ).fetchall()
+    for row in rows:
+        meta = json.loads(row[2]) if row[2] else {}
+        if meta.get("dataset_key") == "prediction_main":
+            return int(row[0]), str(row[1]), meta
+
+    raise RuntimeError("No se encontró archivo prediction_main")
 
 
-def fetch_historical_rows(conn, hist_source_expr: str, cell_id: str, scale: int, start_year: int, end_year: int, target_month: int):
-    query = f"""
-        SELECT
-            CAST(date AS DATE) AS date,
-            CAST(EXTRACT(YEAR FROM CAST(date AS DATE)) AS INTEGER) AS year,
-            CAST(EXTRACT(MONTH FROM CAST(date AS DATE)) AS INTEGER) AS month,
-            CAST(value AS DOUBLE) AS value,
-            CAST(source AS VARCHAR) AS source,
-            CAST(freq AS VARCHAR) AS freq
-        FROM {hist_source_expr}
-        WHERE var = 'SPI'
-          AND scale = {scale}
-          AND UPPER(CAST(source AS VARCHAR)) = 'SAT_RAW'
-          AND (freq IS NULL OR UPPER(CAST(freq AS VARCHAR)) IN ('M', 'MON', 'MONTH', 'MONTHLY'))
-          AND CAST(EXTRACT(YEAR FROM CAST(date AS DATE)) AS INTEGER) BETWEEN {start_year} AND {end_year}
-          AND CAST(EXTRACT(MONTH FROM CAST(date AS DATE)) AS INTEGER) = {target_month}
-          AND cell_id = '{cell_id}'
-          AND value IS NOT NULL
-          AND isfinite(CAST(value AS DOUBLE))
-          AND ABS(CAST(value AS DOUBLE)) <= 50
-        ORDER BY date
-    """
-    return conn.execute(query).fetchdf()
+def resolve_historical_cloud_key(conn: sqlite3.Connection, historical_file_id: int) -> str:
+    row = conn.execute(
+        "SELECT cloud_key FROM parquet_files WHERE id = ?",
+        (historical_file_id,),
+    ).fetchone()
+    if row is None or not row[0]:
+        raise RuntimeError(f"No existe cloud_key para historical_file_id={historical_file_id}")
+    return str(row[0])
 
 
-def get_prediction_month(conn, pred_source_expr: str, cell_id: str, scale: int, horizon: int, var: str):
-    query = f"""
-        SELECT
-            CAST(date AS DATE) AS pred_date,
-            CAST(value AS DOUBLE) AS spi_value
-        FROM {pred_source_expr}
-        WHERE var = '{var}'
-          AND scale = {scale}
-          AND horizon = {horizon}
-          AND cell_id = '{cell_id}'
-        ORDER BY pred_date
-        LIMIT 1
-    """
-    df = conn.execute(query).fetchdf()
-    if df.empty:
-        raise RuntimeError("No se encontró una fila de predicción para la celda/horizonte indicados")
-    row = df.iloc[0]
-    return pd.to_datetime(row["pred_date"]), float(row["spi_value"])
+def prediction_value_from_parquet(
+    pred_path: Path,
+    cell_id: str,
+    scale: int,
+    horizon: int,
+    var: str,
+) -> tuple[datetime, float]:
+    table = pq.read_table(
+        str(pred_path),
+        columns=["cell_id", "scale", "horizon", "var", "date", "value"],
+    )
+    mask = pc.equal(table["cell_id"], cell_id)
+    mask = pc.and_kleene(mask, pc.equal(table["scale"], scale))
+    mask = pc.and_kleene(mask, pc.equal(table["horizon"], horizon))
+    mask = pc.and_kleene(mask, pc.equal(table["var"], var))
+    sub = table.filter(mask)
+    if sub.num_rows == 0:
+        raise RuntimeError("No hay fila de predicción para cell/scale/horizon/var")
+
+    rows = sub.select(["date", "value"]).to_pylist()
+    rows.sort(key=lambda row: row["date"])
+    first = rows[0]
+    return first["date"], float(first["value"])
+
+
+def _freq_allowed_mask(freq_col):
+    freq_upper = pc.ascii_upper(pc.fill_null(freq_col, ""))
+    return pc.or_kleene(
+        pc.equal(freq_upper, ""),
+        pc.or_kleene(
+            pc.equal(freq_upper, "M"),
+            pc.or_kleene(
+                pc.equal(freq_upper, "MON"),
+                pc.or_kleene(pc.equal(freq_upper, "MONTH"), pc.equal(freq_upper, "MONTHLY")),
+            ),
+        ),
+    )
+
+
+def std_for_window(
+    hist_path: Path,
+    cell_id: str,
+    scale: int,
+    month: int,
+    year_start: int,
+    year_end: int,
+) -> tuple[int, float | None]:
+    table = pq.read_table(
+        str(hist_path),
+        columns=["date", "cell_id", "scale", "var", "value", "source", "freq"],
+    )
+    mask = pc.equal(table["cell_id"], cell_id)
+    mask = pc.and_kleene(mask, pc.equal(table["scale"], scale))
+    mask = pc.and_kleene(mask, pc.equal(table["var"], "SPI"))
+    mask = pc.and_kleene(mask, pc.equal(pc.ascii_upper(table["source"]), "SAT_RAW"))
+    mask = pc.and_kleene(mask, _freq_allowed_mask(table["freq"]))
+    mask = pc.and_kleene(mask, pc.greater_equal(pc.year(table["date"]), year_start))
+    mask = pc.and_kleene(mask, pc.less_equal(pc.year(table["date"]), year_end))
+    mask = pc.and_kleene(mask, pc.equal(pc.month(table["date"]), month))
+
+    sub = table.filter(mask).select(["value"])
+    values = [float(row["value"]) for row in sub.to_pylist()]
+    values = [value for value in values if math.isfinite(value) and abs(value) <= 50]
+    n = len(values)
+    if n < 2:
+        return n, None
+
+    mean_value = sum(values) / n
+    variance = sum((value - mean_value) ** 2 for value in values) / (n - 1)
+    return n, variance ** 0.5
+
+
+def shift_window(start_year: int, end_year: int, issued_month: int, horizon: int) -> tuple[int, int, int]:
+    start_total = start_year * 12 + (issued_month - 1) + horizon
+    end_total = end_year * 12 + (issued_month - 1) + horizon
+    shifted_start_year = start_total // 12
+    shifted_end_year = end_total // 12
+    shifted_month = (start_total % 12) + 1
+    return shifted_start_year, shifted_end_year, shifted_month
+
+
+def call_api(args: argparse.Namespace, cell_id: str) -> tuple[dict | None, dict | None, str | None]:
+    payload = {
+        "parquet_file_id": args.prediction_file_id,
+        "var": args.var,
+        "scale": args.scale,
+        "horizon": args.horizon,
+        "include_anomaly": True,
+        "map_metric": "anomaly",
+        "clim_start_year": args.clim_start_year,
+        "clim_end_year": args.clim_end_year,
+    }
+    if args.consultation_date:
+        payload["consultation_date"] = args.consultation_date
+
+    req = urllib.request.Request(
+        args.api_url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=45) as response:
+            body = json.loads(response.read().decode("utf-8"))
+        row = next((cell for cell in body.get("grid_cells", []) if str(cell.get("cell_id")) == str(cell_id)), None)
+        return body, row, None
+    except urllib.error.HTTPError as err:
+        return None, None, f"HTTP {err.code}: {err.read().decode('utf-8')}"
+    except Exception as err:  # pragma: no cover
+        return None, None, f"{type(err).__name__}: {err}"
 
 
 def main() -> int:
     args = parse_args()
+    if not DB_PATH.exists():
+        raise RuntimeError(f"No se encontró la base de datos: {DB_PATH}")
 
-    db_session = SessionLocal()
+    conn = sqlite3.connect(str(DB_PATH))
     try:
-        pred_file = None
-        if args.prediction_file_id is not None:
-            pred_file = db_session.query(ParquetFile).filter(
-                ParquetFile.id == args.prediction_file_id,
-                ParquetFile.status.in_(["active", "archived"]),
-            ).first()
-        if pred_file is None:
-            pred_file = find_latest_prediction_file(db_session)
+        prediction_file_id, prediction_cloud_key, prediction_meta = resolve_prediction_row(conn, args.prediction_file_id)
+        args.prediction_file_id = prediction_file_id
+        historical_cloud_key = resolve_historical_cloud_key(conn, args.historical_file_id)
 
-        prediction_cloud_key = _resolve_prediction_cloud_key(pred_file.id, db_session)
-        historical_cloud_key = _resolve_historical_cloud_key_for_prediction(pred_file.id, db_session)
+        pred_path = cloud_cache_path(prediction_cloud_key)
+        hist_path = cloud_cache_path(historical_cloud_key)
 
-        if not prediction_cloud_key:
-            raise RuntimeError("No se pudo resolver el parquet de predicción")
-        if not historical_cloud_key:
-            raise RuntimeError("No se pudo resolver el parquet histórico CHIRPS")
-
-        historical_service = HistoricalDataService(cache_service=cache_service)
-        prediction_service = PredictionDataService(
-            historical_service=historical_service,
-            cache_service=cache_service,
-        )
-
-        pred_source_info = historical_service._resolve_parquet_source(prediction_cloud_key)
-        pred_source_expr = pred_source_info["source_expr"]
-        conn = duckdb.connect()
-
-        pred_date, prediction_spi = get_prediction_month(
-            conn=conn,
-            pred_source_expr=pred_source_expr,
+        pred_date, spi_value = prediction_value_from_parquet(
+            pred_path,
             cell_id=args.cell_id,
             scale=args.scale,
             horizon=args.horizon,
             var=args.var,
         )
 
-        service_result = prediction_service.query_spatial(
-            parquet_url=prediction_cloud_key,
-            var=args.var,
-            scale=args.scale,
-            horizon=args.horizon,
-            include_anomaly=True,
-            map_metric="anomaly",
-            clim_start_year=args.start_year,
-            clim_end_year=args.end_year,
-            historical_parquet_url=historical_cloud_key,
-        )
+        api_body, api_cell, api_error = call_api(args, args.cell_id)
 
-        target_cell = None
-        for cell in service_result.get("grid_cells", []):
-            if str(cell.get("cell_id")) == str(args.cell_id):
-                target_cell = cell
-                break
-
-        if target_cell is None:
-            raise RuntimeError(f"No se encontró la celda {args.cell_id} en la respuesta del servicio")
-
-        target_month = int(args.month or pred_date.month)
-
-        hist_source_info = historical_service._resolve_parquet_source(historical_cloud_key)
-        hist_source_expr = hist_source_info["source_expr"]
-
-        manual_result = manual_anomaly(
-            conn=conn,
-            hist_source_expr=hist_source_expr,
+        old_n, old_std = std_for_window(
+            hist_path,
             cell_id=args.cell_id,
             scale=args.scale,
-            start_year=args.start_year,
-            end_year=args.end_year,
-            target_month=target_month,
+            month=pred_date.month,
+            year_start=args.clim_start_year,
+            year_end=args.clim_end_year,
         )
 
-        historical_rows = fetch_historical_rows(
-            conn=conn,
-            hist_source_expr=hist_source_expr,
+        issued_at_raw = prediction_meta.get("issued_at")
+        issued_month = date.fromisoformat(issued_at_raw[:10]).month if issued_at_raw else 1
+        new_start, new_end, new_month = shift_window(
+            args.clim_start_year,
+            args.clim_end_year,
+            issued_month,
+            args.horizon,
+        )
+        new_n, new_std = std_for_window(
+            hist_path,
             cell_id=args.cell_id,
             scale=args.scale,
-            start_year=args.start_year,
-            end_year=args.end_year,
-            target_month=target_month,
+            month=new_month,
+            year_start=new_start,
+            year_end=new_end,
         )
 
-        spi_value = float(target_cell.get("spi_value") if target_cell.get("spi_value") is not None else prediction_spi)
-        backend_std = target_cell.get("climatology_std_spi")
-        backend_anomaly = target_cell.get("anomaly_value")
-        manual_std = manual_result.get("climatology_std_spi")
-        manual_anomaly_value = None if manual_std is None else spi_value * float(manual_std)
+        old_anom = (spi_value * old_std) if old_std is not None else None
+        new_anom = (spi_value * new_std) if new_std is not None else None
 
-        print("prediction_file_id:", pred_file.id)
-        print("prediction_cloud_key:", prediction_cloud_key)
-        print("historical_cloud_key:", historical_cloud_key)
-        print("cell_id:", args.cell_id)
-        print("scale:", args.scale)
-        print("horizon:", args.horizon)
-        print("target_month:", target_month)
-        print("prediction_date:", pred_date.date())
-        print("spi_value:", spi_value)
-        print("backend_std:", backend_std)
-        print("backend_anomaly:", backend_anomaly)
-        print("manual_std:", manual_std)
-        print("manual_anomaly:", manual_anomaly_value)
-        print("manual_rows_used:", manual_result.get("n_rows"))
-        print("historical_rows_table:")
-        print(historical_rows.to_string(index=False))
-        if backend_anomaly is not None and manual_anomaly_value is not None:
-            diff = abs(float(backend_anomaly) - float(manual_anomaly_value))
-            print("abs_diff:", diff)
+        print("prediction_file_id", prediction_file_id)
+        print("prediction_cloud_key", prediction_cloud_key)
+        print("historical_cloud_key", historical_cloud_key)
+        print("cell_id", args.cell_id)
+        print("scale", args.scale)
+        print("horizon", args.horizon)
+        print("issued_at", issued_at_raw)
+        print("pred_date", pred_date.date().isoformat())
+        print("spi", f"{spi_value:.12f}")
+
+        print("old_window", f"{args.clim_start_year}-{args.clim_end_year}", f"month={pred_date.month}", f"n={old_n}")
+        print("old_std", None if old_std is None else f"{old_std:.12f}")
+        print("old_anomaly", None if old_anom is None else f"{old_anom:.12f}")
+
+        print("new_window", f"{new_start}-{new_end}", f"month={new_month}", f"n={new_n}")
+        print("new_std", None if new_std is None else f"{new_std:.12f}")
+        print("new_anomaly", None if new_anom is None else f"{new_anom:.12f}")
+
+        if api_error:
+            print("api_error", api_error)
+            return 0
+
+        assert api_body is not None
+        print("api_effective_horizon", api_body.get("effective_horizon"))
+        print("api_target_month", api_body.get("target_month"))
+        print("api_climatology_period", api_body.get("anomaly_metadata", {}).get("climatology_period"))
+
+        if api_cell is None:
+            print("api_cell", None)
+            return 0
+
+        api_std = api_cell.get("climatology_std_spi")
+        api_anom = api_cell.get("anomaly_value")
+        print("api_std", api_std)
+        print("api_anomaly", api_anom)
+        if api_std is not None and old_std is not None:
+            print("abs_diff_api_vs_old_std", f"{abs(float(api_std) - float(old_std)):.12f}")
+        if api_std is not None and new_std is not None:
+            print("abs_diff_api_vs_new_std", f"{abs(float(api_std) - float(new_std)):.12f}")
+        if api_anom is not None and old_anom is not None:
+            print("abs_diff_api_vs_old_anomaly", f"{abs(float(api_anom) - float(old_anom)):.12f}")
+        if api_anom is not None and new_anom is not None:
+            print("abs_diff_api_vs_new_anomaly", f"{abs(float(api_anom) - float(new_anom)):.12f}")
         return 0
     finally:
-        db_session.close()
+        conn.close()
 
 
 if __name__ == "__main__":

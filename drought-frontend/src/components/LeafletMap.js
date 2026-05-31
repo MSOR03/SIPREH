@@ -1079,8 +1079,9 @@ export default function LeafletMap({
               `<div style="font-size:12px;line-height:1.4">
                 <strong style="color:#1f2937">${cell.station_name || cell.codigo}</strong><br/>
                 Código: <b>${cell.codigo}</b><br/>
-                Valor: <b>${!isNaN(cellValue) && cellValue !== null ? cellValue.toFixed(3) : 'N/A'}</b><br/>
-                ${!isNaN(anomalyValue) && anomalyValue !== null ? `Anomalía: <b>${anomalyValue.toFixed(3)}</b><br/>` : ''}
+                SPI: <b>${!isNaN(cellValue) && cellValue !== null ? cellValue.toFixed(3) : 'N/A'}</b><br/>
+                ${!isNaN(anomalyValue) && anomalyValue !== null ? `Anomalía calculada: <b>${anomalyValue.toFixed(3)}</b><br/>` : ''}
+                ${!isNaN(cell.climatology_std_spi) && cell.climatology_std_spi !== null ? `Desviación estándar: <b>${Number(cell.climatology_std_spi).toFixed(3)}</b><br/>` : ''}
                 ${cell.category ? `Categoría: ${cell.category}<br/>` : ''}
                 ${cell.severity != null ? `Severidad: ${cell.severity}` : ''}
               </div>`,
@@ -1134,9 +1135,12 @@ export default function LeafletMap({
         rect.on('mouseover', (e) => {
           sharedTooltip.setContent(
           '<div style="font-size:12px;line-height:1.4">' +
-          'Valor: <b>' + (!isNaN(cellValue) && cellValue !== null ? cellValue.toFixed(3) : 'N/A') + '</b><br/>' +
+          'SPI: <b>' + (!isNaN(cellValue) && cellValue !== null ? cellValue.toFixed(3) : 'N/A') + '</b><br/>' +
           (!isNaN(anomalyValue) && anomalyValue !== null
-            ? 'Anomalía: <b>' + anomalyValue.toFixed(3) + '</b><br/>'
+            ? 'Anomalía calculada: <b>' + anomalyValue.toFixed(3) + '</b><br/>'
+            : '') +
+          (!isNaN(cell.climatology_std_spi) && cell.climatology_std_spi !== null
+            ? 'Desviación estándar: <b>' + Number(cell.climatology_std_spi).toFixed(3) + '</b><br/>'
             : '') +
           (cell.category ? ('Categoría: ' + cell.category) : 'Categoría: N/A') +
           '<br/><span style="font-size:10px;color:#6b7280">Click para detalle 1D</span>' +

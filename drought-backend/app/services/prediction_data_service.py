@@ -59,6 +59,11 @@ class PredictionDataService:
         """
         Mapea horizonte solicitado (Hn) al horizonte cuyo mes de prediccion
         coincide con fecha_consulta + n meses (H1 = mes siguiente).
+
+        Nota: no usamos MIN(date) por horizonte porque algunos archivos pueden
+        contener fechas atipicas en pocas filas que sesgan el mapeo global.
+        En su lugar, tomamos el mes predominante por horizonte (mayor frecuencia
+        de filas) y mapeamos contra ese mes representativo.
         """
         if requested_horizon < 1:
             return requested_horizon
@@ -67,14 +72,26 @@ class PredictionDataService:
         target_month = self._add_months(base_date, requested_horizon)
 
         q = f"""
+            WITH month_counts AS (
+                SELECT
+                    CAST(horizon AS INTEGER) AS horizon,
+                    DATE_TRUNC('month', CAST(date AS DATE)) AS pred_month_start,
+                    COUNT(*) AS n_rows,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY CAST(horizon AS INTEGER)
+                        ORDER BY COUNT(*) DESC, DATE_TRUNC('month', CAST(date AS DATE)) ASC
+                    ) AS rn
+                FROM {parquet_source}
+                WHERE var = '{var}'
+                  AND scale = {scale}
+                  AND date IS NOT NULL
+                GROUP BY CAST(horizon AS INTEGER), DATE_TRUNC('month', CAST(date AS DATE))
+            )
             SELECT
-                CAST(horizon AS INTEGER) AS horizon,
-                MIN(CAST(date AS DATE)) AS pred_date
-            FROM {parquet_source}
-            WHERE var = '{var}'
-              AND scale = {scale}
-              AND date IS NOT NULL
-            GROUP BY horizon
+                horizon,
+                pred_month_start AS pred_date
+            FROM month_counts
+            WHERE rn = 1
             ORDER BY horizon
         """
         horizon_df = conn.execute(q).fetchdf()
@@ -103,12 +120,14 @@ class PredictionDataService:
         cell_id: str,
         var: str,
         scale: int,
+        base_date: Optional[date] = None,
     ) -> Dict[str, Any]:
         """
         Retorna los 12 horizontes de prediccion para una celda, indice y escala.
         Cada fila incluye value, q1, q3, iqr_min, iqr_max.
         """
-        cache_key = f"pred:ts:{parquet_url}:{cell_id}:{var}:{scale}"
+        base_tag = base_date.isoformat() if base_date else "na"
+        cache_key = f"pred:ts:{parquet_url}:{cell_id}:{var}:{scale}:{base_tag}"
         cached = self.cache.get(cache_key)
         if cached:
             return cached
@@ -158,9 +177,14 @@ class PredictionDataService:
 
         data = []
         for _, row in df.iterrows():
+            row_horizon = int(row["horizon"])
+            if base_date:
+                row_date = self._add_months(base_date, row_horizon)
+            else:
+                row_date = pd.to_datetime(row["date"], errors="coerce")
             data.append({
-                "horizon": int(row["horizon"]),
-                "date": str(row["date"]).split(" ")[0] if row["date"] else None,
+                "horizon": row_horizon,
+                "date": row_date.strftime("%Y-%m-%d") if pd.notna(row_date) else None,
                 "value": float(row["value"]) if row["value"] is not None else None,
                 "q1": float(row["q1"]) if row["q1"] is not None else None,
                 "q3": float(row["q3"]) if row["q3"] is not None else None,
@@ -235,7 +259,62 @@ class PredictionDataService:
         parquet_source = source_info["source_expr"]
 
         effective_horizon = horizon
-        if align_to_consultation_month:
+        target_month = None
+        if align_to_consultation_month and consultation_date:
+            target_month = self._add_months(self._month_start(consultation_date), horizon)
+
+        if target_month is not None:
+            target_month_iso = target_month.isoformat()
+            query = f"""
+                WITH monthly_candidates AS (
+                    SELECT
+                        cell_id,
+                        CAST(date AS DATE) AS pred_date,
+                        CAST(lat AS DOUBLE) AS lat,
+                        CAST(lon AS DOUBLE) AS lon,
+                        CAST(value AS DOUBLE) AS value,
+                        CAST(horizon AS INTEGER) AS src_horizon,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY cell_id
+                            ORDER BY ABS(CAST(horizon AS INTEGER) - {horizon}) ASC,
+                                     CAST(horizon AS INTEGER) ASC
+                        ) AS rn
+                    FROM {parquet_source}
+                    WHERE var = '{var}'
+                      AND scale = {scale}
+                      AND DATE_TRUNC('month', CAST(date AS DATE)) = DATE '{target_month_iso}'
+                )
+                SELECT
+                    cell_id,
+                    pred_date,
+                    lat,
+                    lon,
+                    value,
+                    src_horizon
+                FROM monthly_candidates
+                WHERE rn = 1
+                ORDER BY cell_id
+            """
+        else:
+            query = f"""
+                SELECT
+                    cell_id,
+                    CAST(date AS DATE) AS pred_date,
+                    CAST(lat AS DOUBLE) AS lat,
+                    CAST(lon AS DOUBLE) AS lon,
+                    CAST(value AS DOUBLE) AS value,
+                    CAST(horizon AS INTEGER) AS src_horizon
+                FROM {parquet_source}
+                WHERE var = '{var}'
+                  AND scale = {scale}
+                  AND horizon = {effective_horizon}
+                ORDER BY cell_id
+            """
+
+        df = conn.execute(query).fetchdf()
+
+        if df.empty and target_month is not None:
+            # Fallback defensivo para parquets sin cobertura del mes objetivo.
             effective_horizon = self._resolve_effective_horizon_for_consultation(
                 conn=conn,
                 parquet_source=parquet_source,
@@ -245,21 +324,21 @@ class PredictionDataService:
                 consultation_date=consultation_date,
             )
 
-        query = f"""
-            SELECT
-                cell_id,
-                CAST(date AS DATE) AS pred_date,
-                CAST(lat AS DOUBLE) AS lat,
-                CAST(lon AS DOUBLE) AS lon,
-                CAST(value AS DOUBLE) AS value
-            FROM {parquet_source}
-            WHERE var = '{var}'
-              AND scale = {scale}
-              AND horizon = {effective_horizon}
-            ORDER BY cell_id
-        """
-
-        df = conn.execute(query).fetchdf()
+            query = f"""
+                SELECT
+                    cell_id,
+                    CAST(date AS DATE) AS pred_date,
+                    CAST(lat AS DOUBLE) AS lat,
+                    CAST(lon AS DOUBLE) AS lon,
+                    CAST(value AS DOUBLE) AS value,
+                    CAST(horizon AS INTEGER) AS src_horizon
+                FROM {parquet_source}
+                WHERE var = '{var}'
+                  AND scale = {scale}
+                  AND horizon = {effective_horizon}
+                ORDER BY cell_id
+            """
+            df = conn.execute(query).fetchdf()
 
         if df.empty:
             return {
@@ -296,6 +375,29 @@ class PredictionDataService:
                 hist_source_info = self.historical._resolve_parquet_source(historical_parquet_url)
                 hist_source = hist_source_info["source_expr"]
 
+                # Regla de negocio de horizontes: la climatologia se evalua
+                # desplazando el mes de emision por el horizonte solicitado.
+                # Ejemplo: emision enero + H12 => enero del anio siguiente,
+                # por lo que 1991-2020 pasa a 1992-2021 (mismo mes).
+                if consultation_date:
+                    base_month = self._month_start(consultation_date)
+                    clim_start_shifted = self._add_months(date(clim_start_year, base_month.month, 1), horizon)
+                    clim_end_shifted = self._add_months(date(clim_end_year, base_month.month, 1), horizon)
+                    clim_filter_month = clim_start_shifted.month
+                    clim_filter_start_year = clim_start_shifted.year
+                    clim_filter_end_year = clim_end_shifted.year
+                else:
+                    # Fallback defensivo: usar el mes de prediccion seleccionado.
+                    pred_month_fallback = None
+                    if not df.empty and "pred_date" in df.columns:
+                        pred_series = pd.to_datetime(df["pred_date"], errors="coerce").dropna()
+                        if not pred_series.empty:
+                            pred_month_fallback = int(pred_series.iloc[0].month)
+
+                    clim_filter_month = pred_month_fallback or 1
+                    clim_filter_start_year = clim_start_year
+                    clim_filter_end_year = clim_end_year
+
                 clim_query = f"""
                     WITH hist_values AS (
                         SELECT
@@ -310,7 +412,8 @@ class PredictionDataService:
                           AND UPPER(CAST(source AS VARCHAR)) = 'SAT_RAW'
                           AND (freq IS NULL OR UPPER(CAST(freq AS VARCHAR)) IN ('M', 'MON', 'MONTH', 'MONTHLY'))
                           AND CAST(EXTRACT(YEAR FROM CAST(date AS DATE)) AS INTEGER)
-                              BETWEEN {clim_start_year} AND {clim_end_year}
+                                                            BETWEEN {clim_filter_start_year} AND {clim_filter_end_year}
+                                                    AND CAST(EXTRACT(MONTH FROM CAST(date AS DATE)) AS INTEGER) = {clim_filter_month}
                           AND value IS NOT NULL
                     )
                     SELECT
@@ -342,7 +445,12 @@ class PredictionDataService:
                     clim_query_error = str(exc)
 
                 df["pred_date"] = pd.to_datetime(df["pred_date"], errors="coerce")
-                df["clim_month"] = df["pred_date"].dt.month.astype("Int64")
+                if consultation_date:
+                    # Cuando la consulta se ancla a la fecha de emision, la climatologia
+                    # debe usar el mes desplazado por el horizonte, no el mes crudo de la fila.
+                    df["clim_month"] = int(clim_filter_month)
+                else:
+                    df["clim_month"] = df["pred_date"].dt.month.astype("Int64")
                 df["pred_lat4"] = pd.to_numeric(df["lat"], errors="coerce").round(4)
                 df["pred_lon4"] = pd.to_numeric(df["lon"], errors="coerce").round(4)
 
@@ -386,8 +494,9 @@ class PredictionDataService:
                     "map_metric": map_metric,
                     "formula": "anomaly = SPI_pred * std_climatology",
                     "climatology_period": {
-                        "start_year": clim_start_year,
-                        "end_year": clim_end_year,
+                        "start_year": clim_filter_start_year,
+                        "end_year": clim_filter_end_year,
+                        "month": clim_filter_month,
                     },
                 }
                 if clim_query_error is not None:
@@ -503,6 +612,7 @@ class PredictionDataService:
             "scale": scale,
             "horizon": horizon,
             "effective_horizon": effective_horizon,
+            "target_month": target_month.isoformat() if target_month is not None else None,
             "map_metric": map_metric,
             "grid_cells": grid_cells,
             "statistics": statistics,
@@ -670,12 +780,14 @@ class PredictionDataService:
         var: str,
         scale: int,
         cuenca_dn: int,
+        base_date: Optional[date] = None,
     ) -> Dict[str, Any]:
         """
         Retorna los 12 horizontes ponderados por area para una cuenca.
         Incluye value, q1, q3, iqr_min, iqr_max.
         """
-        cache_key = f"pred:ws_ts:{parquet_url}:{var}:{scale}:{cuenca_dn}"
+        base_tag = base_date.isoformat() if base_date else "na"
+        cache_key = f"pred:ws_ts:{parquet_url}:{var}:{scale}:{cuenca_dn}:{base_tag}"
         cached = self.cache.get(cache_key)
         if cached:
             return cached
@@ -743,9 +855,14 @@ class PredictionDataService:
 
         data = []
         for _, row in df.iterrows():
+            row_horizon = int(row["horizon"])
+            if base_date:
+                row_date = self._add_months(base_date, row_horizon)
+            else:
+                row_date = pd.to_datetime(row["date"], errors="coerce")
             data.append({
-                "horizon": int(row["horizon"]),
-                "date": str(row["date"]).split(" ")[0] if row["date"] else None,
+                "horizon": row_horizon,
+                "date": row_date.strftime("%Y-%m-%d") if pd.notna(row_date) else None,
                 "value": float(row["value"]) if row["value"] is not None else None,
                 "q1": float(row["q1"]) if row["q1"] is not None else None,
                 "q3": float(row["q3"]) if row["q3"] is not None else None,

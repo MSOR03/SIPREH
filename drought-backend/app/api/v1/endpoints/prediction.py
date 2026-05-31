@@ -4,6 +4,7 @@ Consulta datos del parquet prediction_main via DuckDB.
 """
 import json
 import logging
+from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -164,6 +165,34 @@ def _resolve_historical_cloud_key_for_prediction(file_id: int, db) -> str:
     return result
 
 
+def _resolve_prediction_issued_at(file_id: int, db) -> date | None:
+    """Resuelve la fecha de emision del archivo de prediccion desde metadata o fallback."""
+    file = db.query(ParquetFile).filter(
+        ParquetFile.id == file_id,
+        ParquetFile.status.in_(["active", "archived"]),
+    ).first()
+
+    if not file:
+        return None
+
+    meta = _parse_meta(file.file_metadata)
+    issued_at = meta.get("issued_at") or meta.get("activated_at") or meta.get("year_month")
+    if not issued_at and file.created_at:
+        issued_at = file.created_at.strftime("%Y-%m-%d")
+
+    if not issued_at:
+        return None
+
+    issued_str = str(issued_at).strip()
+    try:
+        if len(issued_str) == 7 and issued_str.count("-") == 1:
+            year, month = issued_str.split("-")
+            return date(int(year), int(month), 1)
+        return date.fromisoformat(issued_str[:10])
+    except ValueError:
+        return None
+
+
 # ============================================================================
 # HISTORICO DE PREDICCIONES: listar archivos con fecha de emision
 # ============================================================================
@@ -281,12 +310,15 @@ def prediction_timeseries(
             detail="Archivo de prediccion no encontrado o sin cloud_key",
         )
 
+    issued_at = _resolve_prediction_issued_at(request.parquet_file_id, db)
+
     try:
         result = _prediction_service.query_timeseries(
             parquet_url=cloud_key,
             cell_id=request.cell_id,
             var=request.var,
             scale=request.scale,
+            base_date=issued_at,
         )
         return orjson_response(result)
     except Exception as e:
@@ -329,6 +361,8 @@ def prediction_spatial(
             detail="Archivo de prediccion no encontrado o sin cloud_key",
         )
 
+    issued_at = _resolve_prediction_issued_at(request.parquet_file_id, db)
+
     try:
         historical_cloud_key = _resolve_historical_cloud_key_for_prediction(
             request.parquet_file_id,
@@ -350,6 +384,7 @@ def prediction_spatial(
             clim_end_year=request.clim_end_year,
             historical_parquet_url=historical_cloud_key,
             align_to_consultation_month=_is_current_prediction_file(request.parquet_file_id, db),
+            consultation_date=issued_at,
         )
         return orjson_response(result)
     except ValueError as e:
@@ -431,12 +466,15 @@ def prediction_watershed_timeseries(
             detail="Archivo de prediccion no encontrado o sin cloud_key",
         )
 
+    issued_at = _resolve_prediction_issued_at(request.parquet_file_id, db)
+
     try:
         result = _prediction_service.query_watershed_timeseries(
             parquet_url=cloud_key,
             var=request.var,
             scale=request.scale,
             cuenca_dn=request.cuenca_dn,
+            base_date=issued_at,
         )
         return orjson_response(result)
     except Exception as e:

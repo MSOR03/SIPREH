@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useMemo, useState } from 'react';
 import { TrendingUp, Zap, BarChart3, Map as MapIcon, Grid3x3, Droplets } from 'lucide-react';
 import Select from '../ui/Select';
 import Button from '../ui/Button';
@@ -15,6 +16,65 @@ const PREDICTION_INDICES = [
 
 const SCALES = [1, 3, 6, 12];
 
+function formatIssuedAt(value) {
+  if (!value) return null;
+
+  const raw = String(value).trim();
+  const fullDateMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (fullDateMatch) {
+    const [, year, month, day] = fullDateMatch;
+    return `${day}/${month}/${year}`;
+  }
+
+  const yearMonthMatch = raw.match(/^(\d{4})-(\d{2})$/);
+  if (yearMonthMatch) {
+    const [, year, month] = yearMonthMatch;
+    return `${month}/${year}`;
+  }
+
+  return raw;
+}
+
+function parseIssuedAtDate(value) {
+  if (!value) return null;
+
+  const raw = String(value).trim();
+  const fullDateMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (fullDateMatch) {
+    const [, year, month, day] = fullDateMatch;
+    return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  }
+
+  const yearMonthMatch = raw.match(/^(\d{4})-(\d{2})$/);
+  if (yearMonthMatch) {
+    const [, year, month] = yearMonthMatch;
+    return new Date(Date.UTC(Number(year), Number(month) - 1, 1));
+  }
+
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function addMonths(date, months) {
+  const next = new Date(date.getTime());
+  next.setUTCMonth(next.getUTCMonth() + months);
+  return next;
+}
+
+function formatDateIso(date) {
+  if (!date) return null;
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function formatDateDisplay(date) {
+  const iso = formatDateIso(date);
+  if (!iso) return null;
+  return formatIssuedAt(iso);
+}
+
 export default function PredictionSection({
   predictionOpen,
   setPredictionOpen,
@@ -24,9 +84,69 @@ export default function PredictionSection({
   hasSelection,
   onPredictionPlot,
 }) {
+  const [currentIssuedAt, setCurrentIssuedAt] = useState(null);
+  const [loadingIssuedAt, setLoadingIssuedAt] = useState(false);
   const is2D = predictionState.visualizationType === '2D';
   const is1D = predictionState.visualizationType === '1D';
   const isCuencas = predictionState.spatialUnit === 'cuencas';
+
+  useEffect(() => {
+    if (!predictionOpen) return;
+
+    let cancelled = false;
+
+    async function loadCurrentPredictionIssuedAt() {
+      setLoadingIssuedAt(true);
+      try {
+        const { predictionHistoryApi } = await import('@/services/api');
+        const result = await predictionHistoryApi.getList();
+        if (cancelled) return;
+
+        const currentPrediction = result?.predictions?.find((item) => item.is_current) || result?.predictions?.[0] || null;
+        setCurrentIssuedAt(currentPrediction?.issued_at || null);
+      } catch (error) {
+        if (!cancelled) {
+          setCurrentIssuedAt(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingIssuedAt(false);
+        }
+      }
+    }
+
+    loadCurrentPredictionIssuedAt();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [predictionOpen]);
+
+  const subtitle = useMemo(() => {
+    if (loadingIssuedAt) return 'Cargando fecha de emision...';
+    const issuedAtLabel = formatIssuedAt(currentIssuedAt);
+    return issuedAtLabel ? `Fecha de emision: ${issuedAtLabel}` : 'Ultima prediccion disponible';
+  }, [currentIssuedAt, loadingIssuedAt]);
+
+  const horizonSummary = useMemo(() => {
+    const horizon = Number(predictionState.horizon || 1);
+    const issuedAtDate = parseIssuedAtDate(currentIssuedAt);
+    const forecastDate = issuedAtDate ? addMonths(issuedAtDate, horizon) : null;
+    const forecastDateLabel = formatDateDisplay(forecastDate);
+
+    return {
+      horizonLabel: `${horizon} ${horizon === 1 ? 'mes' : 'meses'}`,
+      forecastDateLabel,
+      horizonMarks: [1, 6, 12].map((step) => {
+        const dateLabel = issuedAtDate ? formatDateDisplay(addMonths(issuedAtDate, step)) : null;
+        return {
+          step,
+          label: `${step}m`,
+          dateLabel,
+        };
+      }),
+    };
+  }, [currentIssuedAt, predictionState.horizon]);
 
   const canGenerate = (() => {
     if (!predictionState.droughtIndex || !predictionState.scale) return false;
@@ -40,7 +160,7 @@ export default function PredictionSection({
     <CollapsiblePanel
       icon={Zap}
       title="Prediccion Actual"
-      subtitle="Ultima prediccion disponible"
+      subtitle={subtitle}
       color="green"
       open={predictionOpen}
       onToggle={() => setPredictionOpen(!predictionOpen)}
@@ -134,7 +254,12 @@ export default function PredictionSection({
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-gray-500 dark:text-gray-400">
-                    Horizonte: <strong className="text-green-700 dark:text-green-300">{predictionState.horizon || 1} {(predictionState.horizon || 1) === 1 ? 'mes' : 'meses'}</strong>
+                    Horizonte: <strong className="text-green-700 dark:text-green-300">{horizonSummary.horizonLabel}</strong>
+                    {horizonSummary.forecastDateLabel && (
+                      <span className="ml-3 text-gray-400 dark:text-gray-500">
+                        ({horizonSummary.forecastDateLabel})
+                      </span>
+                    )}
                   </span>
                 </div>
                 <input
@@ -146,10 +271,15 @@ export default function PredictionSection({
                   onChange={(e) => setPredictionState((prev) => ({ ...prev, horizon: parseInt(e.target.value) }))}
                   className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-green-500"
                 />
-                <div className="flex justify-between text-[10px] text-gray-400 dark:text-gray-500">
-                  <span>1m</span>
-                  <span>6m</span>
-                  <span>12m</span>
+                <div className="flex justify-between gap-2 text-[10px] text-gray-400 dark:text-gray-500">
+                  {horizonSummary.horizonMarks.map((mark) => (
+                    <span key={mark.step} className="flex flex-col items-center leading-tight text-center">
+                      <span>{mark.label}</span>
+                      <span className="text-[9px] text-gray-500 dark:text-gray-400">
+                        {mark.dateLabel || '--/--/----'}
+                      </span>
+                    </span>
+                  ))}
                 </div>
               </div>
             </StepSection>
