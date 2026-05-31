@@ -22,7 +22,7 @@ from app.api.v1.endpoints.prediction_schemas import (
     PredictionWatershedTimeSeriesRequest,
 )
 from app.api.v1.endpoints.historical_utils import orjson_response
-from app.services.tiered_storage import _parse_meta
+from app.services.tiered_storage import _parse_meta, get_active_cloud_keys_for_dataset, encode_multi_keys
 
 router = APIRouter()
 logger = logging.getLogger("prediction")
@@ -51,6 +51,117 @@ def _resolve_prediction_cloud_key(file_id: int, db) -> str:
 
     cache_service.set(f"pred_cloud_key:{file_id}", file.cloud_key, expire=3600)
     return file.cloud_key
+
+
+def _is_current_prediction_file(file_id: int, db: Session) -> bool:
+    """True si corresponde al archivo activo de prediction_main."""
+    file = db.query(ParquetFile).filter(
+        ParquetFile.id == file_id,
+        ParquetFile.status.in_(["active", "archived"]),
+    ).first()
+    if not file or file.status != "active":
+        return False
+
+    meta = _parse_meta(file.file_metadata)
+    return str(meta.get("dataset_key") or "").lower() == "prediction_main"
+
+
+def _resolve_historical_cloud_key_for_prediction(file_id: int, db) -> str:
+    """
+    Resuelve cloud_key(s) del dataset historico compatible con la prediccion.
+
+    Prioridad de fuente:
+    - metadata.data_source o metadata.source del archivo de prediccion
+    - fallback CHIRPS
+    """
+    cache_key = f"pred_hist_cloud_key:v2:{file_id}"
+    cached = cache_service.get(cache_key)
+    if cached:
+        return cached
+
+    file = db.query(ParquetFile).filter(
+        ParquetFile.id == file_id,
+        or_(ParquetFile.status.in_(["active", "archived"]), ParquetFile.status.is_(None)),
+    ).first()
+
+    if not file:
+        return None
+
+    _ = _parse_meta(file.file_metadata)
+    # Regla de negocio: la prediccion sale del parquet prediction_main,
+    # pero la climatologia para anomalia siempre se toma de CHIRPS historico.
+    source = "CHIRPS"
+    dataset_key = "historical_chirps"
+
+    def _infer_source_for_candidate(candidate: ParquetFile, candidate_meta: dict) -> str:
+        """Infer source for legacy files where metadata is incomplete."""
+        direct = str(candidate_meta.get("data_source") or candidate_meta.get("source") or "").upper()
+        if direct in {"CHIRPS", "IMERG", "ERA5"}:
+            return direct
+
+        hints = " ".join([
+            str(candidate_meta.get("dataset_key") or ""),
+            str(candidate.filename or ""),
+            str(candidate.original_filename or ""),
+            str(candidate.cloud_key or ""),
+        ]).upper()
+
+        if "CHIRPS" in hints:
+            return "CHIRPS"
+        if "IMERG" in hints:
+            return "IMERG"
+        if "ERA5" in hints:
+            return "ERA5"
+        return ""
+
+    keys = get_active_cloud_keys_for_dataset(dataset_key, db)
+    if not keys:
+        # Fallback: buscar archivos historicos activos/archivados por metadata,
+        # para instalaciones antiguas donde no existe dataset_key estandarizado.
+        candidates = db.query(ParquetFile).filter(
+            or_(ParquetFile.status.in_(["active", "archived"]), ParquetFile.status.is_(None)),
+            ParquetFile.cloud_key.isnot(None),
+            ParquetFile.id != file_id,
+        ).all()
+
+        fallback_keys = []
+        for candidate in candidates:
+            cmeta = _parse_meta(candidate.file_metadata)
+            c_dataset = str(cmeta.get("dataset_key") or "").lower()
+            c_source = _infer_source_for_candidate(candidate, cmeta)
+            c_fingerprint = " ".join([
+                c_dataset,
+                str(candidate.filename or ""),
+                str(candidate.original_filename or ""),
+                str(candidate.cloud_key or ""),
+            ]).upper()
+
+            # Excluir datasets de prediccion y priorizar coincidencia de fuente.
+            if "PREDICTION" in c_fingerprint:
+                continue
+            if "HYDRO" in c_fingerprint:
+                continue
+            if c_source and c_source != source:
+                continue
+
+            # Priorizacion estricta por fuente esperada.
+            if source == "CHIRPS" and "CHIRPS" not in c_fingerprint:
+                continue
+            if source == "IMERG" and "IMERG" not in c_fingerprint:
+                continue
+            if source == "ERA5" and "ERA5" not in c_fingerprint:
+                continue
+
+            fallback_keys.append(candidate.cloud_key)
+
+        keys = fallback_keys
+
+    if not keys:
+        return None
+
+    result = encode_multi_keys(keys) if len(keys) > 1 else keys[0]
+    cache_service.set(cache_key, result, expire=3600)
+    return result
 
 
 # ============================================================================
@@ -200,8 +311,15 @@ def prediction_spatial(
     Retorna ~297 celdas con value, color y categoria de sequia.
     """
     logger.info(
-        "POST /prediction/spatial - file=%s var=%s scale=%s horizon=%s",
-        request.parquet_file_id, request.var, request.scale, request.horizon,
+        "POST /prediction/spatial - file=%s var=%s scale=%s horizon=%s include_anomaly=%s map_metric=%s clim=%s-%s",
+        request.parquet_file_id,
+        request.var,
+        request.scale,
+        request.horizon,
+        request.include_anomaly,
+        request.map_metric,
+        request.clim_start_year,
+        request.clim_end_year,
     )
 
     cloud_key = _resolve_prediction_cloud_key(request.parquet_file_id, db)
@@ -212,13 +330,33 @@ def prediction_spatial(
         )
 
     try:
+        historical_cloud_key = _resolve_historical_cloud_key_for_prediction(
+            request.parquet_file_id,
+            db,
+        )
+
+        # Compatibilidad: si la variable es SPI, intentar incluir anomalia
+        # aunque el frontend no envie include_anomaly explicitamente.
+        effective_include_anomaly = request.include_anomaly or str(request.var).upper() == "SPI"
+
         result = _prediction_service.query_spatial(
             parquet_url=cloud_key,
             var=request.var,
             scale=request.scale,
             horizon=request.horizon,
+            include_anomaly=effective_include_anomaly,
+            map_metric=request.map_metric,
+            clim_start_year=request.clim_start_year,
+            clim_end_year=request.clim_end_year,
+            historical_parquet_url=historical_cloud_key,
+            align_to_consultation_month=_is_current_prediction_file(request.parquet_file_id, db),
         )
         return orjson_response(result)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
     except Exception as e:
         logger.error("Error en prediction spatial: %s", str(e))
         raise HTTPException(
