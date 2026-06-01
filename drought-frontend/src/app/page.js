@@ -644,11 +644,14 @@ export default function Home() {
           );
         } else {
           // === 2D CELDAS: Spatial grid ===
+          const wantsAnomaly = String(predictionState.droughtIndex || '').toUpperCase() === 'SPI';
           const response = await predictionApi.getSpatialData({
             fileId: predFileId,
             var: predictionState.droughtIndex,
             scale: predictionState.scale,
             horizon: predictionState.horizon,
+            includeAnomaly: wantsAnomaly,
+            mapMetric: 'spi',
           });
 
           setPlotData({
@@ -888,11 +891,14 @@ export default function Home() {
           );
         } else {
           // === 2D CELDAS: Spatial grid ===
+          const wantsAnomaly = String(predictionHistoryState.droughtIndex || '').toUpperCase() === 'SPI';
           const response = await predictionHistoryApi.getSpatialData({
             fileId: predFileId,
             var: predictionHistoryState.droughtIndex,
             scale: predictionHistoryState.scale,
             horizon: predictionHistoryState.horizon,
+            includeAnomaly: wantsAnomaly,
+            mapMetric: 'spi',
           });
 
           setPlotData({

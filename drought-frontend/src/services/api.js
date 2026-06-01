@@ -517,7 +517,10 @@ export const predictionApi = {
   },
 
   // Datos espaciales 2D (297 celdas)
-  getSpatialData: async ({ fileId, var: varName, scale, horizon }) => {
+  getSpatialData: async ({ fileId, var: varName, scale, horizon, includeAnomaly, mapMetric = 'spi' }) => {
+    const shouldIncludeAnomaly =
+      typeof includeAnomaly === 'boolean' ? includeAnomaly : String(varName || '').toUpperCase() === 'SPI';
+
     return fetchApi('/prediction/spatial', {
       method: 'POST',
       body: JSON.stringify({
@@ -525,6 +528,8 @@ export const predictionApi = {
         var: varName,
         scale: scale,
         horizon: horizon,
+        include_anomaly: shouldIncludeAnomaly,
+        map_metric: mapMetric,
       }),
     });
   },
@@ -599,7 +604,9 @@ export const predictionHistoryApi = {
   },
 
   // Datos espaciales 2D (297 celdas) para prediccion historica
-  getSpatialData: async ({ fileId, var: varName, scale, horizon }) => {
+  getSpatialData: async ({ fileId, var: varName, scale, horizon, includeAnomaly = false, mapMetric = 'spi' }) => {
+    const shouldIncludeAnomaly = Boolean(includeAnomaly);
+
     return fetchApi('/prediction/spatial', {
       method: 'POST',
       body: JSON.stringify({
@@ -607,6 +614,8 @@ export const predictionHistoryApi = {
         var: varName,
         scale: scale,
         horizon: horizon,
+        include_anomaly: shouldIncludeAnomaly,
+        map_metric: mapMetric,
       }),
     });
   },

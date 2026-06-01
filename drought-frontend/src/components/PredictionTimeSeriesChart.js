@@ -3,6 +3,25 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { useTheme } from '@/contexts/ThemeContext';
 
+function formatChartDate(value) {
+  if (!value) return '';
+
+  const raw = String(value).trim();
+  const fullDateMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (fullDateMatch) {
+    const [, year, month, day] = fullDateMatch;
+    return `${day}/${month}/${year}`;
+  }
+
+  const yearMonthMatch = raw.match(/^(\d{4})-(\d{2})$/);
+  if (yearMonthMatch) {
+    const [, year, month] = yearMonthMatch;
+    return `${month}/${year}`;
+  }
+
+  return raw;
+}
+
 /**
  * Prediction Time Series Chart with IQR bands.
  * Uses Canvas 2D for rendering (no external dependency).
@@ -106,11 +125,18 @@ export default function PredictionTimeSeriesChart({ data = [], title = '', yLabe
 
     // X axis labels
     ctx.textAlign = 'center';
-    ctx.font = '11px system-ui, sans-serif';
     ctx.fillStyle = textColor;
     data.forEach((d, i) => {
       const x = xScale(i);
-      ctx.fillText(`H${d.horizon}`, x, H - mb + 18);
+      const horizonLabel = `H${d.horizon}`;
+      const dateLabel = formatChartDate(d.date);
+
+      ctx.font = '11px system-ui, sans-serif';
+      ctx.fillText(horizonLabel, x, H - mb + 14);
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.fillStyle = isDark ? '#9ca3af' : '#6b7280';
+      ctx.fillText(dateLabel, x, H - mb + 30);
+
       // Tick mark
       ctx.beginPath();
       ctx.strokeStyle = gridColor;

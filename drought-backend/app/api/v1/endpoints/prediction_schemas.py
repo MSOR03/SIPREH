@@ -19,7 +19,26 @@ class PredictionSpatialRequest(BaseModel):
     var: str = Field(..., description="Indice de sequia: SPI, SPEI, RAI, EDDI, PDSI")
     scale: int = Field(..., description="Escala temporal en meses (1, 3, 6, 12)")
     horizon: int = Field(..., ge=1, le=12, description="Horizonte de prediccion (1-12)")
-
+    include_anomaly: bool = Field(
+        False,
+        description="Si es true, calcula anomalia de precipitacion como SPI * desviacion estandar climatologica"
+    )
+    map_metric: Literal["spi", "anomaly"] = Field(
+        "spi",
+        description="Metrica para mapear: spi (valor SPI) o anomaly (anomalia de precipitacion)"
+    )
+    clim_start_year: int = Field(
+        1991,
+        ge=1900,
+        le=2100,
+        description="Ano inicial del periodo climatologico para desviacion estandar"
+    )
+    clim_end_year: int = Field(
+        2020,
+        ge=1900,
+        le=2100,
+        description="Ano final del periodo climatologico para desviacion estandar"
+    )
 
 class AiSummaryRequest(BaseModel):
     type: Literal["1d", "2d"] = Field(..., description="Tipo de resumen: 1d (temporal) o 2d (espacial)")
