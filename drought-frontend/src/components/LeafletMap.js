@@ -1055,6 +1055,9 @@ export default function LeafletMap({
           const anomalyValue = typeof cell.anomaly_value === 'number'
             ? cell.anomaly_value
             : parseFloat(cell.anomaly_value);
+          const anomalyMeanValue = typeof cell.climatology_mean_precip === 'number'
+            ? cell.climatology_mean_precip
+            : parseFloat(cell.climatology_mean_precip);
           const color = cell.color || '#3b82f6';
 
           // Buscar el marcador existente por código de estación
@@ -1081,7 +1084,8 @@ export default function LeafletMap({
                 Código: <b>${cell.codigo}</b><br/>
                 SPI: <b>${!isNaN(cellValue) && cellValue !== null ? cellValue.toFixed(3) : 'N/A'}</b><br/>
                 ${!isNaN(anomalyValue) && anomalyValue !== null ? `Anomalía calculada: <b>${anomalyValue.toFixed(3)}</b><br/>` : ''}
-                ${!isNaN(cell.climatology_std_spi) && cell.climatology_std_spi !== null ? `Desviación estándar: <b>${Number(cell.climatology_std_spi).toFixed(3)}</b><br/>` : ''}
+                ${!isNaN(anomalyMeanValue) && anomalyMeanValue !== null ? `Media climatológica (cálculo anomalía): <b>${Number(anomalyMeanValue).toFixed(3)}</b><br/>` : ''}
+                ${!isNaN(cell.climatology_std_spi) && cell.climatology_std_spi !== null ? `Desviación estándar (cálculo anomalía): <b>${Number(cell.climatology_std_spi).toFixed(3)}</b><br/>` : ''}
                 ${cell.category ? `Categoría: ${cell.category}<br/>` : ''}
                 ${cell.severity != null ? `Severidad: ${cell.severity}` : ''}
               </div>`,
@@ -1120,6 +1124,9 @@ export default function LeafletMap({
         const anomalyValue = typeof cell.anomaly_value === 'number'
           ? cell.anomaly_value
           : parseFloat(cell.anomaly_value);
+        const anomalyMeanValue = typeof cell.climatology_mean_precip === 'number'
+          ? cell.climatology_mean_precip
+          : parseFloat(cell.climatology_mean_precip);
 
         const rect = L.rectangle(cellBounds, {
           fillColor: cell.color || '#3b82f6',
@@ -1139,8 +1146,11 @@ export default function LeafletMap({
           (!isNaN(anomalyValue) && anomalyValue !== null
             ? 'Anomalía calculada: <b>' + anomalyValue.toFixed(3) + '</b><br/>'
             : '') +
+          (!isNaN(anomalyMeanValue) && anomalyMeanValue !== null
+            ? 'Media climatológica (cálculo anomalía): <b>' + Number(anomalyMeanValue).toFixed(3) + '</b><br/>'
+            : '') +
           (!isNaN(cell.climatology_std_spi) && cell.climatology_std_spi !== null
-            ? 'Desviación estándar: <b>' + Number(cell.climatology_std_spi).toFixed(3) + '</b><br/>'
+            ? 'Desviación estándar (cálculo anomalía): <b>' + Number(cell.climatology_std_spi).toFixed(3) + '</b><br/>'
             : '') +
           (cell.category ? ('Categoría: ' + cell.category) : 'Categoría: N/A') +
           '<br/><span style="font-size:10px;color:#6b7280">Click para detalle 1D</span>' +
