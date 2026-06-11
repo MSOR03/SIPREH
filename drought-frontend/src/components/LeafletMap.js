@@ -1084,7 +1084,7 @@ export default function LeafletMap({
                 Código: <b>${cell.codigo}</b><br/>
                 SPI: <b>${!isNaN(cellValue) && cellValue !== null ? cellValue.toFixed(3) : 'N/A'}</b><br/>
                 ${!isNaN(anomalyValue) && anomalyValue !== null ? `Anomalía calculada: <b>${anomalyValue.toFixed(3)}</b><br/>` : ''}
-                ${!isNaN(anomalyMeanValue) && anomalyMeanValue !== null ? `Media climatológica (cálculo anomalía): <b>${Number(anomalyMeanValue).toFixed(3)}</b><br/>` : ''}
+                ${!isNaN(anomalyMeanValue) && anomalyMeanValue !== null ? `Media (calculo de anomalia): <b>${Number(anomalyMeanValue).toFixed(3)}</b><br/>` : ''}
                 ${!isNaN(cell.climatology_std_spi) && cell.climatology_std_spi !== null ? `Desviación estándar (cálculo anomalía): <b>${Number(cell.climatology_std_spi).toFixed(3)}</b><br/>` : ''}
                 ${cell.category ? `Categoría: ${cell.category}<br/>` : ''}
                 ${cell.severity != null ? `Severidad: ${cell.severity}` : ''}
@@ -1147,7 +1147,7 @@ export default function LeafletMap({
             ? 'Anomalía calculada: <b>' + anomalyValue.toFixed(3) + '</b><br/>'
             : '') +
           (!isNaN(anomalyMeanValue) && anomalyMeanValue !== null
-            ? 'Media climatológica (cálculo anomalía): <b>' + Number(anomalyMeanValue).toFixed(3) + '</b><br/>'
+            ? 'Media (calculo de anomalia): <b>' + Number(anomalyMeanValue).toFixed(3) + '</b><br/>'
             : '') +
           (!isNaN(cell.climatology_std_spi) && cell.climatology_std_spi !== null
             ? 'Desviación estándar (cálculo anomalía): <b>' + Number(cell.climatology_std_spi).toFixed(3) + '</b><br/>'
