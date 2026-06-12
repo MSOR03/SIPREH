@@ -83,6 +83,7 @@ export default function PredictionSection({
   setPredictionState,
   hasSelection,
   onPredictionPlot,
+  onPredictionAnomalyPlot,
 }) {
   const [currentIssuedAt, setCurrentIssuedAt] = useState(null);
   const [loadingIssuedAt, setLoadingIssuedAt] = useState(false);
@@ -155,6 +156,15 @@ export default function PredictionSection({
     if (is2D && !predictionState.horizon) return false;
     return true;
   })();
+
+  const canShowAnomaly2DButton = is2D
+    && !isCuencas
+    && String(predictionState.droughtIndex || '').toUpperCase() === 'SPI';
+
+  const canGenerateAnomaly2D = canShowAnomaly2DButton
+    && Number(predictionState.scale) > 0
+    && Number(predictionState.horizon) > 0
+    && Number(predictionState.scale) === Number(predictionState.horizon);
 
   return (
     <CollapsiblePanel
@@ -306,6 +316,19 @@ export default function PredictionSection({
               <TrendingUp className="w-4 h-4" />
               Generar Prediccion
             </Button>
+
+            {canShowAnomaly2DButton && (
+              <Button
+                onClick={onPredictionAnomalyPlot}
+                variant="secondary"
+                className={`w-full mt-2 py-3 rounded-2xl text-sm tracking-wide shadow-md hover:shadow-lg transition-all border border-blue-300 dark:border-blue-700 ${!canGenerateAnomaly2D ? 'opacity-50 cursor-not-allowed' : 'hover:-translate-y-0.5'}`}
+                disabled={!canGenerateAnomaly2D}
+                title="Disponible cuando nivel de agregacion y horizonte son iguales"
+              >
+                <MapIcon className="w-4 h-4" />
+                Ver Anomalia 2D
+              </Button>
+            )}
           </div>
         </div>
       </div>

@@ -30,6 +30,7 @@ export default function LeafletMap({
   spatialDataCells = null, // Datos espaciales 2D para visualización
   spatialResolution = 0.05, // Resolución de las celdas espaciales
   onSpatialCellClick,       // Callback when a 2D spatial cell is clicked (cell data)
+  spatialValueLabel = 'SPI', // Etiqueta del valor principal en tooltip 2D
   theme = 'light', // Tema para tiles del mapa
   showGrid = true,       // Visibilidad de celdas del grid
   showStations = true,   // Visibilidad de estaciones
@@ -42,6 +43,8 @@ export default function LeafletMap({
   selectedEntity = null,  // Entidad seleccionada (cuenca o embalse) { layer, type, dn, area }
   onEntitySelect,         // Callback al seleccionar una entidad
 }) {
+  const prioritizeSpatialHover = Array.isArray(spatialDataCells) && spatialDataCells.length > 0;
+
   // ...existing code...
   const perimetroUrbanoLayerRef = useRef(null);
   const municipioBogotaLayerRef = useRef(null);
@@ -78,29 +81,47 @@ export default function LeafletMap({
   // --- HOOKS DE VISIBILIDAD DE CAPAS VECTORIALES ---
   useEffect(() => {
     if (!mapRef.current || !perimetroUrbanoLayerRef.current) return;
+    const pane = mapRef.current.getPane('perimetroPane');
     if (showPerimetroUrbano) {
       if (!mapRef.current.hasLayer(perimetroUrbanoLayerRef.current)) {
         perimetroUrbanoLayerRef.current.addTo(mapRef.current);
       }
+      if (pane) pane.style.display = '';
     } else {
       if (mapRef.current.hasLayer(perimetroUrbanoLayerRef.current)) {
         perimetroUrbanoLayerRef.current.remove();
       }
+      if (pane) pane.style.display = 'none';
     }
   }, [showPerimetroUrbano, mapReady]);
 
   useEffect(() => {
     if (!mapRef.current || !municipioBogotaLayerRef.current) return;
+    const pane = mapRef.current.getPane('municipioPane');
     if (showMunicipioBogota) {
       if (!mapRef.current.hasLayer(municipioBogotaLayerRef.current)) {
         municipioBogotaLayerRef.current.addTo(mapRef.current);
       }
+      if (pane) pane.style.display = '';
     } else {
       if (mapRef.current.hasLayer(municipioBogotaLayerRef.current)) {
         municipioBogotaLayerRef.current.remove();
       }
+      if (pane) pane.style.display = 'none';
     }
   }, [showMunicipioBogota, mapReady]);
+
+  // Prioriza hover de celdas espaciales: las capas auxiliares siguen visibles,
+  // pero dejan pasar eventos de mouse al overlay de celdas 2D.
+  useEffect(() => {
+    if (!mapRef.current) return;
+
+    ['cuencasPane', 'embalsesPane', 'perimetroPane', 'municipioPane'].forEach((paneName) => {
+      const pane = mapRef.current.getPane(paneName);
+      if (!pane) return;
+      pane.style.pointerEvents = prioritizeSpatialHover ? 'none' : 'auto';
+    });
+  }, [mapReady, prioritizeSpatialHover, showCuencas, showEmbalses, showPerimetroUrbano, showMunicipioBogota]);
 
   useEffect(() => {
     onStationSelectRef.current = onStationSelect;
@@ -317,6 +338,15 @@ export default function LeafletMap({
         map.getPane('embalsesPane').style.zIndex = 460;
         map.getPane('embalsesPane').style.display = 'none';
 
+        // Panes dedicados para capas vectoriales auxiliares
+        map.createPane('perimetroPane');
+        map.getPane('perimetroPane').style.zIndex = 470;
+        map.getPane('perimetroPane').style.display = 'none';
+
+        map.createPane('municipioPane');
+        map.getPane('municipioPane').style.zIndex = 480;
+        map.getPane('municipioPane').style.display = 'none';
+
         // Load cuencas & embalses from separate GeoJSON files
         const _bp = process.env.NEXT_PUBLIC_BASE_PATH || '';
         Promise.all([
@@ -435,6 +465,7 @@ export default function LeafletMap({
             // Perímetro Urbano de Bogotá
             // Perímetro Urbano: azul institucional, opacidad baja, borde delgado
             const perimetroUrbanoLayer = L.geoJSON(perimetroUrbanoGeoData, {
+              pane: 'perimetroPane',
               style: {
                 color: '#b08d57', // Marrón claro
                 weight: 3,
@@ -453,6 +484,7 @@ export default function LeafletMap({
             perimetroUrbanoLayerRef.current = perimetroUrbanoLayer;
             // Municipio de Bogotá: naranja institucional, opacidad baja, borde delgado
             const municipioBogotaLayer = L.geoJSON(municipioBogotaGeoData, {
+              pane: 'municipioPane',
               style: {
                 color: '#6b4f27', // Café
                 weight: 3,
@@ -984,7 +1016,7 @@ export default function LeafletMap({
 
   // Renderizar celdas espaciales 2D cuando cambien
   useEffect(() => {
-    if (!mapRef.current || !spatialLayerRef.current) return;
+    if (!mapReady || !mapRef.current || !spatialLayerRef.current) return;
     
     import('leaflet').then(({ default: L }) => {
       // Restaurar marcadores de estación que fueron coloreados por datos 2D
@@ -1082,7 +1114,7 @@ export default function LeafletMap({
               `<div style="font-size:12px;line-height:1.4">
                 <strong style="color:#1f2937">${cell.station_name || cell.codigo}</strong><br/>
                 Código: <b>${cell.codigo}</b><br/>
-                SPI: <b>${!isNaN(cellValue) && cellValue !== null ? cellValue.toFixed(3) : 'N/A'}</b><br/>
+                ${spatialValueLabel}: <b>${!isNaN(cellValue) && cellValue !== null ? cellValue.toFixed(3) : 'N/A'}</b><br/>
                 ${!isNaN(anomalyValue) && anomalyValue !== null ? `Anomalía calculada: <b>${anomalyValue.toFixed(3)}</b><br/>` : ''}
                 ${!isNaN(anomalyMeanValue) && anomalyMeanValue !== null ? `Media (calculo de anomalia): <b>${Number(anomalyMeanValue).toFixed(3)}</b><br/>` : ''}
                 ${!isNaN(cell.climatology_std_spi) && cell.climatology_std_spi !== null ? `Desviación estándar (cálculo anomalía): <b>${Number(cell.climatology_std_spi).toFixed(3)}</b><br/>` : ''}
@@ -1142,7 +1174,7 @@ export default function LeafletMap({
         rect.on('mouseover', (e) => {
           sharedTooltip.setContent(
           '<div style="font-size:12px;line-height:1.4">' +
-          'SPI: <b>' + (!isNaN(cellValue) && cellValue !== null ? cellValue.toFixed(3) : 'N/A') + '</b><br/>' +
+          String(spatialValueLabel || 'Valor') + ': <b>' + (!isNaN(cellValue) && cellValue !== null ? cellValue.toFixed(3) : 'N/A') + '</b><br/>' +
           (!isNaN(anomalyValue) && anomalyValue !== null
             ? 'Anomalía calculada: <b>' + anomalyValue.toFixed(3) + '</b><br/>'
             : '') +
@@ -1183,7 +1215,7 @@ export default function LeafletMap({
         );
       }
     });
-  }, [spatialDataCells, spatialResolution]);
+  }, [spatialDataCells, spatialResolution, spatialValueLabel, mapReady]);
 
   return <div ref={containerRef} className="w-full h-full" />;
 }

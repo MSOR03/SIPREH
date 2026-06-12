@@ -55,6 +55,7 @@ export default function Sidebar({
   setPredictionHistoryState,
   onAnalysisPlot,
   onPredictionPlot,
+  onPredictionAnomalyPlot,
   onPredictionHistoryPlot,
   selectedStation,
   selectedCell,
@@ -268,6 +269,7 @@ export default function Sidebar({
           setPredictionState={setPredictionState}
           hasSelection={hasSelection}
           onPredictionPlot={onPredictionPlot}
+          onPredictionAnomalyPlot={onPredictionAnomalyPlot}
         />
         </div>
 

@@ -68,14 +68,34 @@ export default function MapArea({
 
   // When prediction or prediction history section is open, override grid with prediction CHIRPS cells
   const showPredictionCells = predictionOpen || predictionHistoryOpen;
+  const dualSpatialMaps = plotData?.dualSpatialMaps || null;
+  const isDualSpatialView = Boolean(dualSpatialMaps?.left && dualSpatialMaps?.right);
+
   const predictionGridCells = useMemo(() => {
     if (!showPredictionCells || !predictionCells?.cells?.length) return null;
     return parseCellIds(predictionCells.cells, predictionCells.resolution || 0.05);
   }, [showPredictionCells, predictionCells]);
 
+  const dualGridCells = useMemo(() => {
+    if (!dualSpatialMaps?.left?.gridCells?.length) return null;
+    const dualCellIds = dualSpatialMaps.left.gridCells
+      .map((cell) => {
+        if (typeof cell === 'string') return cell;
+        if (typeof cell?.cell_id === 'string') return cell.cell_id;
+        if (Number.isFinite(cell?.lon) && Number.isFinite(cell?.lat)) {
+          return `${Number(cell.lon).toFixed(6)}_${Number(cell.lat).toFixed(6)}`;
+        }
+        return null;
+      })
+      .filter(Boolean);
+
+    if (!dualCellIds.length) return null;
+    return parseCellIds(dualCellIds, plotData?.resolution || 0.05);
+  }, [dualSpatialMaps, plotData?.resolution]);
+
   // Decide which cells to show on the map: prediction cells or historical grid cells
-  const effectiveGridCells = predictionGridCells || gridNav.gridCells;
-  const effectiveLevel = predictionGridCells ? 'HIGH' : gridNav.currentLevel;
+  const effectiveGridCells = dualGridCells || predictionGridCells || gridNav.gridCells;
+  const effectiveLevel = (dualGridCells || predictionGridCells) ? 'HIGH' : gridNav.currentLevel;
 
   const toggleLayer = useCallback((key) => {
     setMapLayers(prev => ({ ...prev, [key]: !prev[key] }));
@@ -337,32 +357,121 @@ export default function MapArea({
       {/* Map Container */}
       <div data-tour="map" className="flex-1 min-h-0 relative bg-linear-to-br from-blue-50/20 via-blue-50/10 to-blue-50/10 dark:from-gray-950 dark:via-[#0f1419] dark:to-gray-950 p-6">
         <div className="h-full relative bg-white/60 dark:bg-gray-900/60 backdrop-blur-sm rounded-2xl shadow-2xl ring-4 ring-blue-500/20 dark:ring-blue-400/20 border border-gray-200 dark:border-gray-700">
-          <LeafletMap 
-            theme={theme}
-            onStationSelect={handleStationSelect}
-            selectedStation={selectedStation}
-            selectedCell={selectedCell}
-            onGridCellClick={handleGridCellClick}
-            onCellDoubleClick={handleGridCellDoubleClick}
-            onCellMouseOver={gridNav.handleCellMouseOver}
-            onCellMouseOut={gridNav.handleCellMouseOut}
-            gridCells={effectiveGridCells}
-            currentLevel={effectiveLevel}
-            hoveredCell={gridNav.hoveredCell}
-            spatialDataCells={(plotData?.type === '2D' || plotData?.type === 'prediction-2d' || plotData?.type === 'prediction-history-2d') ? plotData.gridCells : null}
-            spatialResolution={(plotData?.type === '2D' || plotData?.type === 'prediction-2d' || plotData?.type === 'prediction-history-2d') ? (plotData.resolution ?? { ERA5: 0.25, IMERG: 0.1, CHIRPS: 0.05 }[plotData.dataSource] ?? 0.05) : 0.05}
-            onSpatialCellClick={handleSpatialCellClick}
-            showGrid={mapLayers?.grid ?? true}
-            showStations={mapLayers?.stations ?? true}
-            showBoundary={mapLayers?.boundary ?? true}
-            showCuencas={mapLayers?.cuencas ?? false}
-            showEmbalses={mapLayers?.embalses ?? false}
-            showPerimetroUrbano={mapLayers?.perimetroUrbano ?? false}
-            showMunicipioBogota={mapLayers?.municipioBogota ?? false}
-            cuencasSpatialData={plotData?.isCuencas ? plotData.cuencasData : null}
-            selectedEntity={selectedEntity}
-            onEntitySelect={handleEntitySelect}
-          />
+          {isDualSpatialView ? (
+            <div className="h-full grid grid-cols-1 xl:grid-cols-2 gap-3 p-3">
+              <div className="relative rounded-xl border border-gray-300 dark:border-gray-700 overflow-hidden">
+                <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[1001] px-4 py-1.5 rounded-md bg-white/95 dark:bg-gray-800/95 border border-gray-200 dark:border-gray-700 text-sm md:text-base font-bold tracking-wide uppercase text-gray-700 dark:text-gray-200 text-center shadow-sm whitespace-nowrap">
+                  {dualSpatialMaps.left.title}
+                </div>
+                <div className="absolute bottom-2 left-2 z-[1001] w-64 max-w-[75%]">
+                  <ContinuousMapLegend
+                    title="Leyenda Media"
+                    min={dualSpatialMaps.left.statistics?.min}
+                    max={dualSpatialMaps.left.statistics?.max}
+                    unit="mm"
+                    gradient="linear-gradient(to right, #0078e7, #00c5ff, #2bcf7f, #f5d142)"
+                  />
+                </div>
+                <LeafletMap
+                  theme={theme}
+                  onStationSelect={handleStationSelect}
+                  selectedStation={selectedStation}
+                  selectedCell={selectedCell}
+                  onGridCellClick={handleGridCellClick}
+                  onCellDoubleClick={handleGridCellDoubleClick}
+                  onCellMouseOver={gridNav.handleCellMouseOver}
+                  onCellMouseOut={gridNav.handleCellMouseOut}
+                  gridCells={effectiveGridCells}
+                  currentLevel={effectiveLevel}
+                  hoveredCell={gridNav.hoveredCell}
+                  spatialDataCells={dualSpatialMaps.left.gridCells}
+                  spatialResolution={plotData?.resolution ?? 0.05}
+                  spatialValueLabel={dualSpatialMaps.left.valueLabel || 'Valor'}
+                  onSpatialCellClick={handleSpatialCellClick}
+                  showGrid={mapLayers?.grid ?? true}
+                  showStations={mapLayers?.stations ?? true}
+                  showBoundary={mapLayers?.boundary ?? true}
+                  showCuencas={mapLayers?.cuencas ?? false}
+                  showEmbalses={mapLayers?.embalses ?? false}
+                  showPerimetroUrbano={mapLayers?.perimetroUrbano ?? false}
+                  showMunicipioBogota={mapLayers?.municipioBogota ?? false}
+                  cuencasSpatialData={null}
+                  selectedEntity={selectedEntity}
+                  onEntitySelect={handleEntitySelect}
+                />
+              </div>
+
+              <div className="relative rounded-xl border border-gray-300 dark:border-gray-700 overflow-hidden">
+                <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[1001] px-4 py-1.5 rounded-md bg-white/95 dark:bg-gray-800/95 border border-gray-200 dark:border-gray-700 text-sm md:text-base font-bold tracking-wide uppercase text-gray-700 dark:text-gray-200 text-center shadow-sm whitespace-nowrap">
+                  {dualSpatialMaps.right.title}
+                </div>
+                <div className="absolute bottom-2 left-2 z-[1001] w-64 max-w-[75%]">
+                  <ContinuousMapLegend
+                    title="Leyenda Anomalia"
+                    min={dualSpatialMaps.right.statistics?.min}
+                    max={dualSpatialMaps.right.statistics?.max}
+                    mid={0}
+                    unit="mm"
+                    gradient="linear-gradient(to right, #b62323, #e8e8e8, #1f4dbf)"
+                  />
+                </div>
+                <LeafletMap
+                  theme={theme}
+                  onStationSelect={handleStationSelect}
+                  selectedStation={selectedStation}
+                  selectedCell={selectedCell}
+                  onGridCellClick={handleGridCellClick}
+                  onCellDoubleClick={handleGridCellDoubleClick}
+                  onCellMouseOver={gridNav.handleCellMouseOver}
+                  onCellMouseOut={gridNav.handleCellMouseOut}
+                  gridCells={effectiveGridCells}
+                  currentLevel={effectiveLevel}
+                  hoveredCell={gridNav.hoveredCell}
+                  spatialDataCells={dualSpatialMaps.right.gridCells}
+                  spatialResolution={plotData?.resolution ?? 0.05}
+                  spatialValueLabel={dualSpatialMaps.right.valueLabel || 'Valor'}
+                  onSpatialCellClick={handleSpatialCellClick}
+                  showGrid={mapLayers?.grid ?? true}
+                  showStations={mapLayers?.stations ?? true}
+                  showBoundary={mapLayers?.boundary ?? true}
+                  showCuencas={mapLayers?.cuencas ?? false}
+                  showEmbalses={mapLayers?.embalses ?? false}
+                  showPerimetroUrbano={mapLayers?.perimetroUrbano ?? false}
+                  showMunicipioBogota={mapLayers?.municipioBogota ?? false}
+                  cuencasSpatialData={null}
+                  selectedEntity={selectedEntity}
+                  onEntitySelect={handleEntitySelect}
+                />
+              </div>
+            </div>
+          ) : (
+            <LeafletMap 
+              theme={theme}
+              onStationSelect={handleStationSelect}
+              selectedStation={selectedStation}
+              selectedCell={selectedCell}
+              onGridCellClick={handleGridCellClick}
+              onCellDoubleClick={handleGridCellDoubleClick}
+              onCellMouseOver={gridNav.handleCellMouseOver}
+              onCellMouseOut={gridNav.handleCellMouseOut}
+              gridCells={effectiveGridCells}
+              currentLevel={effectiveLevel}
+              hoveredCell={gridNav.hoveredCell}
+              spatialDataCells={(plotData?.type === '2D' || plotData?.type === 'prediction-2d' || plotData?.type === 'prediction-history-2d') ? plotData.gridCells : null}
+              spatialResolution={(plotData?.type === '2D' || plotData?.type === 'prediction-2d' || plotData?.type === 'prediction-history-2d') ? (plotData.resolution ?? { ERA5: 0.25, IMERG: 0.1, CHIRPS: 0.05 }[plotData.dataSource] ?? 0.05) : 0.05}
+              onSpatialCellClick={handleSpatialCellClick}
+              showGrid={mapLayers?.grid ?? true}
+              showStations={mapLayers?.stations ?? true}
+              showBoundary={mapLayers?.boundary ?? true}
+              showCuencas={mapLayers?.cuencas ?? false}
+              showEmbalses={mapLayers?.embalses ?? false}
+              showPerimetroUrbano={mapLayers?.perimetroUrbano ?? false}
+              showMunicipioBogota={mapLayers?.municipioBogota ?? false}
+              cuencasSpatialData={plotData?.isCuencas ? plotData.cuencasData : null}
+              selectedEntity={selectedEntity}
+              onEntitySelect={handleEntitySelect}
+            />
+          )}
 
           {/* ── Layer Control Overlay ── */}
           <div data-tour="layers" className="absolute top-1 left-1 z-[1000]">
@@ -801,6 +910,25 @@ const DroughtLegend = memo(function DroughtLegend({ gridCells }) {
             <span className="text-gray-700 dark:text-gray-300">{label}</span>
           </div>
         ))}
+      </div>
+    </div>
+  );
+});
+
+const ContinuousMapLegend = memo(function ContinuousMapLegend({ title, min, max, mid, gradient, unit = '' }) {
+  const hasMin = Number.isFinite(min);
+  const hasMax = Number.isFinite(max);
+  const hasMid = Number.isFinite(mid);
+  const unitSuffix = unit ? ` ${unit}` : '';
+
+  return (
+    <div className="px-2 py-1.5 rounded-md bg-white/90 dark:bg-gray-800/90 border border-gray-200 dark:border-gray-700 shadow-sm backdrop-blur-sm">
+      <p className="text-[10px] font-semibold text-gray-700 dark:text-gray-200 mb-1">{title}{unitSuffix ? ` (${unit})` : ''}</p>
+      <div className="h-2 rounded" style={{ background: gradient }}></div>
+      <div className="mt-1 flex items-center justify-between text-[10px] text-gray-700 dark:text-gray-300 tabular-nums">
+        <span>{hasMin ? `${min.toFixed(2)}${unitSuffix}` : 'N/A'}</span>
+        <span>{hasMid ? `${mid.toFixed(2)}${unitSuffix}` : ''}</span>
+        <span>{hasMax ? `${max.toFixed(2)}${unitSuffix}` : 'N/A'}</span>
       </div>
     </div>
   );
