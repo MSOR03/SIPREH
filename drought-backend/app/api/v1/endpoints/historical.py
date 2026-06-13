@@ -116,8 +116,14 @@ def _resolve_effective_source(file_id: int, variable: str, request_source: Optio
     if request_source is not None:
         return request_source
 
-    # Intentar desde metadata del archivo (cache de 24h)
-    ds_cache_key = f"file_datasource_v2:{file_id}"
+    # ERA5_LAND: bypass cache — check filename first, always, to avoid stale v2 cache
+    # Old uploads may have been cached under 'ERA5' → 'OBS_IDW' (wrong).
+    _all_names_quick = (cloud_key or "").lower()
+    if "era5_land" in _all_names_quick or "era5land" in _all_names_quick:
+        return get_parquet_source("ERA5_LAND", variable)
+
+    # Intentar desde metadata del archivo (cache de 24h) — v3 invalida stale v2 entries
+    ds_cache_key = f"file_datasource_v3:{file_id}"
     cached_ds = cache_service.get(ds_cache_key)
 
     if cached_ds is None:
@@ -130,16 +136,20 @@ def _resolve_effective_source(file_id: int, variable: str, request_source: Optio
         data_source = None
         if _file:
             _meta = get_file_metadata(_file)
+            # 0: filename wins for ERA5_LAND (handles old uploads with wrong stored metadata)
+            _all_names = (cloud_key or "") + "|" + (_file.original_filename or "") + "|" + (_file.filename or "")
+            if "era5_land" in _all_names.lower() or "era5land" in _all_names.lower():
+                data_source = "ERA5_LAND"
             # 1: campo explícito "data_source"
-            data_source = _meta.get("data_source")
+            if not data_source:
+                data_source = _meta.get("data_source")
             # 2: mapear resolution_level
             if not data_source:
                 _rl = (_meta.get("resolution_level") or "").upper()
-                data_source = {"LOW": "ERA5", "MEDIUM": "IMERG", "HIGH": "CHIRPS"}.get(_rl)
+                data_source = {"LOW": "ERA5", "MEDIUM": "IMERG", "MEDIUM_ERA5LAND": "ERA5_LAND", "HIGH": "CHIRPS"}.get(_rl)
             # 3: inferir desde cloud_key + filenames
             if not data_source:
-                _combined = (cloud_key or "") + "|" + (_file.original_filename or "") + "|" + (_file.filename or "")
-                data_source = infer_data_source_from_url(_combined)
+                data_source = infer_data_source_from_url(_all_names)
 
         cached_ds = data_source if data_source else None
         cache_service.set(ds_cache_key, cached_ds or '', expire=86400)
@@ -327,7 +337,7 @@ def check_files_integrity(
     Útil para detectar archivos mal registrados antes de que causen errores.
     """
     files = db.query(ParquetFile).filter(ParquetFile.status == "active").all()
-    _lvl_to_ds = {"low": "ERA5", "medium": "IMERG", "high": "CHIRPS"}
+    _lvl_to_ds = {"low": "ERA5", "medium": "IMERG", "medium_era5land": "ERA5_LAND", "high": "CHIRPS"}
 
     by_resolution: dict = {}
     issues = []
@@ -337,20 +347,23 @@ def check_files_integrity(
         metadata = get_file_metadata(file)
         fname = file.original_filename or file.filename or ""
 
-        ds = metadata.get("data_source", "")
-        if ds and ds.upper() in ("ERA5", "IMERG", "CHIRPS"):
-            data_source = ds.upper()
+        nm_ci = fname.lower()
+        if "era5_land" in nm_ci or "era5land" in nm_ci:
+            data_source = "ERA5_LAND"
         else:
-            rl = (metadata.get("resolution_level") or "").lower()
-            data_source = _lvl_to_ds.get(rl)
-            if not data_source:
-                nm = fname.lower()
-                if "imerg" in nm:
-                    data_source = "IMERG"
-                elif "chirps" in nm:
-                    data_source = "CHIRPS"
-                elif "era5" in nm:
-                    data_source = "ERA5"
+            ds = metadata.get("data_source", "")
+            if ds and ds.upper() in ("ERA5", "ERA5_LAND", "IMERG", "CHIRPS"):
+                data_source = ds.upper()
+            else:
+                rl = (metadata.get("resolution_level") or "").lower()
+                data_source = _lvl_to_ds.get(rl)
+                if not data_source:
+                    if "imerg" in nm_ci:
+                        data_source = "IMERG"
+                    elif "chirps" in nm_ci:
+                        data_source = "CHIRPS"
+                    elif "era5" in nm_ci:
+                        data_source = "ERA5"
 
         res = metadata.get("resolution") or infer_resolution_from_filename(fname)
         rl_stored = metadata.get("resolution_level", "")
@@ -420,17 +433,20 @@ def list_available_files(
     ).all()
 
     # Helper: infer data_source from metadata + filename (pure function, no DB)
-    _lvl_to_ds = {"low": "ERA5", "medium": "IMERG", "high": "CHIRPS"}
+    _lvl_to_ds = {"low": "ERA5", "medium": "IMERG", "medium_era5land": "ERA5_LAND", "high": "CHIRPS"}
 
     def _resolve_file_data_source(meta: dict, fname: str) -> str | None:
-        """Returns 'ERA5'|'IMERG'|'CHIRPS' or None if truly ambiguous."""
+        """Returns 'ERA5'|'ERA5_LAND'|'IMERG'|'CHIRPS' or None if truly ambiguous."""
+        nm = (fname or "").lower()
+        # Filename wins for ERA5_LAND — handles old uploads where stored data_source='ERA5'
+        if "era5_land" in nm or "era5land" in nm:
+            return "ERA5_LAND"
         ds = meta.get("data_source")
-        if ds and ds.upper() in ("ERA5", "IMERG", "CHIRPS"):
+        if ds and ds.upper() in ("ERA5", "ERA5_LAND", "IMERG", "CHIRPS"):
             return ds.upper()
         rl = (meta.get("resolution_level") or "").lower()
         if rl in _lvl_to_ds:
             return _lvl_to_ds[rl]
-        nm = (fname or "").lower()
         if "imerg" in nm:
             return "IMERG"
         if "chirps" in nm:
@@ -629,7 +645,7 @@ def get_timeseries(
     logger.info(f"POST /timeseries - file={request.parquet_file_id} var={request.variable} cell={request.cell_id}")
     # 🚀 Caché a nivel de endpoint (bypass completo del servicio)
     # Usar string concatenation (más rápido que MD5)
-    endpoint_cache_key = f"endpoint:ts:{request.parquet_file_id}:{request.variable}:{request.start_date}:{request.end_date}:{request.lat}:{request.lon}:{request.cell_id}:{request.scale}:{request.source}:{request.frequency}:{request.limit}"
+    endpoint_cache_key = f"endpoint:ts:v2:{request.parquet_file_id}:{request.variable}:{request.start_date}:{request.end_date}:{request.lat}:{request.lon}:{request.cell_id}:{request.scale}:{request.source}:{request.frequency}:{request.limit}"
     
     cached = cache_service.get(endpoint_cache_key)
     if cached and isinstance(cached, dict):
@@ -742,7 +758,7 @@ def get_spatial_data(
         )
 
     endpoint_cache_key = (
-        f"endpoint:spatial:{request.parquet_file_id}:{request.variable}:"
+        f"endpoint:spatial:v2:{request.parquet_file_id}:{request.variable}:"
         f"mode:{'interval' if interval_mode else 'single'}:"
         f"target:{request.target_date}:start:{request.start_date}:end:{request.end_date}:"
         f"scale:{request.scale}:source:{request.source}:freq:{request.frequency}:"

@@ -38,7 +38,7 @@ const timeHorizons = [
   { value: '6m', label: '6 meses' },
 ];
 
-const RESOLUTION_SOURCE_BY_VALUE = { 0.25: 'ERA5', 0.1: 'IMERG', 0.05: 'CHIRPS' };
+const RESOLUTION_SOURCE_BY_VALUE = { 0.25: 'ERA5', 0.1: 'ERA5_LAND/IMERG', 0.05: 'CHIRPS' };
 const SPATIAL_UNIT_LABELS = { grid: 'Grid', cuencas: 'Cuencas', embalses: 'Embalses', estaciones: 'Estaciones' };
 const ALL_INDICES = [...hydrometIndices, ...hydrologicalIndices];
 
@@ -115,8 +115,8 @@ export default function Sidebar({
   };
 
   const resolutionLabel = useMemo(
-    () => (isHydromet ? RESOLUTION_SOURCE_BY_VALUE[analysisState.spatialResolution] || null : null),
-    [isHydromet, analysisState.spatialResolution]
+    () => (isHydromet ? analysisState.dataSource || null : null),
+    [isHydromet, analysisState.dataSource]
   );
 
   const summaryParts = useMemo(() => {

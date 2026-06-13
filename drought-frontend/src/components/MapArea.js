@@ -47,6 +47,8 @@ export default function MapArea({
   setMapLayers,
   selectedEntity,
   onEntitySelect,
+  dataSource,
+  onDataSourceChange,
 }) {
   const { theme } = useTheme();
   const [mapKey, setMapKey] = useState(() => Date.now());
@@ -62,8 +64,8 @@ export default function MapArea({
     [plotData?.gridCells]
   );
 
-  // Usar el hook de navegación jerárquica
-  const gridNav = useGridNavigation('LOW');
+  // Usar el hook de navegación jerárquica — pasar mediumDataSource para celdas correctas
+  const gridNav = useGridNavigation('LOW', dataSource);
   const [layerMenuOpen, setLayerMenuOpen] = useState(false);
 
   // When prediction or prediction history section is open, override grid with prediction CHIRPS cells
@@ -350,7 +352,7 @@ export default function MapArea({
             currentLevel={effectiveLevel}
             hoveredCell={gridNav.hoveredCell}
             spatialDataCells={(plotData?.type === '2D' || plotData?.type === 'prediction-2d' || plotData?.type === 'prediction-history-2d') ? plotData.gridCells : null}
-            spatialResolution={(plotData?.type === '2D' || plotData?.type === 'prediction-2d' || plotData?.type === 'prediction-history-2d') ? (plotData.resolution ?? { ERA5: 0.25, IMERG: 0.1, CHIRPS: 0.05 }[plotData.dataSource] ?? 0.05) : 0.05}
+            spatialResolution={(plotData?.type === '2D' || plotData?.type === 'prediction-2d' || plotData?.type === 'prediction-history-2d') ? (plotData.resolution ?? { ERA5: 0.25, IMERG: 0.1, ERA5_LAND: 0.1, CHIRPS: 0.05 }[plotData.dataSource] ?? 0.05) : 0.05}
             onSpatialCellClick={handleSpatialCellClick}
             showGrid={mapLayers?.grid ?? true}
             showStations={mapLayers?.stations ?? true}
@@ -377,6 +379,28 @@ export default function MapArea({
 
             {layerMenuOpen && (
               <div className="absolute top-full left-0 mb-2 w-56 bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm rounded-xl shadow-xl border border-gray-200 dark:border-gray-600 p-2 space-y-1 animate-fade-in">
+                {/* Source selector for 0.1° data */}
+                {onDataSourceChange && (
+                  <div className="px-2 pt-1 pb-2 border-b border-gray-100 dark:border-gray-700 mb-1">
+                    <p className="text-[10px] uppercase tracking-wider font-bold text-gray-400 dark:text-gray-500 mb-1.5">Fuente (0.1°)</p>
+                    <div className="flex gap-1">
+                      {['ERA5_LAND', 'IMERG'].map(src => (
+                        <button
+                          key={src}
+                          type="button"
+                          onClick={() => onDataSourceChange(src)}
+                          className={`flex-1 py-1 px-2 rounded-lg text-xs font-semibold border transition-all ${
+                            dataSource === src
+                              ? 'bg-emerald-500 border-emerald-500 text-white shadow-sm'
+                              : 'bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-emerald-400'
+                          }`}
+                        >
+                          {src === 'ERA5_LAND' ? 'ERA5 Land' : 'IMERG'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <p className="text-[10px] uppercase tracking-wider font-bold text-gray-400 dark:text-gray-500 px-2 pt-1 pb-1">Capas visibles</p>
                 {[
                   { key: 'grid', label: 'Celdas (Grid)', icon: Grid3x3, color: 'text-blue-500' },

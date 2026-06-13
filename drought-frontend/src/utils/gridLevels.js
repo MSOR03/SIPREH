@@ -21,7 +21,7 @@ export const GRID_LEVELS = {
     label: '0.1°',
     color: '#10b981',
     zoomLevel: 12,
-    filePattern: /imerg/i,
+    filePattern: /imerg|era5.?land/i,
     nextLevel: 'HIGH',
     prevLevel: 'LOW',
     description: 'Vista intermedia - ~11km por celda'

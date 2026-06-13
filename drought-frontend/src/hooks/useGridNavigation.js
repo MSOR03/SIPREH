@@ -18,17 +18,17 @@ import { historicalApi } from '../services/api';
  */
 function getEffectiveResolution(f) {
   // 1. Use explicit data_source from backend metadata (most reliable)
-  const dsResMap = { 'ERA5': 0.25, 'IMERG': 0.1, 'CHIRPS': 0.05 };
+  const dsResMap = { 'ERA5': 0.25, 'IMERG': 0.1, 'ERA5_LAND': 0.1, 'CHIRPS': 0.05 };
   if (f.data_source && dsResMap[f.data_source] != null) return dsResMap[f.data_source];
   // 2. Use resolution_level from backend metadata
-  const lvlResMap = { 'LOW': 0.25, 'MEDIUM': 0.1, 'HIGH': 0.05 };
+  const lvlResMap = { 'LOW': 0.25, 'MEDIUM': 0.1, 'MEDIUM_ERA5LAND': 0.1, 'HIGH': 0.05 };
   if (f.resolution_level && lvlResMap[f.resolution_level] != null) return lvlResMap[f.resolution_level];
-  // 3. Filename-based fallback — only match files with explicit dataset keyword in name
-  // Do NOT fall back to f.resolution: prediction files with resolution=0.1 would match IMERG
+  // 3. Filename-based fallback — check era5_land before generic era5
   const name = (f.filename || '').toLowerCase();
+  if (name.includes('era5_land') || name.includes('era5land')) return 0.1;
   if (name.includes('imerg')) return 0.1;
-  if (name.includes('era5')) return 0.25;
   if (name.includes('chirps')) return 0.05;
+  if (name.includes('era5')) return 0.25;
   return null;
 }
 
@@ -38,7 +38,7 @@ function getEffectiveResolution(f) {
  * 
  * NOTA: Las celdas se cargan desde el backend (no se generan localmente)
  */
-export function useGridNavigation(initialLevel = 'LOW') {
+export function useGridNavigation(initialLevel = 'LOW', mediumDataSource = null) {
   const [currentLevel, setCurrentLevel] = useState(initialLevel);
   const [gridCells, setGridCells] = useState([]);
   const [selectedCell, setSelectedCell] = useState(null);
@@ -46,9 +46,12 @@ export function useGridNavigation(initialLevel = 'LOW') {
   const [hoveredCell, setHoveredCell] = useState(null);
   
   // Cachear todas las celdas de todos los niveles al montar
+  // allCells.MEDIUM_IMERG y allCells.MEDIUM_ERA5LAND se cargan separadamente
   const [allCells, setAllCells] = useState({
     LOW: [],
     MEDIUM: [],
+    MEDIUM_IMERG: [],
+    MEDIUM_ERA5LAND: [],
     HIGH: [],
   });
   const [isLoading, setIsLoading] = useState(true);
@@ -67,6 +70,8 @@ export function useGridNavigation(initialLevel = 'LOW') {
         const cellsData = {
           LOW: [],
           MEDIUM: [],
+          MEDIUM_IMERG: [],
+          MEDIUM_ERA5LAND: [],
           HIGH: [],
         };
         
@@ -74,25 +79,46 @@ export function useGridNavigation(initialLevel = 'LOW') {
         for (const level of ['LOW', 'MEDIUM', 'HIGH']) {
           const resolution = GRID_LEVELS[level].resolution;
           
-          // Buscar archivo con esta resolución — REQUIERE que el archivo tenga
-          // data_source o resolution_level identificable para evitar falsos positivos
-          // (p.ej. archivos de predicción con resolution=0.1 pero sin fuente conocida)
-          const file = files.find(f => {
-            const hasKnownSource = f.data_source ||
-              (f.resolution_level && f.resolution_level !== 'UNKNOWN');
-            if (!hasKnownSource) return false;
-            const fileResolution = getEffectiveResolution(f);
-            if (fileResolution === null) return false;
-            return Math.abs(fileResolution - resolution) < 0.01;
-          });
-          
-          if (file) {
-            // Obtener celdas del archivo
-            const cellsResponse = await historicalApi.getCells(file.file_id);
+          if (level === 'MEDIUM') {
+            // At MEDIUM (0.1°) there can be ERA5_LAND and IMERG — load both
+            const medFiles = files.filter(f => {
+              const hasKnownSource = f.data_source ||
+                (f.resolution_level && f.resolution_level !== 'UNKNOWN');
+              if (!hasKnownSource) return false;
+              const fr = getEffectiveResolution(f);
+              return fr !== null && Math.abs(fr - resolution) < 0.01;
+            });
+            for (const mf of medFiles) {
+              const resp = await historicalApi.getCells(mf.file_id);
+              if (resp.cells && Array.isArray(resp.cells)) {
+                const parsed = parseCellIds(resp.cells, resolution);
+                if (mf.data_source === 'ERA5_LAND') {
+                  cellsData.MEDIUM_ERA5LAND = parsed;
+                } else {
+                  cellsData.MEDIUM_IMERG = parsed;
+                }
+              }
+            }
+            // Active MEDIUM defaults to IMERG, then ERA5_LAND.
+            // The separate mediumDataSource useEffect will switch it once allCells is set.
+            cellsData.MEDIUM = cellsData.MEDIUM_IMERG.length
+              ? cellsData.MEDIUM_IMERG
+              : cellsData.MEDIUM_ERA5LAND;
+          } else {
+            const file = files.find(f => {
+              const hasKnownSource = f.data_source ||
+                (f.resolution_level && f.resolution_level !== 'UNKNOWN');
+              if (!hasKnownSource) return false;
+              const fileResolution = getEffectiveResolution(f);
+              if (fileResolution === null) return false;
+              return Math.abs(fileResolution - resolution) < 0.01;
+            });
             
-            // Parsear cell_ids a objetos de celda
-            if (cellsResponse.cells && Array.isArray(cellsResponse.cells)) {
-              cellsData[level] = parseCellIds(cellsResponse.cells, resolution);
+            if (file) {
+              const cellsResponse = await historicalApi.getCells(file.file_id);
+              if (cellsResponse.cells && Array.isArray(cellsResponse.cells)) {
+                cellsData[level] = parseCellIds(cellsResponse.cells, resolution);
+              }
             }
           }
         }
@@ -111,10 +137,14 @@ export function useGridNavigation(initialLevel = 'LOW') {
         // Fallback: usar celdas estáticas reales
         console.warn('Usando celdas estáticas como fallback (extraídas de archivos parquet reales)');
         
-        const { getAllStaticCells } = await import('../utils/staticCells');
+        const { getStaticCells, getAllStaticCells } = await import('../utils/staticCells');
         const fallbackCells = getAllStaticCells();
         
-        setAllCells(fallbackCells);
+        setAllCells({
+          ...fallbackCells,
+          MEDIUM_IMERG: fallbackCells.MEDIUM,
+          MEDIUM_ERA5LAND: getStaticCells('MEDIUM', 'ERA5_LAND'),
+        });
         setGridCells(fallbackCells[initialLevel]);
         
       } finally {
@@ -124,6 +154,16 @@ export function useGridNavigation(initialLevel = 'LOW') {
     
     loadAllCells();
   }, [initialLevel]);
+
+  // When mediumDataSource changes (or allCells first loads), update active MEDIUM cells from cache
+  useEffect(() => {
+    if (currentLevel !== 'MEDIUM') return;
+    const preferred = mediumDataSource === 'ERA5_LAND' ? allCells.MEDIUM_ERA5LAND : allCells.MEDIUM_IMERG;
+    const fallback = allCells.MEDIUM_ERA5LAND?.length ? allCells.MEDIUM_ERA5LAND : allCells.MEDIUM_IMERG;
+    const next = (preferred?.length ? preferred : fallback) || [];
+    setGridCells(next);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mediumDataSource, allCells]);
   
   /**
    * Navega al siguiente nivel (drill-down)
@@ -148,7 +188,12 @@ export function useGridNavigation(initialLevel = 'LOW') {
     ]);
     
     // Obtener todas las celdas del siguiente nivel desde el caché
-    const allNextLevelCells = allCells[nextLevelKey];
+    // Para MEDIUM, usar la fuente correcta según mediumDataSource
+    let allNextLevelCells = allCells[nextLevelKey];
+    if (nextLevelKey === 'MEDIUM') {
+      const preferred = mediumDataSource === 'ERA5_LAND' ? allCells.MEDIUM_ERA5LAND : allCells.MEDIUM_IMERG;
+      allNextLevelCells = (preferred?.length ? preferred : allCells.MEDIUM) || [];
+    }
     
     // Filtrar solo las celdas que están dentro de la celda padre
     const childCells = generateChildCells(parentCell, allNextLevelCells);
@@ -166,7 +211,7 @@ export function useGridNavigation(initialLevel = 'LOW') {
     setSelectedCell(null); // Limpia selección al navegar
     
     return true;
-  }, [currentLevel, gridCells, selectedCell, allCells]);
+  }, [currentLevel, gridCells, selectedCell, allCells, mediumDataSource]);
   
   /**
    * Regresa al nivel anterior (drill-up)

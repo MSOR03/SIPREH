@@ -27,6 +27,8 @@ def infer_resolution_from_filename(filename: str) -> tuple[str, float] | tuple[N
         return "high", 0.05
     if "imerg" in name:
         return "medium", 0.10
+    if "era5_land" in name or "era5land" in name:
+        return "medium_era5land", 0.10
     if "era5" in name:
         return "low", 0.25
     return None, None
@@ -97,7 +99,7 @@ async def upload_parquet_file(
         metadata["resolution_level"] = resolution_level
         metadata["resolution_source"] = "filename_inference"
         # Store data_source so file-matching logic is unambiguous downstream
-        _ds_by_level = {"high": "CHIRPS", "medium": "IMERG", "low": "ERA5"}
+        _ds_by_level = {"high": "CHIRPS", "medium": "IMERG", "medium_era5land": "ERA5_LAND", "low": "ERA5"}
         metadata["data_source"] = _ds_by_level.get(resolution_level)
     
     # Generate unique filename

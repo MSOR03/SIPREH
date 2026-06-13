@@ -298,7 +298,11 @@ function resolveSatelliteProductLabel(plotData, analysisState, forcedResolution 
     resolution = Number(analysisState.spatialResolution);
   }
   if (Math.abs(resolution - 0.25) < 0.001) return `ERA5 (ECMWF, 0.25°)`;
-  if (Math.abs(resolution - 0.10) < 0.001) return `IMERG (GPM NASA, 0.10°)`;
+  if (Math.abs(resolution - 0.10) < 0.001) {
+    const ds = plotData?.dataSource || analysisState?.dataSource || '';
+    if (ds === 'ERA5_LAND') return `ERA5 Land (ECMWF, 0.10°)`;
+    return `IMERG (GPM NASA, 0.10°)`;
+  }
   if (Math.abs(resolution - 0.05) < 0.001) return `CHIRPS (UCSB, 0.05°)`;
   if (Number.isFinite(resolution)) return `Resolución desconocida (${resolution.toFixed(2)}°)`;
   return 'N/A';
@@ -988,11 +992,11 @@ function draw1DConsultationInfo(ctx, plotData, analysisState, layout = {}) {
     infoY = wrapText(ctx, `Variable: ${indexOrVariable}`, contentX, infoY, contentMaxW, 22);
   }
 
-  // Determinar producto según resolución
+  // Determinar producto según resolución y fuente
   let producto = '';
   if (Number.isFinite(resolucion)) {
     if (Math.abs(resolucion - 0.05) < 0.001) producto = 'CHIRPS';
-    else if (Math.abs(resolucion - 0.10) < 0.001) producto = 'IMERG';
+    else if (Math.abs(resolucion - 0.10) < 0.001) producto = plotData?.dataSource === 'ERA5_LAND' ? 'ERA5 Land' : 'IMERG';
     else if (Math.abs(resolucion - 0.25) < 0.001) producto = 'ERA5';
   }
   wrapText(ctx, `Producto de análisis satelital consultado: ${producto}`, contentX, infoY, contentMaxW, 22);
@@ -2090,11 +2094,11 @@ async function draw2DMap(ctx, plotData, analysisState) {
     infoY = wrapText(ctx, 'Variable: ' + dataKind.label, infoBoxX + 22, infoY, infoBoxMaxWidth, 22);
   }
 
-  // Determinar producto según resolución
+  // Determinar producto según resolución y fuente
   let producto = '';
   if (Number.isFinite(resolucion)) {
     if (Math.abs(resolucion - 0.05) < 0.001) producto = 'CHIRPS';
-    else if (Math.abs(resolucion - 0.10) < 0.001) producto = 'IMERG';
+    else if (Math.abs(resolucion - 0.10) < 0.001) producto = plotData?.dataSource === 'ERA5_LAND' ? 'ERA5 Land' : 'IMERG';
     else if (Math.abs(resolucion - 0.25) < 0.001) producto = 'ERA5';
   }
   infoY = wrapText(
@@ -2152,7 +2156,7 @@ async function draw2DMap(ctx, plotData, analysisState) {
     const resolucion = Number(plotData?.resolution || analysisState?.spatialResolution);
     let fuente = 'N/A';
     if (Math.abs(resolucion - 0.25) < 0.001) fuente = 'ERA5';
-    else if (Math.abs(resolucion - 0.10) < 0.001) fuente = 'IMERG';
+    else if (Math.abs(resolucion - 0.10) < 0.001) fuente = plotData?.dataSource === 'ERA5_LAND' ? 'ERA5 Land' : 'IMERG';
     else if (Math.abs(resolucion - 0.05) < 0.001) fuente = 'CHIRPS';
     const sistemaCoord = 'WGS84 (EPSG:4326)';
 

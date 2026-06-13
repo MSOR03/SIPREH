@@ -11,12 +11,13 @@ import { downloadAnalysisImage, downloadAnalysisJson } from '@/utils/exporters';
 
 // Helper: resolve effective resolution for a file object, preferring backend metadata fields
 function getFileResolution(f) {
-  const dsResMap = { ERA5: 0.25, IMERG: 0.1, CHIRPS: 0.05 };
+  const dsResMap = { ERA5: 0.25, IMERG: 0.1, ERA5_LAND: 0.1, CHIRPS: 0.05 };
   if (f.data_source && dsResMap[f.data_source] != null) return dsResMap[f.data_source];
   const lvlResMap = { LOW: 0.25, MEDIUM: 0.1, HIGH: 0.05 };
   if (f.resolution_level && lvlResMap[f.resolution_level] != null) return lvlResMap[f.resolution_level];
-  // Filename-based fallback — only match files with explicit dataset keyword in name
+  // Filename-based fallback — check era5_land/era5land BEFORE generic era5
   const nm = (f.filename || '').toLowerCase();
+  if (nm.includes('era5_land') || nm.includes('era5land')) return 0.1;
   if (nm.includes('imerg')) return 0.1;
   if (nm.includes('era5')) return 0.25;
   if (nm.includes('chirps')) return 0.05;
@@ -110,10 +111,12 @@ export default function Home() {
     }
   }, [predictionOpen, predictionHistoryOpen]);
 
-  // Auto-update dataSource when spatialResolution changes
+  // Auto-update dataSource when spatialResolution changes.
+  // Only auto-sync for resolutions that map to exactly one source.
+  // At 0.1° both ERA5_LAND and IMERG are valid — let the user’s sidebar selection stand.
   useEffect(() => {
-    const SOURCE_BY_RES = { 0.25: 'ERA5', 0.1: 'IMERG', 0.05: 'CHIRPS' };
-    const mappedSource = SOURCE_BY_RES[analysisState.spatialResolution];
+    const UNIQUE_SOURCE_BY_RES = { 0.25: 'ERA5', 0.05: 'CHIRPS' };
+    const mappedSource = UNIQUE_SOURCE_BY_RES[analysisState.spatialResolution];
     if (mappedSource && analysisState.dataSource !== mappedSource) {
       setAnalysisState(prev => ({ ...prev, dataSource: mappedSource }));
     }
@@ -259,14 +262,16 @@ export default function Home() {
         } else if (analysisState.spatialUnit === 'cuencas') {
           // ===== 2D CUENCAS: promedio ponderado por cuenca =====
           // spatialResolution is kept in sync with the UI selector (RadioCard), so use it as primary truth
-          const SOURCE_BY_RES = { 0.25: 'ERA5', 0.1: 'IMERG', 0.05: 'CHIRPS' };
-          const dataSource = SOURCE_BY_RES[analysisState.spatialResolution] || analysisState.dataSource || 'CHIRPS';
-          const sourceResMap = { ERA5: 0.25, IMERG: 0.1, CHIRPS: 0.05 };
+          const dataSource = analysisState.dataSource || 'CHIRPS';
+          const sourceResMap = { ERA5: 0.25, IMERG: 0.1, ERA5_LAND: 0.1, CHIRPS: 0.05 };
           const targetResolution = sourceResMap[dataSource] || 0.05;
           const historicalFiles = files.filter(f => !f.dataset_type || f.dataset_type === 'historical');
           const file = historicalFiles.find(f => {
             const eff = getFileResolution(f);
-            return eff != null && Math.abs(eff - targetResolution) < 0.01;
+            if (eff == null || Math.abs(eff - targetResolution) >= 0.01) return false;
+            // At 0.1° multiple sources exist — match data_source explicitly
+            if (Math.abs(targetResolution - 0.1) < 0.001 && f.data_source && f.data_source !== dataSource) return false;
+            return true;
           });
 
           if (!file) {
@@ -318,7 +323,10 @@ export default function Home() {
         const historicalFiles = files.filter(f => !f.dataset_type || f.dataset_type === 'historical');
         const file = historicalFiles.find(f => {
           const eff = getFileResolution(f);
-          return eff != null && Math.abs(eff - targetResolution) < 0.01;
+          if (eff == null || Math.abs(eff - targetResolution) >= 0.01) return false;
+          // At 0.1° multiple sources exist — match data_source explicitly
+          if (Math.abs(targetResolution - 0.1) < 0.001 && f.data_source && analysisState.dataSource && f.data_source !== analysisState.dataSource) return false;
+          return true;
         });
         
         if (!file) {
@@ -348,7 +356,7 @@ export default function Home() {
           ? ` | Freq: ${analysisState.frequency === 'M' ? 'Mensual' : 'Diaria'}`
           : '';
         const sourceByResolution = { 0.25: 'ERA5', 0.1: 'IMERG', 0.05: 'CHIRPS' };
-        const inferredSource = sourceByResolution[targetResolution] || analysisState.dataSource || null;
+        const inferredSource = analysisState.dataSource || sourceByResolution[targetResolution] || null;
 
         // Procesar respuesta y actualizar plotData para modo 2D
         setPlotData({
@@ -394,7 +402,10 @@ export default function Home() {
           const historicalOnly = files.filter(f => !f.dataset_type || f.dataset_type === 'historical');
           const file = historicalOnly.find(f => {
             const eff = getFileResolution(f);
-            return eff != null && Math.abs(eff - resolution) < 0.01;
+            if (eff == null || Math.abs(eff - resolution) >= 0.01) return false;
+            // At 0.1° multiple sources exist — prefer the user’s selected dataSource
+            if (Math.abs(resolution - 0.1) < 0.001 && f.data_source && analysisState.dataSource && f.data_source !== analysisState.dataSource) return false;
+            return true;
           });
           
           if (!file) {
@@ -508,14 +519,16 @@ export default function Home() {
           );
         } else if (selectedEntity?.type === 'cuenca') {
           // ===== 1D CUENCA: serie temporal ponderada =====
-          const SOURCE_BY_RES = { 0.25: 'ERA5', 0.1: 'IMERG', 0.05: 'CHIRPS' };
-          const dataSource = SOURCE_BY_RES[analysisState.spatialResolution] || analysisState.dataSource || 'CHIRPS';
-          const sourceResMap = { ERA5: 0.25, IMERG: 0.1, CHIRPS: 0.05 };
+          const dataSource = analysisState.dataSource || 'CHIRPS';
+          const sourceResMap = { ERA5: 0.25, ERA5_LAND: 0.1, IMERG: 0.1, CHIRPS: 0.05 };
           const targetResolution = sourceResMap[dataSource] || 0.05;
           const historicalFiles = files.filter(f => !f.dataset_type || f.dataset_type === 'historical');
           const file = historicalFiles.find(f => {
             const eff = getFileResolution(f);
-            return eff != null && Math.abs(eff - targetResolution) < 0.01;
+            if (eff == null || Math.abs(eff - targetResolution) >= 0.01) return false;
+            // At 0.1° multiple sources exist — match data_source explicitly
+            if (Math.abs(targetResolution - 0.1) < 0.001 && f.data_source && f.data_source !== dataSource) return false;
+            return true;
           });
 
           if (!file) {
@@ -1412,6 +1425,11 @@ export default function Home() {
           setMapLayers={setMapLayers}
           selectedEntity={selectedEntity}
           onEntitySelect={handleEntitySelect}
+          dataSource={analysisState.dataSource}
+          onDataSourceChange={(src) => {
+            const resMap = { ERA5_LAND: 0.1, IMERG: 0.1, CHIRPS: 0.05 };
+            setAnalysisState(prev => ({ ...prev, dataSource: src, spatialResolution: resMap[src] ?? prev.spatialResolution }));
+          }}
         />
       </div>
       
