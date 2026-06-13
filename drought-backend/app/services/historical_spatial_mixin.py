@@ -116,7 +116,7 @@ class SpatialMixin:
         cache_key = None
         try:
             cache_key = self.cache._generate_key(
-                "spatial",
+                "spatial_v2",
                 url=parquet_url,
                 var=variable,
                 mode="interval" if interval_mode else "single",
@@ -167,16 +167,28 @@ class SpatialMixin:
             # Construir filtros base (sin fecha)
             base_clauses = []
 
-            if bounds:
-                base_clauses.append(f"lat >= {bounds.get('min_lat', -90)}")
-                base_clauses.append(f"lat <= {bounds.get('max_lat', 90)}")
-                base_clauses.append(f"lon >= {bounds.get('min_lon', -180)}")
-                base_clauses.append(f"lon <= {bounds.get('max_lon', 180)}")
-
             # Detectar columnas reales
             parquet_columns = format_info.get('columns', [])
             has_freq_col = 'freq' in parquet_columns
             has_source_col = 'source' in parquet_columns
+            has_cell_id_col = 'cell_id' in parquet_columns
+            has_lat_lon_col = 'lat' in parquet_columns and 'lon' in parquet_columns
+
+            if bounds:
+                if has_lat_lon_col:
+                    base_clauses.append(f"lat >= {bounds.get('min_lat', -90)}")
+                    base_clauses.append(f"lat <= {bounds.get('max_lat', 90)}")
+                    base_clauses.append(f"lon >= {bounds.get('min_lon', -180)}")
+                    base_clauses.append(f"lon <= {bounds.get('max_lon', 180)}")
+                elif has_cell_id_col:
+                    min_lat = bounds.get('min_lat', -90)
+                    max_lat = bounds.get('max_lat', 90)
+                    min_lon = bounds.get('min_lon', -180)
+                    max_lon = bounds.get('max_lon', 180)
+                    base_clauses.append(f"TRY_CAST(split_part(cell_id, '_', 2) AS DOUBLE) >= {min_lat}")
+                    base_clauses.append(f"TRY_CAST(split_part(cell_id, '_', 2) AS DOUBLE) <= {max_lat}")
+                    base_clauses.append(f"TRY_CAST(split_part(cell_id, '_', 1) AS DOUBLE) >= {min_lon}")
+                    base_clauses.append(f"TRY_CAST(split_part(cell_id, '_', 1) AS DOUBLE) <= {max_lon}")
 
             # Frecuencia: detectar dinámicamente qué existe en el parquet
             effective_freq = None
@@ -215,18 +227,27 @@ class SpatialMixin:
 
             base_where = " AND ".join(base_clauses) if base_clauses else "1=1"
 
+            # Coordinate SELECT and GROUP BY — dynamic based on parquet schema
+            if has_lat_lon_col:
+                coord_select = "lat, lon, CAST(PRINTF('%.6f', lon) || '_' || PRINTF('%.6f', lat) AS VARCHAR) as cell_id,"
+                coord_group = "lat, lon"
+            elif has_cell_id_col:
+                coord_select = "TRY_CAST(split_part(cell_id, '_', 2) AS DOUBLE) AS lat, TRY_CAST(split_part(cell_id, '_', 1) AS DOUBLE) AS lon, cell_id,"
+                coord_group = "cell_id"
+            else:
+                coord_select = "lat, lon, CAST(PRINTF('%.6f', lon) || '_' || PRINTF('%.6f', lat) AS VARCHAR) as cell_id,"
+                coord_group = "lat, lon"
+
             def run_spatial_query(for_date: date):
                 where_clause = f"{base_where} AND {date_col} = CAST('{for_date}' AS DATE)"
                 query = f"""
                 SELECT
-                    lat,
-                    lon,
-                    CAST(PRINTF('%.6f', lon) || '_' || PRINTF('%.6f', lat) AS VARCHAR) as cell_id,
+                    {coord_select}
                     AVG(CAST({value_expr} AS DOUBLE)) as value,
                     COUNT(*) as records_in_cell
                 FROM {parquet_source}
                 WHERE {where_clause}
-                GROUP BY lat, lon
+                GROUP BY {coord_group}
                 LIMIT {limit}
                 """
                 return conn.execute(query).fetchdf()
@@ -238,14 +259,12 @@ class SpatialMixin:
                 )
                 query = f"""
                 SELECT
-                    lat,
-                    lon,
-                    CAST(PRINTF('%.6f', lon) || '_' || PRINTF('%.6f', lat) AS VARCHAR) as cell_id,
+                    {coord_select}
                     AVG(CAST({value_expr} AS DOUBLE)) as value,
                     COUNT(*) as records_in_cell
                 FROM {parquet_source}
                 WHERE {where_clause}
-                GROUP BY lat, lon
+                GROUP BY {coord_group}
                 LIMIT {limit}
                 """
                 return conn.execute(query).fetchdf()
@@ -288,24 +307,22 @@ class SpatialMixin:
                 def run_spatial_query_fallback(for_date):
                     fw = f"{fallback_where} AND {date_col} = CAST('{for_date}' AS DATE)"
                     q = f"""
-                    SELECT lat, lon,
-                           CAST(PRINTF('%.6f', lon) || '_' || PRINTF('%.6f', lat) AS VARCHAR) as cell_id,
+                    SELECT {coord_select}
                            AVG(CAST({value_expr} AS DOUBLE)) as value,
                            COUNT(*) as records_in_cell
                     FROM {parquet_source}
-                    WHERE {fw} GROUP BY lat, lon LIMIT {limit}
+                    WHERE {fw} GROUP BY {coord_group} LIMIT {limit}
                     """
                     return conn.execute(q).fetchdf()
 
                 def run_spatial_query_interval_fallback(range_start, range_end):
                     fw = f"{fallback_where} AND {date_col} BETWEEN CAST('{range_start}' AS DATE) AND CAST('{range_end}' AS DATE)"
                     q = f"""
-                    SELECT lat, lon,
-                           CAST(PRINTF('%.6f', lon) || '_' || PRINTF('%.6f', lat) AS VARCHAR) as cell_id,
+                    SELECT {coord_select}
                            AVG(CAST({value_expr} AS DOUBLE)) as value,
                            COUNT(*) as records_in_cell
                     FROM {parquet_source}
-                    WHERE {fw} GROUP BY lat, lon LIMIT {limit}
+                    WHERE {fw} GROUP BY {coord_group} LIMIT {limit}
                     """
                     return conn.execute(q).fetchdf()
 

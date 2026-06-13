@@ -30,6 +30,7 @@ SOURCE_BY_INDEX = {
 SOURCE_BY_DATA_SOURCE = {
     "IMERG": "SAT_LSCDF",
     "CHIRPS": "SAT_RAW",
+    "ERA5_LAND": "OBS_INTERP",
 }
 
 # Override variable+dataset (mayor precedencia que todo lo demás).
@@ -63,12 +64,17 @@ def get_parquet_source(data_source: str, variable: str) -> str:
 
 
 def infer_data_source_from_url(parquet_url: str) -> str:
-    """Infiere ERA5/IMERG/CHIRPS a partir del cloud_key o URL del parquet."""
+    """Infiere ERA5/ERA5_LAND/IMERG/CHIRPS a partir del cloud_key o URL del parquet."""
     url_lower = (parquet_url or "").lower()
     if "chirps" in url_lower:
         return "CHIRPS"
     if "imerg" in url_lower:
         return "IMERG"
+    # Check era5_land / era5land BEFORE the generic era5 check
+    if "era5_land" in url_lower or "era5land" in url_lower:
+        return "ERA5_LAND"
+    if "era5" in url_lower:
+        return "ERA5"
     return "ERA5"
 
 # Mapeo de columnas reales en los archivos .parquet

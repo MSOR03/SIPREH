@@ -151,20 +151,51 @@ class TimeseriesMixin:
                 # Sin columna freq pero user pide mensual → agregar en pandas
                 need_monthly_agg = True
 
-            # 🔥 OPTIMIZACIÓN: BETWEEN para pushdown de row-groups del parquet
+            # Detectar si el parquet tiene columna cell_id (ERA5_LAND) o lat/lon
+            has_cell_id_col = 'cell_id' in parquet_columns
+            has_lat_lon_col = 'lat' in parquet_columns and 'lon' in parquet_columns
+
+            # 🔥 OPTIMIZACIÓN: filtrar por celda
             if cell_id:
-                try:
-                    _lon_s, _lat_s = cell_id.split('_', 1)
-                    _eps = 0.0001
-                    _clat, _clon = float(_lat_s), float(_lon_s)
-                    where_clauses.append(f"lat BETWEEN {_clat - _eps} AND {_clat + _eps}")
-                    where_clauses.append(f"lon BETWEEN {_clon - _eps} AND {_clon + _eps}")
-                except (ValueError, IndexError):
+                if has_cell_id_col:
+                    # Preferir cell_id exacto — evita BETWEEN sobre columnas que pueden no existir
                     where_clauses.append(f"cell_id = '{cell_id}'")
+                elif has_lat_lon_col:
+                    try:
+                        _lon_s, _lat_s = cell_id.split('_', 1)
+                        _eps = 0.0001
+                        _clat, _clon = float(_lat_s), float(_lon_s)
+                        where_clauses.append(f"lat BETWEEN {_clat - _eps} AND {_clat + _eps}")
+                        where_clauses.append(f"lon BETWEEN {_clon - _eps} AND {_clon + _eps}")
+                    except (ValueError, IndexError):
+                        pass  # sin filtro espacial, tomará todas las celdas
+                else:
+                    # Fallback genérico
+                    try:
+                        _lon_s, _lat_s = cell_id.split('_', 1)
+                        _eps = 0.0001
+                        _clat, _clon = float(_lat_s), float(_lon_s)
+                        where_clauses.append(f"lat BETWEEN {_clat - _eps} AND {_clat + _eps}")
+                        where_clauses.append(f"lon BETWEEN {_clon - _eps} AND {_clon + _eps}")
+                    except (ValueError, IndexError):
+                        pass
             elif lat is not None and lon is not None:
-                tolerance = 0.15
-                where_clauses.append(f"lat BETWEEN {lat - tolerance} AND {lat + tolerance}")
-                where_clauses.append(f"lon BETWEEN {lon - tolerance} AND {lon + tolerance}")
+                if has_lat_lon_col:
+                    tolerance = 0.15
+                    where_clauses.append(f"lat BETWEEN {lat - tolerance} AND {lat + tolerance}")
+                    where_clauses.append(f"lon BETWEEN {lon - tolerance} AND {lon + tolerance}")
+
+            # Determinar qué columnas usar para coordenadas en el SELECT
+            if has_lat_lon_col:
+                coord_select = "lat, lon,"
+                coord_join = ", lat, lon"
+            elif has_cell_id_col:
+                # Extraer lat/lon desde cell_id (formato LON_LAT)
+                coord_select = "TRY_CAST(split_part(cell_id, '_', 2) AS DOUBLE) AS lat, TRY_CAST(split_part(cell_id, '_', 1) AS DOUBLE) AS lon,"
+                coord_join = ", TRY_CAST(split_part(cell_id, '_', 2) AS DOUBLE) AS lat, TRY_CAST(split_part(cell_id, '_', 1) AS DOUBLE) AS lon"
+            else:
+                coord_select = "NULL AS lat, NULL AS lon,"
+                coord_join = ", NULL AS lat, NULL AS lon"
 
             # Construir query
             if file_format == 'long':
@@ -182,8 +213,7 @@ class TimeseriesMixin:
                 query = f"""
                 SELECT
                     CAST({date_col} AS DATE) as date,
-                    lat,
-                    lon,
+                    {coord_select}
                     CAST(value AS DOUBLE) as value
                 FROM {parquet_source}
                 WHERE {where_clause}
@@ -195,8 +225,7 @@ class TimeseriesMixin:
                 query = f"""
                 SELECT
                     CAST({date_col} AS DATE) as date,
-                    lat,
-                    lon,
+                    {coord_select}
                     CAST({variable} AS DOUBLE) as value
                 FROM {parquet_source}
                 WHERE {where_clause}
@@ -219,8 +248,7 @@ class TimeseriesMixin:
                 fallback_query = f"""
                 SELECT
                     CAST({date_col} AS DATE) as date,
-                    lat,
-                    lon,
+                    {coord_select}
                     CAST(value AS DOUBLE) as value
                 FROM {parquet_source}
                 WHERE {fallback_where}
@@ -230,8 +258,8 @@ class TimeseriesMixin:
                 if len(result_df) > 0:
                     print(f"   ↳ fallback sin source: {len(result_df)} rows")
 
-            # Si buscamos por lat/lon, filtrar por el punto más cercano
-            if lat is not None and lon is not None and len(result_df) > 0:
+            # Si buscamos por lat/lon (no cell_id), filtrar por el punto más cercano
+            if lat is not None and lon is not None and not cell_id and len(result_df) > 0:
                 result_df['distance'] = np.sqrt(
                     (result_df['lat'] - lat)**2 + (result_df['lon'] - lon)**2
                 )
@@ -246,6 +274,21 @@ class TimeseriesMixin:
             # Ordenar por fecha en pandas (más rápido que ORDER BY sobre archivo remoto)
             if len(result_df) > 0:
                 result_df = result_df.sort_values('date')
+
+            # Dedup: garantizar un único registro por fecha.
+            # Puede haber duplicados cuando source filter falla y el fallback devuelve
+            # filas de múltiples fuentes (OBS_IDW + OBS_INTERP) para el mismo día/celda.
+            if len(result_df) > 1 and result_df['date'].duplicated().any():
+                # Priorizar filas con valor no-nulo; si hay empate tomar la primera
+                result_df = (
+                    result_df
+                    .sort_values('value', ascending=False, na_position='last')
+                    .groupby('date', sort=False)[['date', 'value', 'lat', 'lon']]
+                    .first()
+                    .reset_index(drop=True)
+                    .sort_values('date')
+                )
+                print(f"   ↳ dedup: {len(result_df)} rows after removing date duplicates")
 
             # DuckDB ya retorna DOUBLE gracias al CAST en la query;
             # solo limpiar Inf que DOUBLE puede contener

@@ -32,6 +32,18 @@ DATASET_CONFIG: Dict[str, Dict[str, Any]] = {
             "Cada mes se reescribe el archivo completo (~7 MB)"
         ),
     },
+    "historical_era5_land": {
+        "dataset_type": "historical",
+        "source": "ERA5_LAND",
+        "allowed_roles": ["snapshot", "delta"],
+        "update_strategy": "single_file",
+        "update_guide": (
+            "1. Subir archivo mensual ERA5 Land (0.1°, source=OBS_INTERP)\n"
+            "2. POST /datasets/merge-and-rollover → descarga snapshot + delta, "
+            "fusiona con DuckDB, sube nuevo snapshot\n"
+            "Cada mes se reescribe el archivo completo"
+        ),
+    },
     "historical_imerg": {
         "dataset_type": "historical",
         "source": "IMERG",

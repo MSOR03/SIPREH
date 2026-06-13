@@ -42,6 +42,10 @@ TIERED_STORAGE_CONFIG: Dict[str, Dict[str, Any]] = {
         "strategy": "single_file",
         "size_tier": "small",
     },
+    "historical_era5_land": {
+        "strategy": "single_file",
+        "size_tier": "small",
+    },
     "historical_imerg": {
         "strategy": "historical_updates",
         "size_tier": "medium",

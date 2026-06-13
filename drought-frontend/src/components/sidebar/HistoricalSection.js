@@ -274,17 +274,17 @@ export default function HistoricalSection({
               <StepSection step={stepNumbers.dataSource} title="Fuente de datos" collapsible defaultOpen={false}>
                 <div className="grid grid-cols-3 gap-2">
                   {[
-                    { key: 'ERA5', res: 0.25 },
-                    { key: 'IMERG', res: 0.10 },
-                    { key: 'CHIRPS', res: 0.05 },
+                    { key: 'ERA5_LAND', res: 0.10, label: 'ERA5 Land (0.1°)' },
+                    { key: 'IMERG',     res: 0.10, label: 'IMERG (0.1°)' },
+                    { key: 'CHIRPS',    res: 0.05, label: 'CHIRPS (0.05°)' },
                   ].map((src) => (
                     <RadioCard
                       key={src.key}
                       name="dataSource"
                       value={src.key}
-                      checked={analysisState.spatialResolution === src.res}
+                      checked={analysisState.dataSource === src.key}
                       onChange={() => setAnalysisState((prev) => ({ ...prev, dataSource: src.key, spatialResolution: src.res }))}
-                      label={src.key}
+                      label={src.label}
                     />
                   ))}
                 </div>
