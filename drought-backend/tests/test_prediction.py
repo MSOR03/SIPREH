@@ -147,6 +147,22 @@ class TestPredictionSpatial:
         )
         assert resp.status_code in (404, 400)
 
+    def test_spatial_anomaly_requires_matching_scale_horizon(self, client, prediction_file_id):
+        resp = client.post(
+            "/api/v1/prediction/spatial",
+            json={
+                "parquet_file_id": prediction_file_id,
+                "var": "SPI",
+                "scale": 3,
+                "horizon": 1,
+                "include_anomaly": True,
+                "map_metric": "anomaly",
+            },
+        )
+        assert resp.status_code == 400
+        data = resp.json()
+        assert "scale == horizon" in (data.get("detail") or "")
+
 
 # ─────────────────────────────────────────────────────────
 # PREDICCIÓN WATERSHED SPATIAL

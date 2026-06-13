@@ -25,6 +25,62 @@ function getFileResolution(f) {
   return null;
 }
 
+function computeBasicStats(values) {
+  const valid = values.filter((v) => Number.isFinite(v));
+  if (!valid.length) {
+    return { count: 0, unique_cells: values.length, mean: null, min: null, max: null, category_counts: {} };
+  }
+  const sum = valid.reduce((acc, v) => acc + v, 0);
+  return {
+    count: valid.length,
+    unique_cells: values.length,
+    mean: sum / valid.length,
+    min: Math.min(...valid),
+    max: Math.max(...valid),
+    category_counts: {},
+  };
+}
+
+function colorForMeanValue(value, min, max) {
+  if (!Number.isFinite(value)) return '#CCCCCC';
+  const span = Number.isFinite(max) && Number.isFinite(min) ? max - min : 0;
+  const ratio = span > 0 ? (value - min) / span : 0.5;
+  const clamped = Math.max(0, Math.min(1, ratio));
+
+  // Ramp: azul -> cian -> verde -> amarillo
+  const r = clamped < 0.66
+    ? Math.round((clamped / 0.66) * 180)
+    : 180 + Math.round(((clamped - 0.66) / 0.34) * 60);
+  const g = clamped < 0.33
+    ? 120 + Math.round((clamped / 0.33) * 110)
+    : 230;
+  const b = clamped < 0.5
+    ? 230
+    : Math.round(230 - ((clamped - 0.5) / 0.5) * 180);
+
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
+
+function colorForAnomalyValue(value, maxAbs) {
+  if (!Number.isFinite(value)) return '#CCCCCC';
+  const safeMax = Number.isFinite(maxAbs) && maxAbs > 0 ? maxAbs : 1;
+  const ratio = Math.min(Math.abs(value) / safeMax, 1);
+
+  if (value < 0) {
+    const g = Math.round(220 - ratio * 170);
+    const b = Math.round(230 - ratio * 70);
+    return `#e6${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+  }
+
+  if (value > 0) {
+    const r = Math.round(220 - ratio * 170);
+    const g = Math.round(220 - ratio * 170);
+    return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}e6`;
+  }
+
+  return '#C8C8C8';
+}
+
 export default function Home() {
   const { showError, showSuccess, showInfo, showWarning } = useToast();
   
@@ -606,7 +662,6 @@ export default function Home() {
       showWarning('Por favor selecciona un horizonte de prediccion', 'Horizonte requerido');
       return;
     }
-
     try {
       showInfo(is2D ? 'Consultando prediccion espacial...' : 'Consultando prediccion temporal...', 'Cargando');
 
@@ -741,6 +796,150 @@ export default function Home() {
       showError(error.message || 'Error al consultar prediccion', 'Error en la consulta');
     }
   }, [predictionState, predictionCells, selectedCell, selectedEntity, showError, showWarning, showInfo, showSuccess]);
+
+  const handlePredictionAnomalyPlot = useCallback(async () => {
+    const is2D = predictionState.visualizationType === '2D';
+    const isCuencas = predictionState.spatialUnit === 'cuencas';
+    const index = String(predictionState.droughtIndex || '').toUpperCase();
+
+    if (!is2D || isCuencas || index !== 'SPI') {
+      showWarning('La visualizacion de anomalia 2D solo aplica para SPI en modo celdas.', 'No disponible');
+      return;
+    }
+
+    if (!predictionState.scale || !predictionState.horizon) {
+      showWarning('Debes seleccionar nivel de agregacion y horizonte.', 'Datos incompletos');
+      return;
+    }
+
+    if (Number(predictionState.scale) !== Number(predictionState.horizon)) {
+      showWarning('La anomalia 2D requiere que nivel de agregacion sea igual al horizonte de prediccion.', 'Regla de anomalia');
+      return;
+    }
+
+    try {
+      showInfo('Consultando mapas 2D de media y anomalia...', 'Cargando');
+
+      const { historicalApi, predictionApi } = await import('@/services/api');
+
+      let predFileId;
+      if (predictionCells?.fileId) {
+        predFileId = predictionCells.fileId;
+      } else {
+        const files = await historicalApi.getFiles();
+        const predFile = files.find(f => f.dataset_type === 'prediction');
+        if (!predFile) {
+          showError('No se encontro archivo de prediccion.', 'Error');
+          return;
+        }
+        predFileId = predFile.file_id;
+      }
+
+      const response = await predictionApi.getSpatialData({
+        fileId: predFileId,
+        var: predictionState.droughtIndex,
+        scale: predictionState.scale,
+        horizon: predictionState.horizon,
+        includeAnomaly: true,
+        mapMetric: 'anomaly',
+      });
+
+      const toIsoDate = (value) => {
+        if (!value) return null;
+        const parsed = new Date(value);
+        if (Number.isNaN(parsed.getTime())) return null;
+        return parsed.toISOString().split('T')[0];
+      };
+
+      const addMonthsUtc = (isoDate, months) => {
+        if (!isoDate || !Number.isFinite(months)) return null;
+        const base = new Date(`${isoDate}T00:00:00Z`);
+        if (Number.isNaN(base.getTime())) return null;
+        base.setUTCMonth(base.getUTCMonth() + months);
+        return base.toISOString().split('T')[0];
+      };
+
+      const horizonDate = toIsoDate(response?.target_month);
+      const emissionDate = horizonDate
+        ? addMonthsUtc(horizonDate, -Number(predictionState.horizon || 0))
+        : null;
+
+      const anomalyCells = Array.isArray(response.grid_cells) ? response.grid_cells : [];
+
+      const anomalyValues = anomalyCells.map((cell) => Number(cell?.anomaly_value));
+      const anomalyStats = computeBasicStats(anomalyValues);
+      const anomalyMaxAbs = Number.isFinite(anomalyStats.min) && Number.isFinite(anomalyStats.max)
+        ? Math.max(Math.abs(anomalyStats.min), Math.abs(anomalyStats.max))
+        : 1;
+
+      const rightAnomalyCells = anomalyCells.map((cell) => {
+        const anomalyValue = Number(cell?.anomaly_value);
+        return {
+          ...cell,
+          value: Number.isFinite(anomalyValue) ? anomalyValue : null,
+          color: colorForAnomalyValue(anomalyValue, anomalyMaxAbs),
+          category: null,
+          severity: null,
+          metric: 'anomaly',
+        };
+      });
+
+      const meanValues = anomalyCells.map((cell) => Number(cell?.climatology_mean_precip));
+      const meanStats = computeBasicStats(meanValues);
+      const meanMin = meanStats.min;
+      const meanMax = meanStats.max;
+
+      const meanCells = anomalyCells.map((cell) => {
+        const meanValue = Number(cell?.climatology_mean_precip);
+        return {
+          ...cell,
+          value: Number.isFinite(meanValue) ? meanValue : null,
+          color: colorForMeanValue(meanValue, meanMin, meanMax),
+          category: null,
+          severity: null,
+          metric: 'mean',
+        };
+      });
+
+      setPlotData({
+        type: 'prediction-2d',
+        title: `Prediccion SPI (${predictionState.scale}m) - Horizonte ${predictionState.horizon} | Media y Anomalia`,
+        subtitle: `${anomalyCells.length} celdas | Vista dual: izquierda media, derecha anomalia`,
+        variable: predictionState.droughtIndex,
+        gridCells: rightAnomalyCells,
+        statistics: anomalyStats,
+        bounds: response.bounds,
+        resolution: 0.05,
+        dualSpatialMaps: {
+          left: {
+            title: 'Media de precipitación 1991-2020 (mm)',
+            valueLabel: 'Media',
+            gridCells: meanCells,
+            statistics: meanStats,
+          },
+          right: {
+            title: 'ANOMALIA DE PRECIPITACIÓN (mm)',
+            valueLabel: 'Anomalia',
+            gridCells: rightAnomalyCells,
+            statistics: anomalyStats,
+          },
+        },
+        predictionMeta: {
+          index: predictionState.droughtIndex,
+          scale: predictionState.scale,
+          horizon: predictionState.horizon,
+          mapMetric: 'anomaly-dual',
+          emissionDate,
+          horizonDate,
+        },
+      });
+
+      showSuccess(`Vista dual generada: ${anomalyCells.length} celdas`, '!Listo!');
+    } catch (error) {
+      console.error('Error plotting prediction anomaly dual:', error);
+      showError(error.message || 'Error al consultar anomalia 2D', 'Error en la consulta');
+    }
+  }, [predictionState, predictionCells, showError, showWarning, showInfo, showSuccess]);
 
   // Handle AI Summary
   const handleAiSummary = useCallback(async () => {
@@ -1399,6 +1598,7 @@ export default function Home() {
           setPredictionHistoryState={setPredictionHistoryState}
           onAnalysisPlot={handleAnalysisPlot}
           onPredictionPlot={handlePredictionPlot}
+          onPredictionAnomalyPlot={handlePredictionAnomalyPlot}
           onPredictionHistoryPlot={handlePredictionHistoryPlot}
           selectedStation={selectedStation}
           selectedCell={selectedCell}

@@ -247,7 +247,7 @@ class PredictionDataService:
 
         consultation_tag = (consultation_date or date.today()).strftime("%Y-%m") if align_to_consultation_month else "na"
         cache_key = (
-            f"pred:spatial:v4:{parquet_url}:{var}:{scale}:{horizon}:{consultation_tag}:"
+            f"pred:spatial:v5:{parquet_url}:{var}:{scale}:{horizon}:{consultation_tag}:"
             f"{int(include_anomaly)}:{map_metric}:{clim_start_year}:{clim_end_year}"
         )
         cached = self.cache.get(cache_key)
@@ -357,8 +357,34 @@ class PredictionDataService:
 
         anomaly_metadata = None
         if anomaly_requested:
-            if not historical_parquet_url:
+            if scale != horizon:
+                if map_metric == "anomaly":
+                    raise ValueError(
+                        "La anomalia solo se puede calcular cuando scale == horizon "
+                        "(1-1, 3-3, 6-6, 12-12)"
+                    )
+
+                df["climatology_mean_precip"] = np.nan
+                df["climatology_std_precip"] = np.nan
+                df["climatology_std_spi"] = np.nan
+                df["spi_value"] = pd.to_numeric(df["value"], errors="coerce")
+                df["anomaly_value"] = np.nan
+                anomaly_metadata = {
+                    "enabled": False,
+                    "map_metric": map_metric,
+                    "reason": "scale_horizon_mismatch",
+                    "detail": "La anomalia solo se calcula cuando scale == horizon",
+                    "required_pairs": ["1-1", "3-3", "6-6", "12-12"],
+                    "requested": {"scale": scale, "horizon": horizon},
+                    "climatology_period": {
+                        "start_year": clim_start_year,
+                        "end_year": clim_end_year,
+                    },
+                }
+            elif not historical_parquet_url:
                 logger.warning("No historical dataset available for anomaly calculation. Returning SPI values only.")
+                df["climatology_mean_precip"] = np.nan
+                df["climatology_std_precip"] = np.nan
                 df["climatology_std_spi"] = np.nan
                 df["spi_value"] = pd.to_numeric(df["value"], errors="coerce")
                 df["anomaly_value"] = np.nan
@@ -366,6 +392,7 @@ class PredictionDataService:
                     "enabled": False,
                     "map_metric": map_metric,
                     "reason": "historical_dataset_not_found",
+                    "historical_var": "precip",
                     "climatology_period": {
                         "start_year": clim_start_year,
                         "end_year": clim_end_year,
@@ -399,33 +426,74 @@ class PredictionDataService:
                     clim_filter_end_year = clim_end_year
 
                 clim_query = f"""
-                    WITH hist_values AS (
+                    WITH precip_base AS (
                         SELECT
                             cell_id,
+                            CAST(date AS DATE) AS obs_date,
+                            CAST(EXTRACT(YEAR FROM CAST(date AS DATE)) AS INTEGER) AS clim_year,
                             CAST(EXTRACT(MONTH FROM CAST(date AS DATE)) AS INTEGER) AS clim_month,
                             CAST(ROUND(CAST(lat AS DOUBLE), 4) AS DOUBLE) AS clim_lat4,
                             CAST(ROUND(CAST(lon AS DOUBLE), 4) AS DOUBLE) AS clim_lon4,
-                            TRY_CAST(value AS DOUBLE) AS value_num
+                            AVG(TRY_CAST(value AS DOUBLE)) AS precip_value
                         FROM {hist_source}
-                        WHERE var = 'SPI'
-                          AND scale = {scale}
+                        WHERE UPPER(CAST(var AS VARCHAR)) IN ('PRECIP', 'PRECIPITATION', 'PREC')
                           AND UPPER(CAST(source AS VARCHAR)) = 'SAT_RAW'
                           AND (freq IS NULL OR UPPER(CAST(freq AS VARCHAR)) IN ('M', 'MON', 'MONTH', 'MONTHLY'))
-                          AND CAST(EXTRACT(YEAR FROM CAST(date AS DATE)) AS INTEGER)
-                                                            BETWEEN {clim_filter_start_year} AND {clim_filter_end_year}
-                                                    AND CAST(EXTRACT(MONTH FROM CAST(date AS DATE)) AS INTEGER) = {clim_filter_month}
                           AND value IS NOT NULL
+                        GROUP BY
+                            cell_id,
+                            CAST(date AS DATE),
+                            CAST(EXTRACT(YEAR FROM CAST(date AS DATE)) AS INTEGER),
+                            CAST(EXTRACT(MONTH FROM CAST(date AS DATE)) AS INTEGER),
+                            CAST(ROUND(CAST(lat AS DOUBLE), 4) AS DOUBLE),
+                            CAST(ROUND(CAST(lon AS DOUBLE), 4) AS DOUBLE)
+                    ),
+                    precip_rolling AS (
+                        SELECT
+                            cell_id,
+                            obs_date,
+                            clim_year,
+                            clim_month,
+                            clim_lat4,
+                            clim_lon4,
+                            SUM(precip_value) OVER (
+                                PARTITION BY cell_id
+                                ORDER BY obs_date
+                                ROWS BETWEEN {scale - 1} PRECEDING AND CURRENT ROW
+                            ) AS precip_agg_value,
+                            COUNT(precip_value) OVER (
+                                PARTITION BY cell_id
+                                ORDER BY obs_date
+                                ROWS BETWEEN {scale - 1} PRECEDING AND CURRENT ROW
+                            ) AS precip_agg_count
+                        FROM precip_base
+                        WHERE precip_value IS NOT NULL
+                          AND isfinite(precip_value)
+                    ),
+                    clim_samples AS (
+                        SELECT
+                            cell_id,
+                            clim_month,
+                            clim_lat4,
+                            clim_lon4,
+                            clim_year,
+                            precip_agg_value
+                        FROM precip_rolling
+                        WHERE precip_agg_count = {scale}
+                          AND clim_month = {clim_filter_month}
+                          AND clim_year BETWEEN {clim_filter_start_year} AND {clim_filter_end_year}
                     )
                     SELECT
                         cell_id,
                         clim_month,
                         clim_lat4,
                         clim_lon4,
-                        COALESCE(STDDEV_SAMP(value_num), STDDEV_POP(value_num)) AS climatology_std_spi
-                    FROM hist_values
-                    WHERE value_num IS NOT NULL
-                      AND isfinite(value_num)
-                      AND ABS(value_num) <= 50
+                        AVG(precip_agg_value) AS climatology_mean_precip,
+                        COALESCE(STDDEV_SAMP(precip_agg_value), STDDEV_POP(precip_agg_value)) AS climatology_std_precip,
+                        COUNT(*) AS climatology_n_years
+                    FROM clim_samples
+                    WHERE precip_agg_value IS NOT NULL
+                      AND isfinite(precip_agg_value)
                     GROUP BY cell_id, clim_month, clim_lat4, clim_lon4
                 """
 
@@ -456,19 +524,19 @@ class PredictionDataService:
 
                 if not clim_df.empty:
                     clim_by_cell = (
-                        clim_df[["cell_id", "clim_month", "climatology_std_spi"]]
-                        .dropna(subset=["climatology_std_spi"])
-                        .groupby(["cell_id", "clim_month"], as_index=False)["climatology_std_spi"]
+                        clim_df[["cell_id", "clim_month", "climatology_mean_precip", "climatology_std_precip", "climatology_n_years"]]
+                        .dropna(subset=["climatology_std_precip"])
+                        .groupby(["cell_id", "clim_month"], as_index=False)[["climatology_mean_precip", "climatology_std_precip", "climatology_n_years"]]
                         .mean()
                     )
                     df = df.merge(clim_by_cell, on=["cell_id", "clim_month"], how="left")
 
-                    missing_mask = df["climatology_std_spi"].isna()
+                    missing_mask = df["climatology_std_precip"].isna()
                     if missing_mask.any():
                         clim_by_coord = (
-                            clim_df[["clim_lat4", "clim_lon4", "clim_month", "climatology_std_spi"]]
-                            .dropna(subset=["climatology_std_spi"])
-                            .groupby(["clim_lat4", "clim_lon4", "clim_month"], as_index=False)["climatology_std_spi"]
+                            clim_df[["clim_lat4", "clim_lon4", "clim_month", "climatology_mean_precip", "climatology_std_precip", "climatology_n_years"]]
+                            .dropna(subset=["climatology_std_precip"])
+                            .groupby(["clim_lat4", "clim_lon4", "clim_month"], as_index=False)[["climatology_mean_precip", "climatology_std_precip", "climatology_n_years"]]
                             .mean()
                         )
                         fallback_df = df.loc[missing_mask, ["pred_lat4", "pred_lon4", "clim_month"]].merge(
@@ -477,12 +545,18 @@ class PredictionDataService:
                             right_on=["clim_lat4", "clim_lon4", "clim_month"],
                             how="left",
                         )
-                        df.loc[missing_mask, "climatology_std_spi"] = fallback_df["climatology_std_spi"].values
+                        df.loc[missing_mask, "climatology_mean_precip"] = fallback_df["climatology_mean_precip"].values
+                        df.loc[missing_mask, "climatology_std_precip"] = fallback_df["climatology_std_precip"].values
+                        df.loc[missing_mask, "climatology_n_years"] = fallback_df["climatology_n_years"].values
                 else:
-                    df["climatology_std_spi"] = np.nan
+                    df["climatology_mean_precip"] = np.nan
+                    df["climatology_std_precip"] = np.nan
+                    df["climatology_n_years"] = np.nan
 
                 df["spi_value"] = pd.to_numeric(df["value"], errors="coerce")
-                df["anomaly_value"] = df["spi_value"] * pd.to_numeric(df["climatology_std_spi"], errors="coerce")
+                df["anomaly_value"] = df["spi_value"] * pd.to_numeric(df["climatology_std_precip"], errors="coerce")
+                # Compatibilidad hacia atrás con clientes que esperan este campo.
+                df["climatology_std_spi"] = pd.to_numeric(df["climatology_std_precip"], errors="coerce")
 
                 if map_metric == "anomaly":
                     if df["anomaly_value"].notna().sum() == 0:
@@ -492,7 +566,10 @@ class PredictionDataService:
                 anomaly_metadata = {
                     "enabled": clim_query_error is None,
                     "map_metric": map_metric,
-                    "formula": "anomaly = SPI_pred * std_climatology",
+                    "formula": "anomaly = SPI_pred * std_precip_agg",
+                    "historical_var": "precip",
+                    "aggregation_window_months": scale,
+                    "required_condition": "scale == horizon",
                     "climatology_period": {
                         "start_year": clim_filter_start_year,
                         "end_year": clim_filter_end_year,
@@ -504,6 +581,8 @@ class PredictionDataService:
                     anomaly_metadata["detail"] = clim_query_error
         else:
             df["spi_value"] = pd.to_numeric(df["value"], errors="coerce")
+            df["climatology_mean_precip"] = np.nan
+            df["climatology_std_precip"] = np.nan
             df["climatology_std_spi"] = np.nan
             df["anomaly_value"] = np.nan
 
@@ -545,6 +624,8 @@ class PredictionDataService:
                 "value": float(row["value"]) if pd.notna(row["value"]) else None,
                 "spi_value": float(row["spi_value"]) if pd.notna(row.get("spi_value")) else None,
                 "climatology_std_spi": float(row["climatology_std_spi"]) if pd.notna(row.get("climatology_std_spi")) else None,
+                "climatology_mean_precip": float(row["climatology_mean_precip"]) if pd.notna(row.get("climatology_mean_precip")) else None,
+                "climatology_std_precip": float(row["climatology_std_precip"]) if pd.notna(row.get("climatology_std_precip")) else None,
                 "anomaly_value": float(row["anomaly_value"]) if pd.notna(row.get("anomaly_value")) else None,
                 "metric": map_metric,
             }

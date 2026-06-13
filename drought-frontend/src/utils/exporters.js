@@ -1497,6 +1497,160 @@ function drawAnalysisTypeIndicator(ctx, plotData) {
   ctx.fillText(label, x + w / 2, y + 28);
   ctx.textAlign = 'left';
 }
+
+function drawPanelInstitutionalTitle(ctx, title, x, y, w) {
+  const h = 32;
+  ctx.save();
+  ctx.fillStyle = '#d1fae5';
+  ctx.strokeStyle = '#065f46';
+  ctx.lineWidth = 1.5;
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeRect(x, y, w, h);
+
+  ctx.fillStyle = '#065f46';
+  ctx.font = 'bold 15px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText(String(title || '').toUpperCase(), x + w / 2, y + 22);
+  ctx.textAlign = 'left';
+  ctx.restore();
+}
+
+function drawDualLegendBar(ctx, {
+  x,
+  y,
+  w,
+  title,
+  min,
+  max,
+  mid = null,
+  unit = 'mm',
+  gradient,
+}) {
+  const h = 74;
+  const innerPad = 12;
+
+  ctx.save();
+  ctx.fillStyle = '#ffffff';
+  ctx.strokeStyle = '#dbe2ea';
+  ctx.lineWidth = 1;
+  drawCard(ctx, x, y, w, h, 10);
+
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 13px Arial';
+  ctx.textAlign = 'left';
+  ctx.fillText(String(title || '').toUpperCase(), x + innerPad, y + 20);
+
+  const barX = x + innerPad;
+  const barY = y + 30;
+  const barW = w - innerPad * 2;
+  const barH = 12;
+
+  const grad = ctx.createLinearGradient(barX, barY, barX + barW, barY);
+  if (Array.isArray(gradient) && gradient.length) {
+    gradient.forEach((stop) => grad.addColorStop(stop.at, stop.color));
+  } else {
+    grad.addColorStop(0, '#2563eb');
+    grad.addColorStop(1, '#22c55e');
+  }
+  ctx.fillStyle = grad;
+  ctx.fillRect(barX, barY, barW, barH);
+  ctx.strokeStyle = '#94a3b8';
+  ctx.strokeRect(barX, barY, barW, barH);
+
+  const hasMin = Number.isFinite(min);
+  const hasMax = Number.isFinite(max);
+  const hasMid = Number.isFinite(mid);
+
+  ctx.fillStyle = '#334155';
+  ctx.font = '12px Arial';
+  ctx.textAlign = 'left';
+  ctx.fillText(hasMin ? `${min.toFixed(2)} ${unit}` : 'N/A', barX, y + 58);
+
+  if (hasMid) {
+    const midText = `${mid.toFixed(2)} ${unit}`;
+    const midX = barX + barW / 2;
+    ctx.textAlign = 'center';
+    ctx.fillText(midText, midX, y + 58);
+  }
+
+  ctx.textAlign = 'right';
+  ctx.fillText(hasMax ? `${max.toFixed(2)} ${unit}` : 'N/A', barX + barW, y + 58);
+
+  ctx.restore();
+  return y + h + 10;
+}
+
+function drawVerticalLegendInMap(ctx, {
+  x,
+  y,
+  h,
+  title,
+  min,
+  max,
+  mid = null,
+  unit = 'mm',
+  gradient,
+}) {
+  const panelW = 118;
+  const panelH = h + 38;
+  const barW = 14;
+  const barX = x + 12;
+  const barY = y + 18;
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
+  ctx.strokeStyle = 'rgba(148,163,184,0.9)';
+  ctx.lineWidth = 1;
+  drawCard(ctx, x, y, panelW, panelH, 8);
+
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 11px Arial';
+  ctx.textAlign = 'left';
+  ctx.fillText(String(title || '').toUpperCase(), x + 10, y + 12);
+
+  const grad = ctx.createLinearGradient(barX, barY + h, barX, barY);
+  if (Array.isArray(gradient) && gradient.length) {
+    gradient.forEach((stop) => grad.addColorStop(stop.at, stop.color));
+  } else {
+    grad.addColorStop(0, '#2563eb');
+    grad.addColorStop(1, '#22c55e');
+  }
+
+  ctx.fillStyle = grad;
+  ctx.fillRect(barX, barY, barW, h);
+  ctx.strokeStyle = '#64748b';
+  ctx.strokeRect(barX, barY, barW, h);
+
+  ctx.fillStyle = '#334155';
+  ctx.font = '10px Arial';
+  ctx.textAlign = 'left';
+  ctx.fillText(Number.isFinite(max) ? `${max.toFixed(1)} ${unit}` : 'N/A', barX + barW + 8, barY + 4);
+  if (Number.isFinite(mid)) {
+    ctx.fillText(`${mid.toFixed(1)} ${unit}`, barX + barW + 8, barY + h / 2 + 4);
+  }
+  ctx.fillText(Number.isFinite(min) ? `${min.toFixed(1)} ${unit}` : 'N/A', barX + barW + 8, barY + h);
+  ctx.restore();
+}
+
+function drawCompactInfoItem(ctx, { x, y, w, h, label, value }) {
+  ctx.save();
+  ctx.fillStyle = '#ffffff';
+  ctx.strokeStyle = '#d8e0e8';
+  ctx.lineWidth = 1;
+  drawCard(ctx, x, y, w, h, 8);
+
+  ctx.fillStyle = '#64748b';
+  ctx.font = 'bold 10px Arial';
+  ctx.textAlign = 'left';
+  ctx.fillText(fitText(ctx, String(label || '').toUpperCase(), w - 20), x + 10, y + 14);
+
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 12px Arial';
+  const safeValue = String(value || 'N/A');
+  ctx.fillText(fitText(ctx, safeValue, w - 20), x + 10, y + 31);
+  ctx.restore();
+}
+
 async function loadStudyAreaBoundary() {
   try {
     const _bp = process.env.NEXT_PUBLIC_BASE_PATH || '';
@@ -1788,7 +1942,7 @@ function drawGraticule(ctx, bounds, frame) {
   // Etiquetas de latitud (rotadas 90° y más a la izquierda)
   const drawLatLabel = (text, x, y) => {
     ctx.save();
-    ctx.translate(x - 10, y - 10); // 10px más a la izquierda, 10px más arriba
+    ctx.translate(x + 2, y - 10); // desplaza ligeramente a la derecha para evitar solape
     ctx.rotate(-Math.PI / 2); // rotar 90° CCW
     ctx.fillStyle = '#1e293b';
     ctx.font = 'bold 12px Arial';
@@ -1905,7 +2059,8 @@ function drawScaleBar(ctx, bounds, frame) {
   const barPx = maxKm * pxPerKm;
 
   // Posición de la barra
-  const x = frame.x + frame.w - barPx - 54;
+  const rightInset = Number.isFinite(frame?.scaleBarRightInset) ? frame.scaleBarRightInset : 54;
+  const x = frame.x + frame.w - barPx - rightInset;
   const y = frame.y + frame.h - 22 - frame.h * 0.025;
   const panelX = x - 14;
   const panelY = y - 24;
@@ -1979,6 +2134,290 @@ async function draw2DMap(ctx, plotData, analysisState) {
     })
     .filter(Boolean);
   if (!points.length) return;
+
+  const dualLeftCells = plotData?.dualSpatialMaps?.left?.gridCells;
+  const dualRightCells = plotData?.dualSpatialMaps?.right?.gridCells;
+  const hasDualExport = Array.isArray(dualLeftCells) && dualLeftCells.length > 0
+    && Array.isArray(dualRightCells) && dualRightCells.length > 0;
+
+  if (hasDualExport) {
+    const leftPoints = dualLeftCells
+      .map((cell) => {
+        const coords = resolveLatLon(cell);
+        if (!coords) return null;
+        return { ...coords, cell };
+      })
+      .filter(Boolean);
+
+    const rightPoints = dualRightCells
+      .map((cell) => {
+        const coords = resolveLatLon(cell);
+        if (!coords) return null;
+        return { ...coords, cell };
+      })
+      .filter(Boolean);
+
+    if (!leftPoints.length || !rightPoints.length) return;
+
+    await draw2DInstitutionalPanel(ctx, plotData);
+    drawAnalysisTypeIndicator(ctx, plotData);
+
+    const marginX = 56;
+    const mapY = 182;
+    const bottomSectionH = 196;
+    const bottomGap = 14;
+    const mapBottom = DEFAULT_IMAGE_HEIGHT - 56 - bottomSectionH - bottomGap;
+    const mapH = mapBottom - mapY;
+    const mapsGap = 20;
+    const panelW = Math.floor((DEFAULT_IMAGE_WIDTH - marginX * 2 - mapsGap) / 2);
+
+    const leftPanel = { x: marginX, y: mapY, w: panelW, h: mapH };
+    const rightPanel = { x: marginX + panelW + mapsGap, y: mapY, w: panelW, h: mapH };
+    const bottomSectionBox = {
+      x: marginX,
+      y: mapBottom + bottomGap,
+      w: DEFAULT_IMAGE_WIDTH - marginX * 2,
+      h: bottomSectionH,
+    };
+    const infoPanelH = 112;
+    const metaGap = 10;
+    const metaPanelH = bottomSectionH - infoPanelH - metaGap;
+    const bottomInfoBox = {
+      x: bottomSectionBox.x,
+      y: bottomSectionBox.y,
+      w: bottomSectionBox.w,
+      h: infoPanelH,
+    };
+    const bottomMetaBox = {
+      x: bottomSectionBox.x,
+      y: bottomSectionBox.y + infoPanelH + metaGap,
+      w: bottomSectionBox.w,
+      h: metaPanelH,
+    };
+
+    const allDualPoints = [...leftPoints, ...rightPoints];
+    const minLon = Math.min(...allDualPoints.map((p) => p.lon));
+    const maxLon = Math.max(...allDualPoints.map((p) => p.lon));
+    const minLat = Math.min(...allDualPoints.map((p) => p.lat));
+    const maxLat = Math.max(...allDualPoints.map((p) => p.lat));
+
+    const boundaryCoords = await loadStudyAreaBoundary();
+    const boundaryLons = boundaryCoords.map((c) => c[0]);
+    const boundaryLats = boundaryCoords.map((c) => c[1]);
+
+    const bounds = {
+      minLon: Math.min(minLon, ...(boundaryLons.length ? boundaryLons : [minLon])),
+      maxLon: Math.max(maxLon, ...(boundaryLons.length ? boundaryLons : [maxLon])),
+      minLat: Math.min(minLat, ...(boundaryLats.length ? boundaryLats : [minLat])),
+      maxLat: Math.max(maxLat, ...(boundaryLats.length ? boundaryLats : [maxLat])),
+    };
+
+    // Cuadro inferior: información de consulta
+    const meta = plotData?.predictionMeta || {};
+    const nowText = new Date().toLocaleString('es-CO', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    });
+    const horizon = meta?.horizon ?? 'N/A';
+    const scale = meta?.scale ?? 'N/A';
+    const index = meta?.index || plotData?.variable || 'SPI';
+    const emissionDate = meta?.emissionDate || 'N/A';
+    const horizonDate = meta?.horizonDate || 'N/A';
+    const productLabel = `CHIRPS (${Number(plotData?.resolution || 0.05).toFixed(2)}°)`;
+
+    const formatIsoToDisplay = (isoValue) => {
+      if (!isoValue || isoValue === 'N/A') return 'N/A';
+      const raw = String(isoValue);
+      const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!m) return raw;
+      return `${m[3]}/${m[2]}/${m[1]}`;
+    };
+
+    ctx.save();
+    ctx.fillStyle = '#f8fafc';
+    ctx.strokeStyle = '#cbd5e1';
+    drawCard(ctx, bottomInfoBox.x, bottomInfoBox.y, bottomInfoBox.w, bottomInfoBox.h, 12);
+
+    const infoX = bottomInfoBox.x + 12;
+    let infoY = bottomInfoBox.y + 16;
+    const infoW = bottomInfoBox.w - 24;
+
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 14px Arial';
+    ctx.fillText('INFORMACIÓN DE CONSULTA', infoX, infoY);
+    const row1Y = infoY + 7;
+    const gap = 6;
+    const itemH = 36;
+
+    const cardsRow1 = [
+      { label: 'Fecha', value: nowText },
+      { label: 'Tipo', value: 'Predicción anomalias de precipitación' },
+      { label: 'Índice', value: index },
+      { label: 'Producto', value: productLabel },
+    ];
+    const cardsRow2 = [
+      { label: 'Emisión', value: formatIsoToDisplay(emissionDate) },
+      { label: 'Nivel de agregación', value: `${scale} meses` },
+      { label: 'Horizonte', value: `${horizon} meses (${formatIsoToDisplay(horizonDate)})` },
+    ];
+
+    const row1Units = [0.95, 1.45, 0.75, 0.95];
+    const row2Units = [0.75, 1.0, 1.25];
+    const row1UnitSum = row1Units.reduce((acc, v) => acc + v, 0);
+    const row2UnitSum = row2Units.reduce((acc, v) => acc + v, 0);
+    const row1Available = infoW - gap * (cardsRow1.length - 1);
+    const row2Available = infoW - gap * (cardsRow2.length - 1);
+
+    let cursorX = infoX;
+    cardsRow1.forEach((card, idx) => {
+      const width = Math.floor((row1Available * row1Units[idx]) / row1UnitSum);
+      drawCompactInfoItem(ctx, {
+        x: cursorX,
+        y: row1Y,
+        w: width,
+        h: itemH,
+        label: card.label,
+        value: card.value,
+      });
+      cursorX += width + gap;
+    });
+
+    let row2X = infoX;
+    const row2Y = row1Y + itemH + 8;
+    cardsRow2.forEach((card, idx) => {
+      const width = idx === cardsRow2.length - 1
+        ? (infoX + row2Available + gap * (cardsRow2.length - 1)) - row2X
+        : Math.floor((row2Available * row2Units[idx]) / row2UnitSum);
+      drawCompactInfoItem(ctx, {
+        x: row2X,
+        y: row2Y,
+        w: width,
+        h: itemH,
+        label: card.label,
+        value: card.value,
+      });
+      row2X += width + gap;
+    });
+    ctx.restore();
+
+    ctx.save();
+    ctx.fillStyle = '#f8fafc';
+    ctx.strokeStyle = '#cbd5e1';
+    drawCard(ctx, bottomMetaBox.x, bottomMetaBox.y, bottomMetaBox.w, bottomMetaBox.h, 12);
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 13px Arial';
+    ctx.fillText('METADATOS', bottomMetaBox.x + 12, bottomMetaBox.y + 18);
+    ctx.fillStyle = '#475569';
+    ctx.font = '12px Arial';
+    const metaTextY = bottomMetaBox.y + 34;
+    const metaValueY = bottomMetaBox.y + 56;
+    ctx.fillText(`Producto satelital: ${productLabel}`, bottomMetaBox.x + 12, metaTextY);
+    ctx.fillText(`Resolución de celdas: ${Number(plotData?.resolution || 0.05).toFixed(2)}°`, bottomMetaBox.x + 12, metaValueY);
+    ctx.fillText('Sistema de coordenadas: WGS84 (EPSG:4326)', bottomMetaBox.x + 360, metaTextY);
+    ctx.restore();
+
+    const drawDualPanel = async (panel, title, panelPoints, legendConfig) => {
+      ctx.save();
+      ctx.fillStyle = '#f8fafc';
+      ctx.strokeStyle = '#cbd5e1';
+      drawCard(ctx, panel.x, panel.y, panel.w, panel.h, 14);
+      ctx.restore();
+
+      drawPanelInstitutionalTitle(ctx, title, panel.x + 10, panel.y + 10, panel.w - 20);
+
+      const frame = {
+        x: panel.x + 18,
+        y: panel.y + 54,
+        w: panel.w - 36,
+        h: panel.h - 82,
+        pad: 18,
+        scaleBarRightInset: 28,
+      };
+
+      drawBasemapBackdrop(ctx, frame, bounds);
+      await drawLeafletBasemapTiles(ctx, bounds, frame);
+      drawProjectBoundary(ctx, boundaryCoords, bounds, frame);
+
+      const lonRange = bounds.maxLon - bounds.minLon || 1;
+      const latRange = bounds.maxLat - bounds.minLat || 1;
+      const uniqueLons = getUniqueSorted(panelPoints.map((p) => p.lon));
+      const uniqueLats = getUniqueSorted(panelPoints.map((p) => p.lat));
+      const lonStep = inferStep(uniqueLons, Number(plotData?.resolution) || lonRange / 20 || 0.1);
+      const latStep = inferStep(uniqueLats, Number(plotData?.resolution) || latRange / 20 || 0.1);
+
+      const base = projectToMap(bounds.minLon, bounds.minLat, bounds, frame);
+      const stepLon = projectToMap(bounds.minLon + lonStep, bounds.minLat, bounds, frame);
+      const stepLat = projectToMap(bounds.minLon, bounds.minLat + latStep, bounds, frame);
+      const cellWidth = Math.max(4, Math.abs(stepLon.x - base.x) * 0.92);
+      const cellHeight = Math.max(4, Math.abs(stepLat.y - base.y) * 0.92);
+
+      ctx.save();
+      ctx.globalAlpha = 0.78;
+      panelPoints.forEach((point) => {
+        const { x, y } = projectToMap(point.lon, point.lat, bounds, frame);
+        ctx.fillStyle = point.cell?.color || '#2563eb';
+        const left = x - cellWidth / 2;
+        const top = y - cellHeight / 2;
+        ctx.fillRect(left, top, cellWidth, cellHeight);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+        ctx.lineWidth = 0.5;
+        ctx.strokeRect(left, top, cellWidth, cellHeight);
+      });
+      ctx.restore();
+
+      drawGraticule(ctx, bounds, frame);
+      drawNorthArrow(ctx, frame.x + 28, frame.y + 56);
+      drawScaleBar(ctx, bounds, frame);
+
+      drawVerticalLegendInMap(ctx, {
+        x: frame.x + frame.w - 124,
+        y: frame.y + frame.h - Math.min(240, Math.max(170, frame.h - 220)) - 96,
+        h: Math.min(240, Math.max(170, frame.h - 220)),
+        title: legendConfig.title,
+        min: legendConfig.min,
+        max: legendConfig.max,
+        mid: legendConfig.mid,
+        unit: 'mm',
+        gradient: legendConfig.gradient,
+      });
+    };
+
+    await drawDualPanel(
+      leftPanel,
+      plotData?.dualSpatialMaps?.left?.title || 'MEDIA',
+      leftPoints,
+      {
+        title: 'Media',
+        min: plotData?.dualSpatialMaps?.left?.statistics?.min,
+        max: plotData?.dualSpatialMaps?.left?.statistics?.max,
+        gradient: [
+          { at: 0, color: '#0078e7' },
+          { at: 0.33, color: '#00c5ff' },
+          { at: 0.66, color: '#2bcf7f' },
+          { at: 1, color: '#f5d142' },
+        ],
+      }
+    );
+
+    await drawDualPanel(
+      rightPanel,
+      plotData?.dualSpatialMaps?.right?.title || 'ANOMALIA',
+      rightPoints,
+      {
+        title: 'Anomalia',
+        min: plotData?.dualSpatialMaps?.right?.statistics?.min,
+        max: plotData?.dualSpatialMaps?.right?.statistics?.max,
+        mid: 0,
+        gradient: [
+          { at: 0, color: '#b62323' },
+          { at: 0.5, color: '#e8e8e8' },
+          { at: 1, color: '#1f4dbf' },
+        ],
+      }
+    );
+
+    return;
+  }
 
   await draw2DInstitutionalPanel(ctx, plotData);
   drawAnalysisTypeIndicator(ctx, plotData);
