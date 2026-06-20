@@ -1,0 +1,68 @@
+\chapter{Tecnologías}
+\label{ch:tecnologias}
+
+\section{Frontend}
+\label{sec:frontend_tech}
+
+\begin{center}
+\small
+\begin{tabular}{@{}llp{5.8cm}@{}}
+\toprule
+\textbf{Tecnología} & \textbf{Versión} & \textbf{Función} \\
+\midrule
+Next.js      & 14       & Framework React con SSR/CSR, enrutamiento y despliegue simplificado. \\
+React        & 18       & Librería de componentes reactivos para la interfaz de usuario. \\
+TypeScript   & 5        & Superconjunto tipado de JavaScript; mejora la mantenibilidad del código. \\
+Leaflet.js   & $\geq$1.9 & Mapa interactivo: grilla de índices, polígonos de cuencas, marcadores. \\
+uPlot        & $\geq$1.6 & Gráficas 1D de alto rendimiento con zoom, pan y diezmado LTTB. \\
+Canvas 2D    & --       & API nativa del navegador para gráficas de predicción con bandas IQR. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Backend}
+\label{sec:backend_tech}
+
+\begin{center}
+\small
+\begin{tabular}{@{}llp{5.8cm}@{}}
+\toprule
+\textbf{Tecnología} & \textbf{Versión} & \textbf{Función} \\
+\midrule
+Python   & 3.11+      & Lenguaje base; integración de librerías científicas y de análisis. \\
+FastAPI  & $\geq$0.110 & Framework REST asíncrono; genera documentación Swagger/ReDoc automáticamente. \\
+Uvicorn  & --         & Servidor ASGI que ejecuta FastAPI con soporte de peticiones concurrentes. \\
+DuckDB   & $\geq$0.10  & Motor analítico embebido; consulta Parquet directamente, 10--100$\times$ más rápido que Pandas. \\
+PyArrow  & $\geq$15    & Lectura/escritura de Parquet; extrae metadatos al cargar archivos. \\
+Redis    & --         & Caché de resultados con TTL configurable (900 s); $\sim$50$\times$ speedup. \\
+PyJWT    & --         & Generación y validación de tokens JWT para control de acceso. \\
+boto3    & --         & SDK S3 de AWS para comunicación con Cloudflare R2. \\
+Groq API & --         & Resúmenes en lenguaje natural vía modelo Llama 3.1-8b-instant. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{remark}
+DuckDB opera en modo \textit{in-process}: no requiere servidor separado y se embebe directamente en el proceso Python, eliminando la latencia de red entre aplicación y motor de consultas.
+\end{remark}
+
+\section{Base de datos}
+\label{sec:db_tech}
+
+\begin{center}
+\small
+\begin{tabular}{@{}llp{5.8cm}@{}}
+\toprule
+\textbf{Tecnología} & \textbf{Entorno} & \textbf{Función} \\
+\midrule
+SQLite         & Desarrollo  & BD relacional embebida. Metadatos, datasets, usuarios y tokens. Sin servidor. \\
+PostgreSQL     & Producción  & BD relacional de servidor completo para mayor concurrencia y robustez. \\
+Cloudflare R2  & Producción  & Almacenamiento de objetos (compatible S3). Aloja los archivos Parquet. Sin costos de egreso. \\
+Apache Parquet & Formato     & Formato columnar de alta compresión. Esquema: \texttt{\{date, lat, lon, variable, value, scale, source\}}. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{example}
+En el dominio de estudio a resolución CHIRPS ($0{,}05^{\circ}$), el archivo histórico contiene $294~\text{celdas} \times 12~\text{meses} \times 30~\text{años} = 105\,840$ filas por índice y escala. Con múltiples índices y escalas, el archivo consolidado puede superar los 50 millones de filas, donde DuckDB sobre Parquet ofrece una ventaja de rendimiento decisiva.
+\end{example}
