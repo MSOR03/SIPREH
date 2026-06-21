@@ -53,6 +53,16 @@ export default function MapArea({
   const { theme } = useTheme();
   const [mapKey, setMapKey] = useState(() => Date.now());
 
+  // Enruta los datos espaciales agregados (plotData.cuencasData) hacia la capa
+  // correcta según la unidad zonal usada para generar el mapa.
+  const zonalUnit = plotData?.isCuencas ? (plotData.spatialUnit || 'cuencas') : null;
+  const zonalData = plotData?.isCuencas ? plotData.cuencasData : null;
+  const cuencasSpatialData = zonalUnit === 'cuencas' ? zonalData : null;
+  const municipiosSpatialData = zonalUnit === 'municipios' ? zonalData : null;
+  const perimetroSpatialData = zonalUnit === 'perimetro' ? zonalData : null;
+  const zonalLabel = { cuencas: 'Cuencas', municipios: 'Municipios', perimetro: 'Perímetro urbano' }[zonalUnit] || 'Zonas';
+  const zonalLabelSingular = { cuencas: 'Cuenca', municipios: 'Municipio', perimetro: 'Perímetro urbano' }[zonalUnit] || 'Zona';
+
  // Normalizar variable para evitar fallos por mayúsculas/minúsculas o espacios
   const normalizedVariable = String(plotData?.variable ?? '').trim().toUpperCase();
   const isDroughtIndex = useMemo(
@@ -307,7 +317,7 @@ export default function MapArea({
                         ? 'text-purple-900 dark:text-purple-100'
                         : 'text-teal-900 dark:text-teal-100'
                     }`}>
-                      {selectedEntity.type === 'embalse' ? 'Embalse' : 'Cuenca'}:
+                      {({ embalse: 'Embalse', cuenca: 'Cuenca', municipio: 'Municipio', perimetro: 'Perímetro urbano' }[selectedEntity.type] || 'Zona')}:
                     </span>
                     <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${
                       selectedEntity.type === 'embalse'
@@ -397,7 +407,9 @@ export default function MapArea({
                   showEmbalses={mapLayers?.embalses ?? false}
                   showPerimetroUrbano={mapLayers?.perimetroUrbano ?? false}
                   showMunicipioBogota={mapLayers?.municipioBogota ?? false}
-                  cuencasSpatialData={null}
+                  cuencasSpatialData={cuencasSpatialData}
+                  municipiosSpatialData={municipiosSpatialData}
+                  perimetroSpatialData={perimetroSpatialData}
                   selectedEntity={selectedEntity}
                   onEntitySelect={handleEntitySelect}
                 />
@@ -440,7 +452,9 @@ export default function MapArea({
                   showEmbalses={mapLayers?.embalses ?? false}
                   showPerimetroUrbano={mapLayers?.perimetroUrbano ?? false}
                   showMunicipioBogota={mapLayers?.municipioBogota ?? false}
-                  cuencasSpatialData={null}
+                  cuencasSpatialData={cuencasSpatialData}
+                  municipiosSpatialData={municipiosSpatialData}
+                  perimetroSpatialData={perimetroSpatialData}
                   selectedEntity={selectedEntity}
                   onEntitySelect={handleEntitySelect}
                 />
@@ -469,7 +483,9 @@ export default function MapArea({
               showEmbalses={mapLayers?.embalses ?? false}
               showPerimetroUrbano={mapLayers?.perimetroUrbano ?? false}
               showMunicipioBogota={mapLayers?.municipioBogota ?? false}
-              cuencasSpatialData={plotData?.isCuencas ? plotData.cuencasData : null}
+              cuencasSpatialData={cuencasSpatialData}
+              municipiosSpatialData={municipiosSpatialData}
+              perimetroSpatialData={perimetroSpatialData}
               selectedEntity={selectedEntity}
               onEntitySelect={handleEntitySelect}
             />
@@ -726,7 +742,7 @@ export default function MapArea({
                       <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.statistics.max?.toFixed(2) || 'N/A'}</p>
                     </div>
                     <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
-                      <p className="text-xs text-gray-500 dark:text-gray-400">Cuencas</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">{zonalLabel}</p>
                       <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{plotData.cuencasData.filter(c => c.value != null).length} / {plotData.cuencasData.length}</p>
                     </div>
                   </div>
@@ -734,7 +750,7 @@ export default function MapArea({
 
                 <div className="bg-white dark:bg-gray-900/50 rounded-xl p-6 shadow-inner">
                   <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
-                    Valores por Cuenca (ponderados por área)
+                    Valores por {zonalLabelSingular} (ponderados por área)
                   </h4>
                   {/* Compact cuenca table */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">

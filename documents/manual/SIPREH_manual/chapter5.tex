@@ -1,0 +1,211 @@
+\chapter{Principales Funcionalidades del Sistema}
+\label{ch:funcionalidades}
+
+\section{Datos históricos}
+\label{sec:datos_historicos}
+
+La sección de datos históricos permite consultar el estado de sequía pasado mediante índices calculados sobre múltiples fuentes de datos. El usuario selecciona la fuente de datos, el índice, la escala temporal y la fecha; el sistema actualiza el mapa espacial y, al hacer clic en una celda, muestra la serie de tiempo correspondiente.
+
+\subsection*{Índices meteorológicos}
+
+\begin{center}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Índice} & \textbf{Escalas} & \textbf{Descripción} \\
+\midrule
+SPI  & 1, 3, 6, 12 m & Anomalía de precipitación normalizada respecto a la distribución histórica. \\
+SPEI & 1, 3, 6, 12 m & Extiende el SPI incorporando la evapotranspiración potencial. \\
+RAI  & 1, 3, 6, 12 m & Anomalía firmada de precipitación respecto a la media histórica. \\
+EDDI & 1, 3, 6, 12 m & Anomalías en la demanda evaporativa atmosférica. Indicador de alerta temprana. \\
+PDSI & Sin escala    & Balance hídrico con oferta, demanda y humedad de suelo. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection*{Fuentes de datos disponibles}
+
+\begin{center}
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Fuente} & \textbf{Resolución} & \textbf{Proveedor} & \textbf{Clave} \\
+\midrule
+ERA5-Land & 0.1° ($\approx$11 km) & ECMWF       & \texttt{historical\_era5\_land} \\
+IMERG     & 0.1° ($\approx$11 km) & NASA GPM    & \texttt{historical\_imerg} \\
+CHIRPS    & 0.05° ($\approx$5.5 km)& UCSB/USGS  & \texttt{historical\_chirps} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection*{Categorías de severidad}
+
+\begin{center}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Categoría} & \textbf{Umbral} & \textbf{Color} \\
+\midrule
+Humedad extrema  & $>{+2.0}$       & Azul oscuro \\
+Humedad severa   & $+1.5$ a $+2.0$ & Azul \\
+Humedad moderada & $+1.0$ a $+1.5$ & Azul claro \\
+Normal           & $-1.0$ a $+1.0$ & Blanco / Gris \\
+Sequía moderada  & $-1.5$ a $-1.0$ & Amarillo \\
+Sequía severa    & $-2.0$ a $-1.5$ & Naranja \\
+Sequía extrema   & ${<-2.0}$       & Rojo oscuro \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{remark}
+Los índices hidrológicos (SDI, SRI, MFI, DDI, HDI) se calculan sobre las 29 estaciones del IDEAM y se visualizan como marcadores en el mapa, no como campo espacial continuo.
+\end{remark}
+
+\section{Predicción actual}
+\label{sec:prediccion_actual}
+
+La sección de predicción actual muestra el pronóstico probabilístico vigente para horizontes de 1 a 12 meses, leído del archivo \texttt{prediction\_main.parquet}.
+
+Cada predicción incluye:
+\begin{itemize}
+    \item \textbf{Valor central:} valor predicho del índice por celda y horizonte.
+    \item \textbf{Banda de incertidumbre:} rango intercuartílico Q1--Q3 representado como área sombreada en la gráfica.
+    \item \textbf{Resumen IA:} interpretación en lenguaje natural generada automáticamente en español mediante la API Groq (modelo Llama 3.1-8b-instant).
+\end{itemize}
+
+\subsection*{Anomalías de precipitación}
+
+Además del valor central del índice, la sección de predicción actual muestra un mapa de \textbf{anomalías de precipitación}: la diferencia entre la precipitación predicha y la climatología histórica del mismo mes y celda. Esto permite identificar de un vistazo si el pronóstico es más seco o húmedo que la media histórica.
+
+\begin{center}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Tipo de anomalía} & \textbf{Significado} & \textbf{Color} \\
+\midrule
+Anomalía positiva fuerte  & Precipitación muy por encima del promedio & Azul oscuro \\
+Anomalía positiva         & Precipitación sobre el promedio           & Azul \\
+Normal                    & Precipitación cercana al promedio histórico & Blanco \\
+Anomalía negativa         & Precipitación bajo el promedio            & Naranja \\
+Anomalía negativa fuerte  & Precipitación muy por debajo del promedio & Rojo \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+El mapa de anomalías se actualiza al cambiar el horizonte de predicción (1 a 12 meses) en el panel lateral. La anomalía se calcula como:
+\[
+A_{c,t} = \hat{P}_{c,t} - \overline{P}_{c,m}
+\]
+donde $\hat{P}_{c,t}$ es la precipitación predicha en la celda $c$ para el tiempo $t$, y $\overline{P}_{c,m}$ es la media histórica de la celda $c$ para el mes $m$ correspondiente.
+
+\begin{remark}
+Las anomalías se visualizan en unidades absolutas (mm/mes). Una anomalía negativa sostenida en múltiples horizontes es señal temprana de déficit hídrico acumulado.
+\end{remark}
+
+\begin{remark}
+El resumen generado por IA es orientativo. Se recomienda contrastarlo con los valores numéricos del mapa y las gráficas de predicción.
+\end{remark}
+
+\section{Predicción histórica}
+\label{sec:prediccion_historica}
+
+La sección de predicción histórica permite comparar versiones de predicción emitidas en fechas anteriores. Cada archivo de predicción se identifica por su fecha de emisión (\texttt{issued\_at}) y se archiva al cargar uno nuevo, sin sobreescribir el anterior.
+
+\begin{definition}
+\textbf{issued\_at:} marca de tiempo que identifica la fecha de emisión de un archivo de predicción. Permite reconstruir la secuencia completa de pronósticos emitidos y comparar la estabilidad del modelo a lo largo del tiempo.
+\end{definition}
+
+\section{Administración}
+\label{sec:administracion_func}
+
+El módulo de administración centraliza la gestión operativa del sistema. Solo es accesible para usuarios con rol de administrador autenticados con JWT.
+
+\subsection*{Carga y actualización de archivos Parquet}
+
+La carga de datos es el flujo de trabajo más frecuente del administrador. A continuación se describe el proceso completo.
+
+\paragraph{Convención de nombre de archivo.} El nombre del archivo determina la resolución espacial que detecta automáticamente el sistema. Debe contener una de las siguientes palabras clave (sin distinción de mayúsculas):
+
+\begin{center}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Palabra clave en el nombre} & \textbf{Fuente detectada} & \textbf{Resolución} \\
+\midrule
+\texttt{ERA5\_LAND} o \texttt{era5land} & ERA5-Land & 0.10° \\
+\texttt{IMERG}                          & IMERG     & 0.10° \\
+\texttt{CHIRPS}                         & CHIRPS    & 0.05° \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{example}
+Nombres de archivo válidos:
+\begin{itemize}
+    \item \texttt{grid\_ERA5\_LAND\_2024.parquet} $\to$ detectado como ERA5-Land, 0.10°.
+    \item \texttt{historical\_CHIRPS\_SPI.parquet} $\to$ detectado como CHIRPS, 0.05°.
+    \item \texttt{prediction\_main.parquet} $\to$ archivo de predicción (no requiere clave de fuente).
+\end{itemize}
+\end{example}
+
+\paragraph{Pasos para cargar un nuevo archivo.}
+
+\begin{enumerate}
+    \item Ingresar al panel de administración con credenciales de administrador.
+    \item En la sección \textbf{Archivos}, hacer clic en \textbf{Cargar archivo}.
+    \item Seleccionar el archivo \texttt{.parquet} desde el sistema de archivos local.
+    \item El sistema valida el formato y extrae automáticamente los metadatos (esquema de columnas, número de filas, rango de fechas, variables disponibles).
+    \item Completar el formulario de configuración con los siguientes campos:
+\end{enumerate}
+
+\begin{center}
+\small
+\begin{tabular}{@{}lp{4.8cm}l@{}}
+\toprule
+\textbf{Campo} & \textbf{Descripción} & \textbf{Ejemplo} \\
+\midrule
+Dataset Key  & Identificador del conjunto de datos al que pertenece el archivo. & \texttt{historical\_chirps} \\
+Role         & Tipo de dato del archivo. & \texttt{snapshot} / \texttt{prediction\_monthly} \\
+Year-Month   & Mes de referencia, formato YYYY-MM. & \texttt{2024-06} \\
+Period Start & Fecha de inicio de la cobertura del archivo. & \texttt{1990-01-01} \\
+Period End   & Fecha de fin de la cobertura del archivo. & \texttt{2024-12-31} \\
+Activate Now & Si se activa, el archivo queda disponible de inmediato. & Checkbox \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{enumerate}
+\setcounter{enumi}{5}
+    \item Hacer clic en \textbf{Guardar}. El archivo se sube a Cloudflare R2 y sus metadatos quedan registrados en la base de datos.
+    \item Si no se marcó \textit{Activate Now}, el dataset puede activarse posteriormente desde la sección \textbf{Datasets}.
+\end{enumerate}
+
+\paragraph{Actualización de un archivo existente.}
+
+Para reemplazar un archivo del mismo dataset con datos más recientes:
+\begin{enumerate}
+    \item Preparar el nuevo archivo Parquet con la misma convención de nombre y esquema de columnas.
+    \item Seguir el mismo proceso de carga descrito arriba, seleccionando el mismo \textit{Dataset Key}.
+    \item El sistema registra el nuevo archivo como versión actualizada. El archivo anterior queda archivado (no eliminado) en R2.
+    \item Activar el nuevo archivo desde la sección \textbf{Datasets} para que la interfaz lo use.
+\end{enumerate}
+
+\begin{remark}
+Los archivos de predicción (\texttt{prediction\_main.parquet}) siguen el mismo proceso. Cada versión se identifica por su \texttt{issued\_at}, lo que permite a los usuarios consultar predicciones históricas emitidas en fechas anteriores.
+\end{remark}
+
+\subsection*{Sincronización con Cloudflare R2}
+
+La sincronización bidireccional mantiene la consistencia entre la base de datos de metadatos y los archivos físicos en R2. Al sincronizar:
+\begin{itemize}
+    \item Los archivos presentes en R2 pero no registrados en la base de datos local quedan registrados automáticamente.
+    \item Los registros sin archivo correspondiente en R2 se marcan como no disponibles.
+\end{itemize}
+
+\subsection*{Gestión de usuarios}
+
+\begin{itemize}
+    \item Creación de nuevos usuarios con rol estándar o administrador.
+    \item Modificación de contraseña y datos de perfil.
+    \item Desactivación de cuentas (no eliminación, para preservar la trazabilidad).
+\end{itemize}

@@ -1,0 +1,187 @@
+\chapter{Despliegues}
+\label{ch:despliegues}
+
+Este capítulo describe los procedimientos recomendados para el despliegue de cada componente del SIPREH en entornos de producción: el frontend, el backend y la base de datos. Se presentan tanto las opciones de despliegue en la nube como las instrucciones para entornos locales de desarrollo.
+
+\section{Despliegue frontend}
+\label{sec:deploy_frontend}
+
+El frontend de SIPREH es una aplicación Next.js 14, compatible con despliegue en cualquier plataforma que soporte Node.js o exportación estática.
+
+\subsection*{Opción recomendada: Vercel}
+
+Vercel es la plataforma de referencia para aplicaciones Next.js. El despliegue se realiza en tres pasos:
+
+\begin{enumerate}
+    \item Vincular el repositorio del frontend a un proyecto de Vercel desde \href{https://vercel.com/new}{vercel.com/new}.
+    \item Configurar las variables de entorno en el panel de Vercel:
+\begin{verbatim}
+NEXT_PUBLIC_API_URL=https://api.sipreh.ejemplo.co/api/v1
+\end{verbatim}
+    \item Vercel detecta automáticamente el framework Next.js, ejecuta \texttt{npm run build} y despliega el resultado. Cada \textit{push} a la rama principal desencadena un redespliegue automático.
+\end{enumerate}
+
+\subsection*{Opción alternativa: servidor propio con Docker}
+
+\begin{verbatim}
+# Construir la imagen del frontend
+docker build -t sipreh-frontend .
+
+# Ejecutar el contenedor
+docker run -p 3000:3000 \
+  -e NEXT_PUBLIC_API_URL=https://api.sipreh.ejemplo.co/api/v1 \
+  sipreh-frontend
+\end{verbatim}
+
+\begin{remark}
+En producción, se recomienda ubicar un proxy inverso (Nginx o Caddy) frente al contenedor Next.js para gestionar los certificados TLS, la compresión de respuestas y el caché de activos estáticos.
+\end{remark}
+
+\section{Despliegue backend}
+\label{sec:deploy_backend}
+
+El backend es una aplicación FastAPI + Uvicorn. Se distribuye como imagen Docker para facilitar la reproducibilidad del entorno.
+
+\subsection*{Variables de entorno requeridas}
+
+\begin{verbatim}
+# Base de datos
+DATABASE_URL=postgresql://user:password@db:5432/sipreh
+
+# Almacenamiento R2
+R2_ENDPOINT_URL=https://<account_id>.r2.cloudflarestorage.com
+R2_ACCESS_KEY_ID=<clave_de_acceso>
+R2_SECRET_ACCESS_KEY=<clave_secreta>
+R2_BUCKET_NAME=sipreh-data
+
+# Autenticación JWT
+SECRET_KEY=<clave_secreta_aleatoria_256_bits>
+ACCESS_TOKEN_EXPIRE_MINUTES=60
+REFRESH_TOKEN_EXPIRE_DAYS=30
+
+# Caché Redis
+REDIS_URL=redis://redis:6379/0
+
+# IA (opcional)
+GROQ_API_KEY=<clave_groq>
+
+# Almacenamiento en disco
+LOCAL_PARQUET_CACHE_DIR=/data/parquet_cache
+LOCAL_CACHE_MAX_GB=10
+\end{verbatim}
+
+\subsection*{Despliegue con Docker Compose}
+
+El archivo \texttt{docker-compose.yml} del repositorio orquesta el backend junto con Redis y, opcionalmente, PostgreSQL:
+
+\begin{verbatim}
+version: "3.9"
+services:
+  backend:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file: .env
+    volumes:
+      - parquet_cache:/data/parquet_cache
+    depends_on:
+      - redis
+      - db
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: sipreh
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  parquet_cache:
+  pgdata:
+\end{verbatim}
+
+Para iniciar todos los servicios:
+
+\begin{verbatim}
+docker compose up -d
+\end{verbatim}
+
+\begin{remark}
+La primera vez que el backend se inicia, ejecuta automáticamente las migraciones de base de datos (creación de tablas) mediante Alembic. No es necesario ejecutar migraciones manualmente en el primer despliegue.
+\end{remark}
+
+\subsection*{Verificación del despliegue}
+
+Una vez levantado el backend, la documentación interactiva de la API está disponible en:
+
+\begin{itemize}
+    \item \texttt{http://localhost:8000/docs} --- Swagger UI (interfaz de prueba interactiva).
+    \item \texttt{http://localhost:8000/redoc} --- ReDoc (documentación de referencia).
+    \item \texttt{http://localhost:8000/api/v1/historical/catalog} --- Catálogo de datos disponibles (requiere autenticación).
+\end{itemize}
+
+\section{Despliegue base de datos}
+\label{sec:deploy_db}
+
+SIPREH utiliza dos sistemas de persistencia con requisitos de despliegue independientes.
+
+\subsection*{Base de datos relacional}
+
+\begin{itemize}
+    \item \textbf{Desarrollo local:} SQLite no requiere instalación adicional. El archivo de base de datos se crea automáticamente en la ruta especificada por \texttt{DATABASE\_URL} al iniciar el backend.
+    \item \textbf{Producción:} Se recomienda PostgreSQL 15 o superior, alojado en un servicio gestionado (Supabase, Neon, AWS RDS, Railway) o en el mismo servidor mediante la imagen Docker \texttt{postgres:16-alpine}.
+\end{itemize}
+
+\begin{example}
+Cadena de conexión para distintos entornos:
+\begin{verbatim}
+# SQLite (desarrollo local)
+DATABASE_URL=sqlite:///./sipreh.db
+
+# PostgreSQL (producción)
+DATABASE_URL=postgresql://sipreh_user:password@db.host:5432/sipreh
+\end{verbatim}
+\end{example}
+
+\subsection*{Almacenamiento de objetos Cloudflare R2}
+
+El bucket R2 almacena todos los archivos Parquet de datos. Para configurarlo:
+
+\begin{enumerate}
+    \item Crear una cuenta en \href{https://www.cloudflare.com/}{Cloudflare} y activar el servicio R2 en el dashboard.
+    \item Crear un bucket con el nombre configurado en \texttt{R2\_BUCKET\_NAME} (por ejemplo, \texttt{sipreh-data}).
+    \item Crear un token de API R2 con permisos de lectura y escritura sobre el bucket.
+    \item Configurar las variables \texttt{R2\_ENDPOINT\_URL}, \texttt{R2\_ACCESS\_KEY\_ID} y \texttt{R2\_SECRET\_ACCESS\_KEY} en el archivo \texttt{.env} del backend.
+    \item Verificar la conectividad ejecutando la sincronización desde el panel de administración de SIPREH.
+\end{enumerate}
+
+\begin{remark}
+Cloudflare R2 no cobra costos de egreso (\textit{egress}) para transferencias hacia servidores Cloudflare Workers ni hacia Internet, a diferencia de Amazon S3. Esto lo hace especialmente ventajoso para el patrón de acceso de SIPREH, donde los archivos Parquet (típicamente de 100 MB a varios GB) se descargan desde el bucket con cada nuevo despliegue o al recibir la primera petición sobre un archivo.
+\end{remark}
+
+\begin{definition}
+\textbf{Egress} (en almacenamiento en la nube): transferencia de datos desde el proveedor de nube hacia el exterior (Internet u otro proveedor). Muchos servicios de almacenamiento como Amazon S3 o Google Cloud Storage cobran por GB de egreso, lo que puede representar un costo significativo para aplicaciones que sirven archivos de datos grandes frecuentemente.
+\end{definition}
+
+\subsection*{Resumen de requisitos de infraestructura}
+
+\begin{center}
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Componente} & \textbf{Entorno dev} & \textbf{Entorno prod} & \textbf{Mínimo recomendado} \\
+\midrule
+Frontend       & \texttt{localhost:3000} & Vercel / Nginx         & 512 MB RAM, 1 vCPU \\
+Backend        & \texttt{localhost:8000} & Docker + proxy inverso & 2 GB RAM, 2 vCPU \\
+Redis          & \texttt{localhost:6379} & Redis gestionado       & 256 MB RAM \\
+PostgreSQL     & SQLite                  & PostgreSQL 15+         & 1 GB RAM, 1 vCPU \\
+Parquet cache  & Disco local             & Volumen Docker / NFS   & 10 GB disco SSD \\
+Objetos R2     & Bucket de prueba        & Bucket R2 producción   & Sin límite práctico \\
+\bottomrule
+\end{tabular}
+\end{center}

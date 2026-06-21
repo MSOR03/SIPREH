@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { TrendingUp, Zap, BarChart3, Map as MapIcon, Grid3x3, Droplets } from 'lucide-react';
+import { TrendingUp, Zap, BarChart3, Map as MapIcon, Grid3x3, Droplets, Building2, Map as MapPolygon } from 'lucide-react';
 import Select from '../ui/Select';
 import Button from '../ui/Button';
 import { CollapsiblePanel, RadioCard, RadioOption, StepSection } from './primitives';
@@ -89,7 +89,9 @@ export default function PredictionSection({
   const [loadingIssuedAt, setLoadingIssuedAt] = useState(false);
   const is2D = predictionState.visualizationType === '2D';
   const is1D = predictionState.visualizationType === '1D';
-  const isCuencas = predictionState.spatialUnit === 'cuencas';
+  // "isCuencas" = cualquier unidad zonal (cuencas/municipios/perímetro) vs celdas
+  const isCuencas = (predictionState.spatialUnit || 'grid') !== 'grid';
+  const zonalNoun = { cuencas: 'cuenca', municipios: 'municipio', perimetro: 'perímetro' }[predictionState.spatialUnit] || 'zona';
 
   useEffect(() => {
     if (!predictionOpen) return;
@@ -193,7 +195,7 @@ export default function PredictionSection({
                 checked={is1D}
                 onChange={() => setPredictionState((prev) => ({ ...prev, visualizationType: '1D' }))}
                 label="1D Serie"
-                description={isCuencas ? 'Por cuenca, 12 horizontes' : 'Por celda, 12 horizontes'}
+                description={isCuencas ? `Por ${zonalNoun}, 12 horizontes` : 'Por celda, 12 horizontes'}
                 icon={BarChart3}
               />
               <RadioOption
@@ -202,7 +204,7 @@ export default function PredictionSection({
                 checked={is2D}
                 onChange={() => setPredictionState((prev) => ({ ...prev, visualizationType: '2D' }))}
                 label="2D Mapa"
-                description={isCuencas ? '7 cuencas CHIRPS' : '297 celdas CHIRPS'}
+                description={isCuencas ? `Agregado por ${zonalNoun}` : '297 celdas CHIRPS'}
                 icon={MapIcon}
               />
             </div>
@@ -222,10 +224,26 @@ export default function PredictionSection({
               <RadioOption
                 name="predSpatialUnit"
                 value="cuencas"
-                checked={isCuencas}
+                checked={predictionState.spatialUnit === 'cuencas'}
                 onChange={() => setPredictionState((prev) => ({ ...prev, spatialUnit: 'cuencas' }))}
                 label="Cuencas"
                 icon={Droplets}
+              />
+              <RadioOption
+                name="predSpatialUnit"
+                value="municipios"
+                checked={predictionState.spatialUnit === 'municipios'}
+                onChange={() => setPredictionState((prev) => ({ ...prev, spatialUnit: 'municipios' }))}
+                label="Municipios"
+                icon={Building2}
+              />
+              <RadioOption
+                name="predSpatialUnit"
+                value="perimetro"
+                checked={predictionState.spatialUnit === 'perimetro'}
+                onChange={() => setPredictionState((prev) => ({ ...prev, spatialUnit: 'perimetro' }))}
+                label="Perímetro urbano"
+                icon={MapPolygon}
               />
             </div>
           </StepSection>
@@ -300,7 +318,7 @@ export default function PredictionSection({
             <div className="px-3 py-2 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
               <p className="text-xs text-amber-700 dark:text-amber-300">
                 {isCuencas
-                  ? 'Selecciona una cuenca del mapa para ver la prediccion 1D'
+                  ? `Selecciona una ${zonalNoun} del mapa para ver la prediccion 1D`
                   : 'Selecciona una celda del mapa para ver la prediccion 1D'}
               </p>
             </div>

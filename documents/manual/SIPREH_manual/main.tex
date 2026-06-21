@@ -1,0 +1,53 @@
+\documentclass[12pt,a4paper,violet,openany]{bbe}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.5em}
+
+\usepackage{fontspec}
+\setmainfont{Roboto}[
+  BoldFont = {Roboto Bold},
+  ItalicFont = {Roboto Italic},
+  BoldItalicFont = {Roboto Bold Italic}
+]
+\setsansfont{Roboto}[
+  BoldFont = {Roboto Bold},
+  ItalicFont = {Roboto Italic},
+  BoldItalicFont = {Roboto Bold Italic}
+]
+\renewcommand{\familydefault}{\sfdefault}
+
+\usepackage[spanish]{babel}
+\addto\captionsspanish{\renewcommand{\tablename}{Tabla}}
+\decimalpoint
+\usepackage{hyperref}
+\usepackage{blindtext}
+\usepackage{fvextra}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepgfplotslibrary{groupplots}
+
+% Extra TikZ libraries for diagrams and flowcharts
+\usetikzlibrary{positioning, shapes.geometric, fit, backgrounds, matrix, babel}
+
+\title{Manual Técnico del Sistema Integrado de Predicción y Monitoreo de Sequías Hidrometeorológicas (SIPREH)}
+\authors{Grupo de Investigación en Ingeniería de los Recursos Hídricos --- GIREH\\
+Facultad de Ingeniería, Universidad Nacional de Colombia}
+\date{\today}
+
+\input{figures.tex}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\include{chapter1}
+\include{chapter2}
+\include{chapter3}
+\include{chapter4}
+\include{chapter5}
+\include{chapter6}
+\include{chapter7}
+\include{chapter8}
+
+\end{document}

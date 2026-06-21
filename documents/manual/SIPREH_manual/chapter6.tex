@@ -1,0 +1,183 @@
+\chapter{Funcionamiento del Sistema}
+\label{ch:funcionamiento}
+
+Este capítulo describe los flujos de interacción típicos del usuario estándar y del administrador.
+
+\section{Flujograma de acceso del usuario}
+\label{sec:flujo_usuario}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    every node/.style={font=\small\sffamily},
+    %% Rectángulo de proceso
+    proc/.style={
+        draw=violet, fill=violet!10, text=black, rounded corners=3pt,
+        minimum width=5.0cm, minimum height=0.72cm,
+        align=center, line width=0.8pt},
+    %% Rombo de decisión (aspect alto = rombo plano)
+    dec/.style={
+        draw=violet, fill=violet!8, text=black,
+        diamond, aspect=4.5,
+        minimum width=5.0cm, minimum height=0.72cm,
+        align=center, line width=0.8pt, font=\small\sffamily},
+    %% Cápsula terminal
+    term/.style={
+        draw=violet, fill=violet, text=white,
+        rounded corners=14pt, minimum width=3.2cm, minimum height=0.68cm,
+        align=center, line width=0.8pt},
+    %% Nodo lateral (error / aviso)
+    side/.style={
+        draw=violet!55, fill=violet!6, text=black, rounded corners=3pt,
+        minimum width=2.6cm, minimum height=0.68cm,
+        align=center, line width=0.7pt, font=\small\sffamily},
+    arr/.style={draw=violet!65, ->, line width=0.9pt},
+    lbl/.style={fill=none, draw=none, font=\footnotesize\sffamily,
+                text=violet!60!black},
+]
+
+%% ── COLUMNA PRINCIPAL (x = 0) ───────────────────────────────────
+\node[term] (ini)   at (0,  0.00) {Inicio};
+\node[proc] (login) at (0, -1.65) {Acceder al sistema};
+\node[dec]  (auth)  at (0, -3.35) {¿Autenticado?};
+\node[proc] (sel)   at (0, -5.15) {Configurar sección y parámetros};
+\node[proc] (map2d) at (0, -6.85) {Explorar mapa 2D};
+\node[proc] (chart) at (0, -8.55) {Clic en celda/cuenca $\to$ ver gráfica 1D};
+\node[dec]  (exp)   at (0,-10.30) {¿Exportar datos?};
+\node[proc] (dl)    at (0,-12.10) {Descargar PNG o JSON};
+\node[dec]  (cont)  at (0,-13.85) {¿Continuar explorando?};
+\node[term] (fin)   at (0,-15.60) {Fin / Cerrar sesión};
+
+%% ── NODO LATERAL ────────────────────────────────────────────────
+\node[side] (err) at (4.5,-3.35) {Credenciales\\inválidas};
+
+%% ── FLUJO VERTICAL PRINCIPAL ────────────────────────────────────
+\draw[arr] (ini)   -- (login);
+\draw[arr] (login) -- (auth);
+\draw[arr] (auth)  -- node[lbl, right=3pt]{Sí} (sel);
+\draw[arr] (sel)   -- (map2d);
+\draw[arr] (map2d) -- (chart);
+\draw[arr] (chart) -- (exp);
+\draw[arr] (exp)   -- node[lbl, right=3pt]{Sí} (dl);
+\draw[arr] (dl)    -- (cont);
+\draw[arr] (cont)  -- node[lbl, right=3pt]{No} (fin);
+
+%% ── FALLO DE AUTENTICACIÓN (lado derecho) ───────────────────────
+%% auth → error (horizontal)
+\draw[arr] (auth.east) -- node[lbl, above=1pt]{No} (err.west);
+%% error → login: sube, cruza por encima del rombo auth, llega a login.east
+\draw[arr] (err.north) -- ++(0,0.65) -| (login.east);
+
+%% ── BYPASS: no exportar (carril derecho, x ≈ 4.0) ───────────────
+\draw[arr] (exp.east)
+    -- node[lbl, above=1pt]{No} ++(1.5,0)
+    -- ++(0,-3.55)
+    -- (cont.east);
+
+%% ── BUCLE CONTINUAR (carril izquierdo, x ≈ −3.3) ────────────────
+\draw[arr] (cont.west)
+    -- ++(-0.8,0)
+    -- ++(0,8.70)
+    -- node[lbl, pos=1.0, above=2pt]{Sí} (sel.west);
+
+\end{tikzpicture}
+\caption{Flujo de acceso y uso del sistema para un usuario estándar.}
+\label{fig:flujo_usuario}
+\end{figure}
+
+\section{Flujograma de acceso del administrador}
+\label{sec:flujo_admin}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    every node/.style={font=\small\sffamily},
+    proc/.style={
+        draw=teal, fill=teal!10, text=black, rounded corners=3pt,
+        minimum width=5.0cm, minimum height=0.72cm,
+        align=center, line width=0.8pt},
+    dec/.style={
+        draw=teal, fill=teal!8, text=black,
+        diamond, aspect=3.5,
+        minimum width=5.0cm, minimum height=0.72cm,
+        align=center, line width=0.8pt, font=\small\sffamily},
+    term/.style={
+        draw=teal, fill=teal, text=white,
+        rounded corners=14pt, minimum width=3.2cm, minimum height=0.68cm,
+        align=center, line width=0.8pt},
+    act/.style={
+        draw=teal!55, fill=teal!8, text=black, rounded corners=3pt,
+        minimum width=2.4cm, minimum height=0.68cm,
+        align=center, line width=0.7pt, font=\small\sffamily},
+    arr/.style={draw=teal!65, ->, line width=0.9pt},
+    lbl/.style={fill=none, draw=none, font=\footnotesize\sffamily,
+                text=teal!60!black},
+]
+
+%% ── COLUMNA PRINCIPAL (x = 0) ───────────────────────────────────
+\node[term] (ini)   at (0,  0.00) {Inicio};
+\node[proc] (login) at (0, -1.65) {Autenticación de administrador};
+\node[dec]  (auth)  at (0, -3.35) {¿Acceso autorizado?};
+\node[proc] (panel) at (0, -5.05) {Panel de administración};
+\node[dec]  (acc)   at (0, -6.80) {¿Qué acción realizar?};
+
+%% ── TRES RAMAS (y = -8.55, spread ±3.0 cm) ─────────────────────
+\node[act]  (upl) at (-3.0,-8.55) {Cargar\\archivo};
+\node[act]  (syn) at ( 0.0,-8.55) {Sincronizar\\con R2};
+\node[act]  (usr) at ( 3.0,-8.55) {Gestionar\\usuarios};
+
+%% Sub-pasos de la carga (rama izquierda)
+\node[act]  (cfg)  at (-3.0,-10.25) {Configurar\\dataset};
+\node[act]  (act2) at (-3.0,-11.95) {Activar\\dataset};
+
+%% ── CONVERGENCIA ────────────────────────────────────────────────
+\node[dec]  (more) at (0,-13.70) {¿Otra acción?};
+\node[term] (fin)  at (0,-15.45) {Fin / Cerrar sesión};
+
+%% ── NODO DENEGADO (lado derecho) ────────────────────────────────
+\node[act]  (den) at (5.0,-3.35) {Acceso\\denegado};
+
+%% ── FLUJO VERTICAL PRINCIPAL ────────────────────────────────────
+\draw[arr] (ini)   -- (login);
+\draw[arr] (login) -- (auth);
+\draw[arr] (auth)  -- node[lbl, right=3pt]{Sí} (panel);
+\draw[arr] (panel) -- (acc);
+\draw[arr] (more)  -- node[lbl, right=3pt]{No} (fin);
+
+%% ── ACCESO DENEGADO ─────────────────────────────────────────────
+\draw[arr] (auth.east) -- node[lbl, above=1pt]{No} (den.west);
+\draw[arr] (den.north) -- ++(0,0.70) -| (login.east);
+
+%% ── FLECHAS acc → TRES RAMAS ────────────────────────────────────
+%% Izquierda: acc.west -| upl.north  (L: izq luego abajo)
+\draw[arr] (acc.west) -|
+    node[lbl, pos=0.15, above=1pt]{Cargar} (upl.north);
+%% Centro: acc.south → syn.north  (recto hacia abajo)
+\draw[arr] (acc.south) --
+    node[lbl, right=2pt]{Sincronizar} (syn.north);
+%% Derecha: acc.east -| usr.north  (L: der luego abajo)
+\draw[arr] (acc.east) -|
+    node[lbl, pos=0.15, above=1pt]{Gestionar} (usr.north);
+
+%% ── SUB-PASOS DE CARGA ──────────────────────────────────────────
+\draw[arr] (upl) -- (cfg);
+\draw[arr] (cfg) -- (act2);
+
+%% ── CONVERGENCIA HACIA more ─────────────────────────────────────
+%% Rama izquierda: act2 |- more.west  (baja, luego va a la derecha)
+\draw[arr] (act2.south) |- (more.west);
+%% Rama central: syn → more.north  (recto)
+\draw[arr] (syn.south) -- (more.north);
+%% Rama derecha: usr |- more.east  (baja, luego va a la izquierda)
+\draw[arr] (usr.south) |- (more.east);
+
+%% ── BUCLE OTRA ACCIÓN (carril izquierdo exterior, x ≈ −4.7) ─────
+\draw[arr] (more.west)
+    -- ++(-2.2,0)
+    -- ++(0,8.65)
+    -- node[lbl, pos=1.0, above=2pt]{Sí} (panel.west);
+
+\end{tikzpicture}
+\caption{Flujo de acceso y operación para un administrador del sistema.}
+\label{fig:flujo_admin}
+\end{figure}

@@ -1,0 +1,81 @@
+\chapter{Previsualización}
+\label{ch:previsualizacion}
+
+Este capítulo presenta una visión general de la interfaz de SIPREH y sus funcionalidades desde la perspectiva del usuario.
+
+\section{Descripción del sistema}
+\label{sec:descripcion_sistema}
+
+SIPREH es una aplicación web de página única (SPA) organizada en torno a un mapa interactivo central y un panel lateral contextual. La navegación principal se divide en tres secciones:
+
+\begin{enumerate}
+    \item \textbf{Datos históricos:} visualización de índices de sequía sobre el mapa y en gráficas de series de tiempo.
+    \item \textbf{Predicción actual:} mapa del pronóstico probabilístico vigente con horizonte de 12 meses.
+    \item \textbf{Predicción histórica:} comparación entre versiones de predicción emitidas en distintas fechas.
+\end{enumerate}
+
+Los usuarios con rol de administrador también pueden acceder al panel de administración para gestionar archivos, conjuntos de datos, usuarios y sincronización con la nube.
+
+\begin{remark}
+La interfaz está optimizada para navegadores de escritorio con resolución mínima de 1366 $\times$ 768 píxeles.
+\end{remark}
+
+\section{Funcionalidades principales}
+\label{sec:funcionalidades}
+
+\subsection{Gráficas 1D}
+\label{subsec:graficas1d}
+
+Las gráficas 1D muestran la serie de tiempo de un índice de sequía para una celda o cuenca seleccionada. Se activan al hacer clic sobre el mapa interactivo.
+
+Capacidades:
+\begin{itemize}
+    \item Zoom y desplazamiento sobre el eje temporal.
+    \item Código de color por categoría de severidad.
+    \item Exportación de la gráfica como imagen PNG.
+    \item Descarga de los datos en formato JSON.
+\end{itemize}
+
+\begin{remark}
+Las gráficas 1D utilizan la librería \texttt{uPlot} con el algoritmo de diezmado LTTB (\textit{Largest-Triangle-Three-Buckets}), que preserva la forma visual de la serie al reducir el número de puntos renderizados en registros extensos.
+\end{remark}
+
+\subsection{Gráficas 2D}
+\label{subsec:graficas2d}
+
+Las gráficas 2D corresponden al campo espacial del índice seleccionado para una fecha determinada, visualizado como un mapa de color continuo. El mapa se actualiza al cambiar la fecha, el índice o la escala en el panel lateral.
+
+Capacidades:
+\begin{itemize}
+    \item Campo espacial del índice con paleta de colores estándar de sequía.
+    \item Superposición de los siete polígonos de cuencas hidrográficas.
+    \item Marcadores de estaciones del IDEAM con acceso a sus series de tiempo.
+    \item Tres niveles de resolución según el nivel de zoom.
+    \item Exportación del mapa como imagen PNG.
+\end{itemize}
+
+\subsection{Exportación de datos}
+\label{subsec:exportacion}
+
+El sistema permite exportar los datos visualizados en dos formatos, generados directamente en el navegador:
+
+\begin{itemize}
+    \item \textbf{PNG:} captura de alta resolución de cualquier panel de mapa o gráfica. Se descarga con un encabezado institucional, tipo de análisis, leyenda y metadatos.
+    \item \textbf{JSON:} datos de la consulta activa (serie de tiempo 1D o campo espacial 2D), incluyendo valores, metadatos de variable, fuente, resolución y sistema de referencia (WGS84 EPSG:4326).
+\end{itemize}
+
+\begin{example}
+El JSON de una consulta 1D contiene columnas \texttt{Tiempo} y \texttt{Valor}. El JSON de una consulta 2D contiene \texttt{Cell\_id} y \texttt{Valor}. Para cuencas, incluye además \texttt{Cuenca\_DN}, \texttt{Nombre\_Cuenca} y \texttt{Categoria}.
+\end{example}
+
+\subsection{Administración}
+\label{subsec:administracion}
+
+El panel de administración es exclusivo para usuarios con rol de administrador. Desde él se puede:
+
+\begin{itemize}
+    \item Cargar archivos Parquet de datos al sistema.
+    \item Configurar y activar conjuntos de datos.
+    \item Sincronizar el almacenamiento local con Cloudflare R2.
+    \item Gestionar usuarios (crear, modificar, desactivar cuentas).
+\end{itemize}

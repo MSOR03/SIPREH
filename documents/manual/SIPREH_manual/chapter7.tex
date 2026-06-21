@@ -1,0 +1,102 @@
+\chapter{Estructura del Proyecto}
+\label{ch:estructura}
+
+Este capítulo describe la organización de directorios del proyecto SIPREH en el frontend y el backend.
+
+\section{Estructura del frontend}
+\label{sec:estructura_frontend}
+
+El frontend es una aplicación Next.js 14 que sigue las convenciones del \textit{App Router}:
+
+\begin{verbatim}
+drought-frontend/
++-- public/
+|   +-- watersheds/          # GeoJSON de cuencas hidrografica
+|   +-- icons/               # Iconos de marcadores
++-- src/
+|   +-- app/
+|   |   +-- layout.tsx       # Layout raiz
+|   |   +-- page.js          # Pagina principal (mapa + sidebar)
+|   |   +-- login/page.tsx   # Pagina de autenticacion
+|   |   +-- admin/page.tsx   # Panel de administracion
+|   +-- components/
+|   |   +-- map/             # Componentes del mapa Leaflet
+|   |   +-- charts/          # Graficas uPlot y Canvas 2D
+|   |   +-- sidebar/         # Paneles de historico y prediccion
+|   |   +-- admin/
+|   |       +-- dashboard/
+|   |           +-- FilesSection.js   # Carga de archivos Parquet
+|   |           +-- DatasetConfig.js  # Configuracion de datasets
+|   |           +-- UserManager.js    # Gestion de usuarios
+|   |           +-- SyncStatus.js     # Estado de sincronizacion R2
+|   +-- utils/
+|   |   +-- exporters.js     # Exportacion PNG y JSON
+|   |   +-- lttb.js          # Algoritmo de diezmado LTTB
+|   |   +-- colorScale.js    # Paleta de colores de severidad
+|   +-- lib/
+|       +-- api.js           # Cliente HTTP hacia el backend
+|       +-- auth.js          # Gestion de tokens JWT
++-- .env.local               # NEXT_PUBLIC_API_URL
++-- next.config.js
++-- package.json
+\end{verbatim}
+
+\begin{remark}
+La función de exportación (\texttt{src/utils/exporters.js}) genera imágenes PNG de 1800$\times$1100 px con encabezado institucional y metadatos, y archivos JSON con los datos de la consulta activa (columnas, fuente, resolución, sistema de referencia WGS84).
+\end{remark}
+
+\section{Estructura del backend}
+\label{sec:estructura_backend}
+
+El backend es una aplicación FastAPI organizada en capas funcionales:
+
+\begin{verbatim}
+drought-backend/
++-- app/
+|   +-- main.py              # Punto de entrada FastAPI
+|   +-- config.py            # Variables de entorno y settings
+|   +-- database.py          # Inicializacion SQLAlchemy
+|   +-- models/              # Modelos ORM (usuario, dataset, archivo)
+|   +-- api/
+|   |   +-- v1/
+|   |       +-- api.py       # Registro de routers
+|   |       +-- endpoints/
+|   |           +-- auth.py          # /auth: login, refresh
+|   |           +-- parquet.py       # /parquet: carga de archivos
+|   |           +-- historical.py    # /historical: 1D, 2D, catalogo
+|   |           +-- prediction.py    # /prediction: actual e historica
+|   |           +-- hydro.py         # /hydro: estaciones IDEAM
+|   |           +-- drought.py       # /drought: analisis de sequia
+|   |           +-- dashboard.py     # /dashboard: resumen del mapa
+|   |           +-- admin_files.py   # /admin/files: CRUD archivos
+|   |           +-- admin_datasets.py# /admin/datasets: ciclo datasets
+|   |           +-- admin_users.py   # /admin/users: gestion usuarios
+|   |           +-- admin_cloud.py   # /admin/cloud: integracion R2
+|   |           +-- admin_tiered.py  # /admin/tiered: almac. escalonado
+|   |           +-- admin_utils.py   # Utilidades compartidas de admin
+|   +-- services/
+|   |   +-- historical_data_service.py
+|   |   +-- prediction_data_service.py
+|   |   +-- hydro_data_service.py
+|   |   +-- drought_analysis.py
+|   |   +-- ai_summary_service.py
+|   |   +-- cache.py
+|   |   +-- cloud_storage.py
+|   |   +-- parquet_processor.py
+|   |   +-- tiered_storage.py
+|   +-- schemas/             # Esquemas Pydantic de request/response
++-- .env                     # Variables de entorno (BD, R2, JWT, Redis)
++-- requirements.txt
++-- Dockerfile
++-- docker-compose.yml
+\end{verbatim}
+
+\begin{example}
+Flujo de una consulta 1D de serie de tiempo:
+\begin{enumerate}
+    \item El router \texttt{historical.py} recibe \texttt{GET /api/v1/historical/timeseries} con parámetros \texttt{lat}, \texttt{lon}, \texttt{index} y \texttt{scale}.
+    \item \texttt{historical\_data\_service.py} verifica el caché (\texttt{cache.py}).
+    \item Si no hay caché, DuckDB consulta el archivo Parquet en disco.
+    \item El resultado se almacena en caché y se devuelve como JSON.
+\end{enumerate}
+\end{example}

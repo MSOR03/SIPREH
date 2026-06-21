@@ -1308,11 +1308,13 @@ async function draw1DSelectedCuencaMap(ctx, plotData, layout = {}) {
   ctx.strokeStyle = '#cbd5e1';
   drawCard(ctx, mapFrame.x, mapFrame.y, mapFrame.w, mapFrame.h, 10);
 
-  // Resolve selected cuenca DN
+  // Resolve selected zona DN
+  const zoneUnit = plotData?.spatialUnit || 'cuencas';
+  const zoneCfg = ZONE_EXPORT_CONFIG[zoneUnit] || ZONE_EXPORT_CONFIG.cuencas;
   const cuencaDn = plotData?.cuencaDn ?? plotData?.predictionMeta?.cuencaDn ?? null;
   const cuencaNombre = plotData?.cuencaNombre ?? null;
 
-  const cuencasFeatures = await loadCuencasGeoJSON();
+  const cuencasFeatures = await loadZoneGeoJSON(zoneUnit);
   const boundaryCoords = await loadStudyAreaBoundary();
   const allPts = flattenFeatureCoordinates({ features: cuencasFeatures });
   const boundaryLons = boundaryCoords.map((c) => c[0]);
@@ -1402,10 +1404,10 @@ async function draw1DSelectedCuencaMap(ctx, plotData, layout = {}) {
 
   ctx.font = '14px Arial';
   ctx.fillStyle = '#64748b';
-  ctx.fillText('Cuenca: ' + resolvedNombre, metadataX + 12, metadataY + 42);
+  ctx.fillText(zoneCfg.label + ': ' + resolvedNombre, metadataX + 12, metadataY + 42);
   ctx.fillText('DN: ' + (cuencaDn !== null ? cuencaDn : 'N/A'), metadataX + 12, metadataY + 62);
   ctx.fillText('Sistema de referencias: WGS84 (EPSG:4326)', metadataX + 250, metadataY + 42);
-  ctx.fillText('Unidad espacial: Cuenca hidrográfica', metadataX + 250, metadataY + 62);
+  ctx.fillText('Unidad espacial: ' + zoneCfg.labelPlural, metadataX + 250, metadataY + 62);
 }
 
 function resolveLatLon(cell) {
@@ -1670,6 +1672,39 @@ async function loadCuencasGeoJSON() {
     if (!response.ok) return [];
     const geojson = await response.json();
     return Array.isArray(geojson?.features) ? geojson.features : [];
+  } catch (_error) {
+    return [];
+  }
+}
+
+// Config por unidad espacial zonal para exportación (archivo geojson + normalización
+// de propiedades DN/Nombre, ya que municipio/perímetro tienen una sola zona con dn=1).
+const ZONE_EXPORT_CONFIG = {
+  cuencas: { file: 'Cuencas.geojson', label: 'Cuenca', labelPlural: 'Cuencas hidrográficas' },
+  municipios: { file: 'Municipio.geojson', label: 'Municipio', labelPlural: 'Municipios', dn: 1, nombreProp: 'MpNombre', nombreDefault: 'Bogotá' },
+  perimetro: { file: 'Perimetro_urb.geojson', label: 'Perímetro urbano', labelPlural: 'Perímetro urbano', dn: 1, nombreDefault: 'Centro Urb' },
+};
+
+// Carga el geojson de la unidad zonal indicada, normalizando properties.DN y
+// properties.Nombre para que el resto del exportador funcione sin cambios.
+async function loadZoneGeoJSON(spatialUnit = 'cuencas') {
+  const cfg = ZONE_EXPORT_CONFIG[spatialUnit] || ZONE_EXPORT_CONFIG.cuencas;
+  try {
+    const _bp = process.env.NEXT_PUBLIC_BASE_PATH || '';
+    const response = await fetch(`${_bp}/data/${cfg.file}?t=${Date.now()}`);
+    if (!response.ok) return [];
+    const geojson = await response.json();
+    const features = Array.isArray(geojson?.features) ? geojson.features : [];
+    if (spatialUnit === 'cuencas') return features;
+    // Normalizar DN/Nombre para municipio/perímetro (zona única dn=1)
+    return features.map((f) => ({
+      ...f,
+      properties: {
+        ...f.properties,
+        DN: cfg.dn,
+        Nombre: f?.properties?.Nombre || (cfg.nombreProp && f?.properties?.[cfg.nombreProp]) || cfg.nombreDefault,
+      },
+    }));
   } catch (_error) {
     return [];
   }
@@ -2761,6 +2796,8 @@ async function draw2DWatershedMap(ctx, plotData, analysisState) {
   const cuencasData = Array.isArray(plotData?.cuencasData) ? plotData.cuencasData : [];
   if (!cuencasData.length) return;
 
+  const zoneUnit = plotData?.spatialUnit || 'cuencas';
+  const zoneCfg = ZONE_EXPORT_CONFIG[zoneUnit] || ZONE_EXPORT_CONFIG.cuencas;
   const colorByDn = new Map(cuencasData.map((c) => [Number(c.dn), c]));
 
   await draw2DInstitutionalPanel(ctx, plotData);
@@ -2841,7 +2878,7 @@ async function draw2DWatershedMap(ctx, plotData, analysisState) {
   drawCard(ctx, mapX, mapY, mapW, mapH, 14);
 
   // Load cuencas GeoJSON and compute bounds
-  const cuencasFeatures = await loadCuencasGeoJSON();
+  const cuencasFeatures = await loadZoneGeoJSON(zoneUnit);
   const allCuencaPoints = flattenFeatureCoordinates({ features: cuencasFeatures });
   const boundaryCoords = await loadStudyAreaBoundary();
   const boundaryLons = boundaryCoords.map((c) => c[0]);
@@ -3013,7 +3050,7 @@ async function draw2DWatershedMap(ctx, plotData, analysisState) {
   const wMetaY = DEFAULT_IMAGE_HEIGHT - 54;
   ctx.fillText('Metadatos', wMetaX, wMetaY);
   ctx.font = '14px Arial';
-  ctx.fillText('Unidad espacial: Cuencas hidrográficas', wMetaX, wMetaY + 22);
+  ctx.fillText('Unidad espacial: ' + zoneCfg.labelPlural, wMetaX, wMetaY + 22);
   ctx.fillText('Sistema de coordenadas: WGS84 (EPSG:4326)', wMetaX, wMetaY + 42);
   ctx.restore();
 }

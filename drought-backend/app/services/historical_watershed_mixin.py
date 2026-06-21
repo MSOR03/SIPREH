@@ -16,9 +16,9 @@ from datetime import date
 
 from app.services.historical_constants import DROUGHT_INDEX_KEYS, DEFAULT_SOURCE, SOURCE_BY_INDEX, NO_SCALE_DROUGHT_INDICES, get_parquet_source
 from app.services.watershed_relations import (
-    get_relations_for_source,
-    get_cell_ids_for_source,
-    CUENCA_NAMES,
+    get_zone_relations,
+    get_zone_cell_ids,
+    get_zone_names,
 )
 from app.services.historical_spatial_mixin import _vectorized_colors
 
@@ -33,10 +33,14 @@ class WatershedMixin:
         data_source: str,
         scale: Optional[int] = None,
         frequency: Optional[str] = None,
+        zone_type: str = "cuenca",
     ) -> dict:
         """
         Construye los componentes base de la query DuckDB para watershed.
         Retorna dict con source_expr, date_col, value_expr, base_where, cell_ids, relations.
+
+        ``zone_type`` selecciona la unidad espacial de agregación:
+        cuenca (default), municipio o perimetro.
         """
         conn = self._get_connection()
 
@@ -89,14 +93,20 @@ class WatershedMixin:
         else:
             value_expr = variable
 
-        # Filtrar solo celdas relevantes para la fuente (usar columna nativa cell_id)
-        cell_ids = get_cell_ids_for_source(data_source)
-        cell_list_sql = ", ".join(f"'{c}'" for c in cell_ids)
+        # Filtrar solo celdas relevantes para la fuente y zona (columna nativa cell_id)
+        cell_ids = get_zone_cell_ids(data_source, zone_type)
+        cell_list_sql = ", ".join(f"'{c}'" for c in cell_ids) if cell_ids else "''"
         base_clauses.append(f"cell_id IN ({cell_list_sql})")
 
         base_where = " AND ".join(base_clauses) if base_clauses else "1=1"
 
-        relations = get_relations_for_source(data_source)
+        # WHERE alterno sin el filtro de 'source', para reintentar cuando la fuente
+        # inferida no coincide con la almacenada (p.ej. temperatura en IMERG no está
+        # bajo SAT_LSCDF). Replica el fallback de los mixins de timeseries/spatial.
+        no_source_clauses = [c for c in base_clauses if not c.startswith("source =")]
+        base_where_no_source = " AND ".join(no_source_clauses) if no_source_clauses else "1=1"
+
+        relations = get_zone_relations(data_source, zone_type)
 
         return {
             "conn": conn,
@@ -104,6 +114,7 @@ class WatershedMixin:
             "date_col": date_col,
             "value_expr": value_expr,
             "base_where": base_where,
+            "base_where_no_source": base_where_no_source,
             "cell_ids": cell_ids,
             "relations": relations,
             "is_drought_index": is_drought_index,
@@ -113,21 +124,25 @@ class WatershedMixin:
         }
 
     def _aggregate_by_cuenca(
-        self, cell_df: pd.DataFrame, relations: list, is_drought_index: bool, variable: str
+        self, cell_df: pd.DataFrame, relations: list, is_drought_index: bool, variable: str,
+        zone_type: str = "cuenca", frequency: Optional[str] = None,
     ) -> List[dict]:
         """
-        Agrega valores de celdas a cuencas usando promedio ponderado por área.
+        Agrega valores de celdas a zonas (cuenca/municipio/perimetro) usando
+        promedio ponderado por área.
 
         cell_df: DataFrame con columnas [cell_id, value]
         relations: lista de dicts {cell_id, dn, nombre, area_m2}
 
         Retorna lista de dicts con {dn, nombre, value, color, category, severity, cell_count}.
         """
+        zone_names = get_zone_names(zone_type)
+
         if cell_df.empty:
             return [
                 {"dn": dn, "nombre": name, "value": None, "color": "#CCCCCC",
                  "category": None, "severity": None, "cell_count": 0}
-                for dn, name in CUENCA_NAMES.items()
+                for dn, name in zone_names.items()
             ]
 
         # Construir lookup de cell values
@@ -151,7 +166,7 @@ class WatershedMixin:
 
         # Calcular promedios ponderados
         cuenca_values = []
-        for dn, name in CUENCA_NAMES.items():
+        for dn, name in zone_names.items():
             cd = cuenca_data.get(dn)
             if cd and cd["total_area"] > 0:
                 cuenca_values.append({
@@ -171,22 +186,37 @@ class WatershedMixin:
         # Aplicar coloring
         values_for_color = pd.Series([c["value"] for c in cuenca_values])
 
-        if is_drought_index:
-            # Usar drought scale coloring
-            temp_df = pd.DataFrame({
-                "value": values_for_color,
-            })
-            temp_df = self._apply_drought_scale(temp_df, variable)
+        # Paleta ABSOLUTA por bins cuando la variable la tiene (índices de sequía,
+        # y variables como temperatura/precip/pet vía VARIABLE_CLASS_SCALES). Esto
+        # iguala el coloreado del mapa por celdas (grid) y evita que el color
+        # dependa del rango de las zonas mostradas (que con valores casi uniformes
+        # —p.ej. temperatura ~13.5 en todas las cuencas, o una sola zona en
+        # municipio/perímetro— colapsaba a gris con la escala relativa).
+        variable_scale = None if is_drought_index else self._get_scale_for_variable(variable, frequency)
+
+        if is_drought_index or variable_scale:
+            temp_df = pd.DataFrame({"value": values_for_color})
+            if is_drought_index:
+                temp_df = self._apply_drought_scale(temp_df, variable)
+            else:
+                temp_df = self._apply_variable_scale(temp_df, variable, frequency)
             for i, c in enumerate(cuenca_values):
                 row = temp_df.iloc[i]
                 c["color"] = row.get("color", "#CCCCCC") if pd.notna(row.get("color")) else "#CCCCCC"
                 c["category"] = row.get("category") if pd.notna(row.get("category")) else None
                 c["severity"] = int(row["severity"]) if pd.notna(row.get("severity")) else None
         else:
+            # Variables sin paleta absoluta (p.ej. balance hídrico): escala relativa.
             valid = values_for_color.dropna()
             if len(valid) > 0:
                 vmin = float(valid.min())
                 vmax = float(valid.max())
+                if vmin == vmax:
+                    # Escala relativa degenerada (una sola zona o valores iguales):
+                    # _vectorized_colors devolvería gris ("sin dato"), engañoso porque
+                    # sí hay dato. Centramos el rango para asignar el color medio.
+                    vmin -= 0.5
+                    vmax += 0.5
                 colors = _vectorized_colors(values_for_color, vmin, vmax)
             else:
                 colors = pd.Series(["#CCCCCC"] * len(cuenca_values))
@@ -208,9 +238,11 @@ class WatershedMixin:
         use_interval: bool = False,
         scale: Optional[int] = None,
         frequency: Optional[str] = None,
+        zone_type: str = "cuenca",
     ) -> Tuple[List[dict], Dict[str, Any], Optional[date]]:
         """
-        Consulta datos espaciales agregados por cuenca para una fecha.
+        Consulta datos espaciales agregados por zona para una fecha.
+        ``zone_type``: cuenca (default), municipio o perimetro.
         Retorna (cuencas_data, statistics, used_date).
         """
         import time as time_module
@@ -226,6 +258,7 @@ class WatershedMixin:
                 url=parquet_url,
                 var=variable,
                 src=data_source,
+                zone=zone_type,
                 mode="interval" if interval_mode else "single",
                 date=str(target_date),
                 start=str(start_date),
@@ -243,16 +276,17 @@ class WatershedMixin:
         t0 = time_module.time()
 
         base = self._build_watershed_base(
-            parquet_url, variable, data_source, scale=scale, frequency=frequency
+            parquet_url, variable, data_source, scale=scale, frequency=frequency, zone_type=zone_type
         )
         conn = base["conn"]
         parquet_source = base["parquet_source"]
         date_col = base["date_col"]
         value_expr = base["value_expr"]
         base_where = base["base_where"]
+        base_where_no_source = base["base_where_no_source"]
 
-        def run_cell_query(for_date: date) -> pd.DataFrame:
-            where = f"{base_where} AND {date_col} = CAST('{for_date}' AS DATE)"
+        def run_cell_query(for_date: date, where_base: str) -> pd.DataFrame:
+            where = f"{where_base} AND {date_col} = CAST('{for_date}' AS DATE)"
             q = f"""
             SELECT
                 cell_id,
@@ -263,8 +297,8 @@ class WatershedMixin:
             """
             return conn.execute(q).fetchdf()
 
-        def run_cell_query_interval(s: date, e: date) -> pd.DataFrame:
-            where = f"{base_where} AND {date_col} BETWEEN CAST('{s}' AS DATE) AND CAST('{e}' AS DATE)"
+        def run_cell_query_interval(s: date, e: date, where_base: str) -> pd.DataFrame:
+            where = f"{where_base} AND {date_col} BETWEEN CAST('{s}' AS DATE) AND CAST('{e}' AS DATE)"
             q = f"""
             SELECT
                 cell_id,
@@ -274,18 +308,31 @@ class WatershedMixin:
             GROUP BY cell_id
             """
             return conn.execute(q).fetchdf()
+
+        # ¿Se aplicó filtro de source? Si tras consultar no hay datos, reintentamos
+        # sin ese filtro (igual que los mixins de spatial/timeseries).
+        source_was_applied = (
+            base["has_source_col"] and base["effective_source"] and base["file_format"] == "long"
+        )
+        where_for_nearest = base_where
 
         used_date = None if interval_mode else target_date
 
         if interval_mode:
-            cell_df = run_cell_query_interval(start_date, end_date)
+            cell_df = run_cell_query_interval(start_date, end_date, base_where)
+            if cell_df.empty and source_was_applied:
+                where_for_nearest = base_where_no_source
+                cell_df = run_cell_query_interval(start_date, end_date, base_where_no_source)
         else:
-            cell_df = run_cell_query(target_date)
+            cell_df = run_cell_query(target_date, base_where)
+            if cell_df.empty and source_was_applied:
+                where_for_nearest = base_where_no_source
+                cell_df = run_cell_query(target_date, base_where_no_source)
             if cell_df.empty:
                 nearest_q = f"""
                 SELECT CAST({date_col} AS DATE) AS d
                 FROM {parquet_source}
-                WHERE {base_where} AND {value_expr} IS NOT NULL
+                WHERE {where_for_nearest} AND {value_expr} IS NOT NULL
                 GROUP BY 1
                 ORDER BY ABS(DATEDIFF('day', d, '{target_date}'::DATE))
                 LIMIT 1
@@ -293,13 +340,14 @@ class WatershedMixin:
                 row = conn.execute(nearest_q).fetchone()
                 if row and row[0] is not None:
                     used_date = row[0]
-                    cell_df = run_cell_query(used_date)
+                    cell_df = run_cell_query(used_date, where_for_nearest)
 
         t1 = time_module.time()
         print(f"⚡ watershed spatial query: {t1-t0:.2f}s | var={variable} src={data_source} cells={len(cell_df)}")
 
         cuencas = self._aggregate_by_cuenca(
-            cell_df, base["relations"], base["is_drought_index"], variable
+            cell_df, base["relations"], base["is_drought_index"], variable,
+            zone_type=zone_type, frequency=frequency,
         )
 
         # Statistics
@@ -337,9 +385,11 @@ class WatershedMixin:
         end_date: date,
         scale: Optional[int] = None,
         frequency: Optional[str] = None,
+        zone_type: str = "cuenca",
     ) -> Tuple[List[dict], Dict[str, Any]]:
         """
-        Consulta serie de tiempo para una cuenca (promedio ponderado por fecha).
+        Consulta serie de tiempo para una zona (promedio ponderado por fecha).
+        ``zone_type``: cuenca (default), municipio o perimetro.
         Retorna (data_points, statistics).
         """
         import time as time_module
@@ -351,6 +401,7 @@ class WatershedMixin:
                 url=parquet_url,
                 var=variable,
                 src=data_source,
+                zone=zone_type,
                 dn=cuenca_dn,
                 start=str(start_date),
                 end=str(end_date),
@@ -367,19 +418,20 @@ class WatershedMixin:
         t0 = time_module.time()
 
         base = self._build_watershed_base(
-            parquet_url, variable, data_source, scale=scale, frequency=frequency
+            parquet_url, variable, data_source, scale=scale, frequency=frequency, zone_type=zone_type
         )
         conn = base["conn"]
         parquet_source = base["parquet_source"]
         date_col = base["date_col"]
         value_expr = base["value_expr"]
         base_where = base["base_where"]
+        base_where_no_source = base["base_where_no_source"]
         relations = base["relations"]
 
-        # Filter relations to only this cuenca
+        # Filter relations to only this zone
         cuenca_rels = [r for r in relations if r["dn"] == cuenca_dn]
         if not cuenca_rels:
-            raise ValueError(f"No hay relaciones para cuenca DN={cuenca_dn} con fuente {data_source}")
+            raise ValueError(f"No hay relaciones para zona DN={cuenca_dn} ({zone_type}) con fuente {data_source}")
 
         # Build cell_id → area mapping for this cuenca
         cell_areas = {}
@@ -394,34 +446,42 @@ class WatershedMixin:
         values_parts = [f"('{cid}', {area})" for cid, area in cell_areas.items()]
         values_clause = ", ".join(values_parts)
 
-        where = (
-            f"{base_where} AND {date_col} BETWEEN CAST('{start_date}' AS DATE) AND CAST('{end_date}' AS DATE)"
-            f" AND cell_id IN ({cell_list_sql})"
-        )
-
-        query = f"""
-        WITH cell_values AS (
+        def run_ts_query(where_base: str) -> pd.DataFrame:
+            where = (
+                f"{where_base} AND {date_col} BETWEEN CAST('{start_date}' AS DATE) AND CAST('{end_date}' AS DATE)"
+                f" AND cell_id IN ({cell_list_sql})"
+            )
+            query = f"""
+            WITH cell_values AS (
+                SELECT
+                    CAST({date_col} AS DATE) as date,
+                    cell_id,
+                    AVG(CAST({value_expr} AS DOUBLE)) as value
+                FROM {parquet_source}
+                WHERE {where}
+                GROUP BY date, cell_id
+            ),
+            areas(cell_id, area_m2) AS (
+                SELECT * FROM (VALUES {values_clause}) AS t(cell_id, area_m2)
+            )
             SELECT
-                CAST({date_col} AS DATE) as date,
-                cell_id,
-                AVG(CAST({value_expr} AS DOUBLE)) as value
-            FROM {parquet_source}
-            WHERE {where}
-            GROUP BY date, cell_id
-        ),
-        areas(cell_id, area_m2) AS (
-            SELECT * FROM (VALUES {values_clause}) AS t(cell_id, area_m2)
+                cv.date,
+                SUM(cv.value * a.area_m2) / NULLIF(SUM(a.area_m2), 0) as value
+            FROM cell_values cv
+            JOIN areas a ON cv.cell_id = a.cell_id
+            WHERE cv.value IS NOT NULL AND isfinite(cv.value)
+            GROUP BY cv.date
+            ORDER BY cv.date
+            """
+            return conn.execute(query).fetchdf()
+
+        df = run_ts_query(base_where)
+        # Fallback sin filtro de source (igual que spatial/timeseries mixins)
+        source_was_applied = (
+            base["has_source_col"] and base["effective_source"] and base["file_format"] == "long"
         )
-        SELECT
-            cv.date,
-            SUM(cv.value * a.area_m2) / NULLIF(SUM(a.area_m2), 0) as value
-        FROM cell_values cv
-        JOIN areas a ON cv.cell_id = a.cell_id
-        WHERE cv.value IS NOT NULL AND isfinite(cv.value)
-        GROUP BY cv.date
-        ORDER BY cv.date
-        """
-        df = conn.execute(query).fetchdf()
+        if df.empty and source_was_applied:
+            df = run_ts_query(base_where_no_source)
 
         t1 = time_module.time()
         print(f"⚡ watershed timeseries query: {t1-t0:.2f}s | var={variable} src={data_source} dn={cuenca_dn} rows={len(df)}")

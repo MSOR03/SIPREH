@@ -398,6 +398,7 @@ export const historicalApi = {
       useInterval = false,
       scale = null,
       frequency = null,
+      zoneType = 'cuenca',
     } = params;
 
     return fetchApi('/historical/watershed/spatial', {
@@ -412,11 +413,12 @@ export const historicalApi = {
         use_interval: useInterval,
         scale: scale,
         frequency: frequency,
+        zone_type: zoneType,
       }),
     });
   },
 
-  // Serie de tiempo de una cuenca (watershed)
+  // Serie de tiempo de una zona (watershed: cuenca/municipio/perimetro)
   getWatershedTimeSeries: async (params) => {
     const {
       fileId,
@@ -427,6 +429,7 @@ export const historicalApi = {
       endDate,
       scale = null,
       frequency = null,
+      zoneType = 'cuenca',
     } = params;
 
     return fetchApi('/historical/watershed/timeseries', {
@@ -440,6 +443,7 @@ export const historicalApi = {
         end_date: endDate,
         scale: scale,
         frequency: frequency,
+        zone_type: zoneType,
       }),
     });
   },
@@ -549,8 +553,8 @@ export const predictionApi = {
     });
   },
 
-  // Datos espaciales agregados por cuenca (watershed) - prediccion
-  getWatershedSpatial: async ({ fileId, var: varName, scale, horizon }) => {
+  // Datos espaciales agregados por zona (watershed) - prediccion
+  getWatershedSpatial: async ({ fileId, var: varName, scale, horizon, zoneType = 'cuenca' }) => {
     return fetchApi('/prediction/watershed/spatial', {
       method: 'POST',
       body: JSON.stringify({
@@ -558,12 +562,13 @@ export const predictionApi = {
         var: varName,
         scale: scale,
         horizon: horizon,
+        zone_type: zoneType,
       }),
     });
   },
 
-  // Serie temporal por cuenca (watershed) - prediccion
-  getWatershedTimeSeries: async ({ fileId, var: varName, scale, cuencaDn }) => {
+  // Serie temporal por zona (watershed) - prediccion
+  getWatershedTimeSeries: async ({ fileId, var: varName, scale, cuencaDn, zoneType = 'cuenca' }) => {
     return fetchApi('/prediction/watershed/timeseries', {
       method: 'POST',
       body: JSON.stringify({
@@ -571,6 +576,7 @@ export const predictionApi = {
         var: varName,
         scale: scale,
         cuenca_dn: cuencaDn,
+        zone_type: zoneType,
       }),
     });
   },
@@ -620,8 +626,8 @@ export const predictionHistoryApi = {
     });
   },
 
-  // Datos espaciales agregados por cuenca (watershed) - prediccion historica
-  getWatershedSpatial: async ({ fileId, var: varName, scale, horizon }) => {
+  // Datos espaciales agregados por zona (watershed) - prediccion historica
+  getWatershedSpatial: async ({ fileId, var: varName, scale, horizon, zoneType = 'cuenca' }) => {
     return fetchApi('/prediction/watershed/spatial', {
       method: 'POST',
       body: JSON.stringify({
@@ -629,12 +635,13 @@ export const predictionHistoryApi = {
         var: varName,
         scale: scale,
         horizon: horizon,
+        zone_type: zoneType,
       }),
     });
   },
 
-  // Serie temporal por cuenca (watershed) - prediccion historica
-  getWatershedTimeSeries: async ({ fileId, var: varName, scale, cuencaDn }) => {
+  // Serie temporal por zona (watershed) - prediccion historica
+  getWatershedTimeSeries: async ({ fileId, var: varName, scale, cuencaDn, zoneType = 'cuenca' }) => {
     return fetchApi('/prediction/watershed/timeseries', {
       method: 'POST',
       body: JSON.stringify({
@@ -642,6 +649,7 @@ export const predictionHistoryApi = {
         var: varName,
         scale: scale,
         cuenca_dn: cuencaDn,
+        zone_type: zoneType,
       }),
     });
   },
