@@ -372,8 +372,15 @@ export default function MapArea({
           {isDualSpatialView ? (
             <div className="h-full grid grid-cols-1 xl:grid-cols-2 gap-3 p-3">
               <div className="relative rounded-xl border border-gray-300 dark:border-gray-700 overflow-hidden">
-                <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[1001] px-4 py-1.5 rounded-md bg-white/95 dark:bg-gray-800/95 border border-gray-200 dark:border-gray-700 text-sm md:text-base font-bold tracking-wide uppercase text-gray-700 dark:text-gray-200 text-center shadow-sm whitespace-nowrap">
-                  {dualSpatialMaps.left.title}
+                <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[1001] px-4 py-1.5 rounded-md bg-white/95 dark:bg-gray-800/95 border border-gray-200 dark:border-gray-700 text-center shadow-sm">
+                  <div className="text-sm md:text-base font-bold tracking-wide text-gray-700 dark:text-gray-200 whitespace-nowrap">
+                    {dualSpatialMaps.left.title}
+                  </div>
+                  {dualSpatialMaps.left.trainingLabel && (
+                    <div className="text-xs font-medium text-blue-600 dark:text-blue-400 mt-0.5 whitespace-nowrap">
+                      {dualSpatialMaps.left.trainingLabel}
+                    </div>
+                  )}
                 </div>
                 <div className="absolute bottom-2 left-2 z-[1001] w-64 max-w-[75%]">
                   <ContinuousMapLegend
@@ -381,7 +388,7 @@ export default function MapArea({
                     min={dualSpatialMaps.left.statistics?.min}
                     max={dualSpatialMaps.left.statistics?.max}
                     unit="mm"
-                    gradient="linear-gradient(to right, #0078e7, #00c5ff, #2bcf7f, #f5d142)"
+                    gradient="linear-gradient(to right, #f5d142, #2bcf7f, #00c5ff, #0078e7)"
                   />
                 </div>
                 <LeafletMap
@@ -416,8 +423,15 @@ export default function MapArea({
               </div>
 
               <div className="relative rounded-xl border border-gray-300 dark:border-gray-700 overflow-hidden">
-                <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[1001] px-4 py-1.5 rounded-md bg-white/95 dark:bg-gray-800/95 border border-gray-200 dark:border-gray-700 text-sm md:text-base font-bold tracking-wide uppercase text-gray-700 dark:text-gray-200 text-center shadow-sm whitespace-nowrap">
-                  {dualSpatialMaps.right.title}
+                <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[1001] px-4 py-1.5 rounded-md bg-white/95 dark:bg-gray-800/95 border border-gray-200 dark:border-gray-700 text-center shadow-sm">
+                  <div className="text-sm md:text-base font-bold tracking-wide text-gray-700 dark:text-gray-200 whitespace-nowrap">
+                    {dualSpatialMaps.right.title}
+                  </div>
+                  {dualSpatialMaps.right.trainingLabel && (
+                    <div className="text-xs font-medium text-blue-600 dark:text-blue-400 mt-0.5 whitespace-nowrap">
+                      {dualSpatialMaps.right.trainingLabel}
+                    </div>
+                  )}
                 </div>
                 <div className="absolute bottom-2 left-2 z-[1001] w-64 max-w-[75%]">
                   <ContinuousMapLegend

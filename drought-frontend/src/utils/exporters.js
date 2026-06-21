@@ -1500,8 +1500,9 @@ function drawAnalysisTypeIndicator(ctx, plotData) {
   ctx.textAlign = 'left';
 }
 
-function drawPanelInstitutionalTitle(ctx, title, x, y, w) {
-  const h = 32;
+function drawPanelInstitutionalTitle(ctx, title, x, y, w, subtitle = null) {
+  const hasSubtitle = Boolean(subtitle);
+  const h = hasSubtitle ? 52 : 32;
   ctx.save();
   ctx.fillStyle = '#d1fae5';
   ctx.strokeStyle = '#065f46';
@@ -1512,7 +1513,12 @@ function drawPanelInstitutionalTitle(ctx, title, x, y, w) {
   ctx.fillStyle = '#065f46';
   ctx.font = 'bold 15px Arial';
   ctx.textAlign = 'center';
-  ctx.fillText(String(title || '').toUpperCase(), x + w / 2, y + 22);
+  ctx.fillText(String(title || ''), x + w / 2, y + 22);
+  if (hasSubtitle) {
+    ctx.font = 'bold 12px Arial';
+    ctx.fillStyle = '#1d4ed8';
+    ctx.fillText(String(subtitle), x + w / 2, y + 40);
+  }
   ctx.textAlign = 'left';
   ctx.restore();
 }
@@ -1970,7 +1976,7 @@ function drawGraticule(ctx, bounds, frame) {
     ctx.font = 'bold 12px Arial';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
-    ctx.fillText(text, x, y + 18); // +18px más abajo (antes +10)
+    ctx.fillText(text, x, y + 3); // subir un poco más las etiquetas de longitud
     ctx.restore();
   };
 
@@ -2351,18 +2357,20 @@ async function draw2DMap(ctx, plotData, analysisState) {
     ctx.fillText('Sistema de coordenadas: WGS84 (EPSG:4326)', bottomMetaBox.x + 360, metaTextY);
     ctx.restore();
 
-    const drawDualPanel = async (panel, title, panelPoints, legendConfig) => {
+    const drawDualPanel = async (panel, title, panelPoints, legendConfig, trainingLabel = null) => {
       ctx.save();
       ctx.fillStyle = '#f8fafc';
       ctx.strokeStyle = '#cbd5e1';
       drawCard(ctx, panel.x, panel.y, panel.w, panel.h, 14);
       ctx.restore();
 
-      drawPanelInstitutionalTitle(ctx, title, panel.x + 10, panel.y + 10, panel.w - 20);
+      drawPanelInstitutionalTitle(ctx, title, panel.x + 10, panel.y + 10, panel.w - 20, trainingLabel);
+
+      const titleBlockHeight = trainingLabel ? 52 : 32;
 
       const frame = {
         x: panel.x + 18,
-        y: panel.y + 54,
+        y: panel.y + 10 + titleBlockHeight + 12,
         w: panel.w - 36,
         h: panel.h - 82,
         pad: 18,
@@ -2419,24 +2427,25 @@ async function draw2DMap(ctx, plotData, analysisState) {
 
     await drawDualPanel(
       leftPanel,
-      plotData?.dualSpatialMaps?.left?.title || 'MEDIA',
+      plotData?.dualSpatialMaps?.left?.title || 'MEDIA DE PRECIPITACIÓN (mm)',
       leftPoints,
       {
         title: 'Media',
         min: plotData?.dualSpatialMaps?.left?.statistics?.min,
         max: plotData?.dualSpatialMaps?.left?.statistics?.max,
         gradient: [
-          { at: 0, color: '#0078e7' },
-          { at: 0.33, color: '#00c5ff' },
-          { at: 0.66, color: '#2bcf7f' },
-          { at: 1, color: '#f5d142' },
+          { at: 0, color: '#f5d142' },
+          { at: 0.33, color: '#2bcf7f' },
+          { at: 0.66, color: '#00c5ff' },
+          { at: 1, color: '#0078e7' },
         ],
-      }
+      },
+      plotData?.dualSpatialMaps?.left?.trainingLabel || null
     );
 
     await drawDualPanel(
       rightPanel,
-      plotData?.dualSpatialMaps?.right?.title || 'ANOMALIA',
+      plotData?.dualSpatialMaps?.right?.title || 'ANOMALIA DE PRECIPITACIÓN (mm)',
       rightPoints,
       {
         title: 'Anomalia',
@@ -2448,7 +2457,8 @@ async function draw2DMap(ctx, plotData, analysisState) {
           { at: 0.5, color: '#e8e8e8' },
           { at: 1, color: '#1f4dbf' },
         ],
-      }
+      },
+      plotData?.dualSpatialMaps?.right?.trainingLabel || null
     );
 
     return;

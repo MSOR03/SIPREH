@@ -59,17 +59,18 @@ function colorForMeanValue(value, min, max) {
   const span = Number.isFinite(max) && Number.isFinite(min) ? max - min : 0;
   const ratio = span > 0 ? (value - min) / span : 0.5;
   const clamped = Math.max(0, Math.min(1, ratio));
+  const inverted = 1 - clamped;
 
-  // Ramp: azul -> cian -> verde -> amarillo
-  const r = clamped < 0.66
-    ? Math.round((clamped / 0.66) * 180)
-    : 180 + Math.round(((clamped - 0.66) / 0.34) * 60);
-  const g = clamped < 0.33
-    ? 120 + Math.round((clamped / 0.33) * 110)
+  // Ramp invertida: amarillo -> verde -> cian -> azul (valores altos en azul)
+  const r = inverted < 0.66
+    ? Math.round((inverted / 0.66) * 180)
+    : 180 + Math.round(((inverted - 0.66) / 0.34) * 60);
+  const g = inverted < 0.33
+    ? 120 + Math.round((inverted / 0.33) * 110)
     : 230;
-  const b = clamped < 0.5
+  const b = inverted < 0.5
     ? 230
-    : Math.round(230 - ((clamped - 0.5) / 0.5) * 180);
+    : Math.round(230 - ((inverted - 0.5) / 0.5) * 180);
 
   return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 }
@@ -894,6 +895,25 @@ export default function Home() {
         ? addMonthsUtc(horizonDate, -Number(predictionState.horizon || 0))
         : null;
 
+      // Calcula el label de meses de entrenamiento climatológico
+      // Los meses de entrenamiento son: mes_emision+1 hasta mes_emision+horizonte
+      const MONTH_NAMES_ES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+      const computeTrainingLabel = (isoEmission, horizonNum) => {
+        if (!isoEmission || !horizonNum) return null;
+        const base = new Date(`${isoEmission}T00:00:00Z`);
+        if (isNaN(base.getTime())) return null;
+        const h = Number(horizonNum);
+        const startIdx = (base.getUTCMonth() + 1) % 12; // índice 0-based del primer mes de entren.
+        const endIdx   = (base.getUTCMonth() + h) % 12; // índice 0-based del último mes de entren.
+        const startNum = String(startIdx + 1).padStart(2, '0');
+        const endNum   = String(endIdx   + 1).padStart(2, '0');
+        if (h === 1) {
+          return `Entren.: ${MONTH_NAMES_ES[startIdx]} (mes ${startNum})`;
+        }
+        return `Entren.: ${MONTH_NAMES_ES[startIdx]}–${MONTH_NAMES_ES[endIdx]} (meses ${startNum}–${endNum})`;
+      };
+      const trainingLabel = computeTrainingLabel(emissionDate, predictionState.horizon);
+
       const anomalyCells = Array.isArray(response.grid_cells) ? response.grid_cells : [];
 
       const anomalyValues = anomalyCells.map((cell) => Number(cell?.anomaly_value));
@@ -933,7 +953,7 @@ export default function Home() {
 
       setPlotData({
         type: 'prediction-2d',
-        title: `Prediccion SPI (${predictionState.scale}m) - Horizonte ${predictionState.horizon} | Media y Anomalia`,
+        title: `Prediccion SPI (${predictionState.scale}m) - Horizonte ${predictionState.horizon} | Anomalia de precipitación (mm)`,
         subtitle: `${anomalyCells.length} celdas | Vista dual: izquierda media, derecha anomalia`,
         variable: predictionState.droughtIndex,
         gridCells: rightAnomalyCells,
@@ -942,13 +962,15 @@ export default function Home() {
         resolution: 0.05,
         dualSpatialMaps: {
           left: {
-            title: 'Media de precipitación 1991-2020 (mm)',
+            title: 'MEDIA DE PRECIPITACIÓN 1991-2020 (mm)',
+            trainingLabel,
             valueLabel: 'Media',
             gridCells: meanCells,
             statistics: meanStats,
           },
           right: {
             title: 'ANOMALIA DE PRECIPITACIÓN (mm)',
+            trainingLabel,
             valueLabel: 'Anomalia',
             gridCells: rightAnomalyCells,
             statistics: anomalyStats,
