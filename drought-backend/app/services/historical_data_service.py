@@ -120,23 +120,22 @@ class HistoricalDataService(TimeseriesMixin, SpatialMixin, WatershedMixin):
         finite_bins = np.array(bins[1:-1], dtype=np.float64)
         indices = np.searchsorted(finite_bins, vals, side="right")
 
-        cat_arr = np.empty(len(vals), dtype=object)
         col_arr = np.empty(len(vals), dtype=object)
-        sev_arr = np.empty(len(vals), dtype=np.float64)
 
         for i, cat in enumerate(cats):
             mask = indices == i
-            cat_arr[mask] = cat["label"]
             col_arr[mask] = cat["color"]
-            sev_arr[mask] = cat["severity"]
-
-        df["category"] = pd.array(cat_arr, dtype="string")
         df["color"] = pd.array(col_arr, dtype="string")
-        df["severity"] = pd.array(sev_arr, dtype="Int64")
 
         null_mask = np.isnan(vals) if vals.dtype.kind == "f" else df["value"].isna()
         if np.any(null_mask):
-            df.loc[null_mask, ["category", "color", "severity"]] = pd.NA
+            df.loc[null_mask, ["color"]] = pd.NA
+
+        # Variables climáticas: color continuo/discreto por bins, sin categorías ni severidad
+        if "category" in df.columns:
+            df = df.drop(columns=["category"])
+        if "severity" in df.columns:
+            df = df.drop(columns=["severity"])
 
         return df
 

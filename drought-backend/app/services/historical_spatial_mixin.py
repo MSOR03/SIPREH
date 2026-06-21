@@ -74,6 +74,29 @@ def _vectorized_colors(values: pd.Series, vmin: float, vmax: float) -> pd.Series
     return pd.Series(colors, index=values.index)
 
 
+def _vectorized_precip_colors(values: pd.Series, vmin: float, vmax: float) -> pd.Series:
+    """Escala simple para precipitación: bajo=rojo, alto=azul."""
+    n = len(values)
+    if vmin == vmax:
+        return pd.Series(["#CCCCCC"] * n, index=values.index)
+
+    norm = ((values.values - vmin) / (vmax - vmin)).clip(0.0, 1.0)
+
+    def lerp(start, end, weight):
+        return (start + (end - start) * weight).astype(np.uint8)
+
+    r = lerp(220, 37, norm)
+    g = lerp(38, 99, norm)
+    b = lerp(38, 235, norm)
+
+    rgb_bytes = np.stack([r, g, b], axis=1)
+    colors = np.array(["#" + c.hex() for c in map(bytes, rgb_bytes)], dtype=object)
+
+    nan_mask = np.isnan(values.values) if values.values.dtype.kind == 'f' else values.isna().values
+    colors[nan_mask] = "#CCCCCC"
+    return pd.Series(colors, index=values.index)
+
+
 class SpatialMixin:
     """Lógica de consulta de datos espaciales (mapa 2D) sobre archivos parquet."""
 
@@ -345,17 +368,26 @@ class SpatialMixin:
             if is_drought_index:
                 result_df = self._apply_drought_scale(result_df, variable)
             else:
+                is_precip = str(variable).strip().lower() == "precip"
                 variable_scale = self._get_scale_for_variable(variable, effective_freq)
-                if variable_scale:
+                if variable_scale and not is_precip:
                     result_df = self._apply_variable_scale(result_df, variable, effective_freq)
                 else:
                     valid_values = vals[np.isfinite(vals)]
                     if len(valid_values) > 0:
                         vmin = float(valid_values.min())
                         vmax = float(valid_values.max())
-                        result_df["color"] = _vectorized_colors(result_df["value"], vmin, vmax)
+                        if is_precip:
+                            result_df["color"] = _vectorized_precip_colors(result_df["value"], vmin, vmax)
+                        else:
+                            result_df["color"] = _vectorized_colors(result_df["value"], vmin, vmax)
                     else:
                         result_df["color"] = "#CCCCCC"
+
+                # Variables climáticas: sin categorías/severidad en la respuesta API
+                drop_cols = [c for c in ["category", "severity"] if c in result_df.columns]
+                if drop_cols:
+                    result_df = result_df.drop(columns=drop_cols)
 
             # Estadísticas (usando numpy directo, sin copia de dropna)
             valid_mask = np.isfinite(vals)

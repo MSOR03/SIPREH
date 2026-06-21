@@ -196,6 +196,72 @@ const key = normalizeLegendLabel(categoryLabel);
 
   return null;
 }
+
+function formatLegendCategoryLabel(label) {
+  const text = String(label || '').trim();
+  if (!text) return 'Sin categoría';
+  return text
+    .split(/\s+/)
+    .map((part) => (part ? part.charAt(0).toUpperCase() + part.slice(1) : part))
+    .join(' ');
+}
+
+function formatLegendRangeForDisplay(rangeText) {
+  const text = String(rangeText || '').trim();
+  if (!text) return '';
+
+  const lessThanTo = text.match(/^<\s*(-?\d+(?:\.\d+)?)$/);
+  if (lessThanTo) return `menor a ${lessThanTo[1]}`;
+
+  const greaterEq = text.match(/^>=\s*(-?\d+(?:\.\d+)?)$/);
+  if (greaterEq) return `${greaterEq[1]} o más`;
+
+  return text.replace(/\s+a\s+<\s+/g, ' a ').replace(/\s+/g, ' ').trim();
+}
+
+function composeLegendEntryText(label, rangeText) {
+  const prettyLabel = formatLegendCategoryLabel(label);
+  const prettyRange = formatLegendRangeForDisplay(rangeText);
+  return prettyRange ? `${prettyLabel} (${prettyRange})` : prettyLabel;
+}
+
+function resolveVariableUnit(variableCode) {
+  const normalized = String(variableCode || '')
+    .trim()
+    .split(/\s*-\s*|\s+/)[0]
+    .toLowerCase();
+
+  if (normalized === 'precip' || normalized === 'pet') return 'mm';
+  if (normalized === 'tmin' || normalized === 'tmean' || normalized === 'tmax') return '°C';
+  return '';
+}
+
+function buildContinuousGradientFromCells(cells, fallbackColors = ['#94a3b8', '#2563eb']) {
+  const valid = (Array.isArray(cells) ? cells : [])
+    .filter((cell) => Number.isFinite(Number(cell?.value)) && typeof cell?.color === 'string')
+    .sort((a, b) => Number(a.value) - Number(b.value));
+
+  if (!valid.length) {
+    return [
+      { at: 0, color: fallbackColors[0] || '#94a3b8' },
+      { at: 1, color: fallbackColors[1] || '#2563eb' },
+    ];
+  }
+
+  const sampleAt = (q) => {
+    const index = Math.max(0, Math.min(valid.length - 1, Math.floor((valid.length - 1) * q)));
+    return valid[index]?.color || '#94a3b8';
+  };
+
+  return [
+    { at: 0, color: sampleAt(0) },
+    { at: 0.25, color: sampleAt(0.25) },
+    { at: 0.5, color: sampleAt(0.5) },
+    { at: 0.75, color: sampleAt(0.75) },
+    { at: 1, color: sampleAt(1) },
+  ];
+}
+
 function resolveDataKind(rawValue) {
   const value = String(rawValue || '').trim();
   const upper = value.toUpperCase();
@@ -2560,6 +2626,8 @@ async function draw2DMap(ctx, plotData, analysisState) {
     .split(/\s*-\s*|\s+/)[0]
     .toLowerCase();
   const legendFrequencyCode = resolvePrecipFrequencyCode(plotData, analysisState);
+  const isClimateVariableLegend = ['precip', 'tmin', 'tmean', 'tmax', 'pet'].includes(legendVariableCode);
+  const legendUnit = resolveVariableUnit(legendVariableCode);
 
   infoY = wrapText(
     ctx,
@@ -2628,7 +2696,41 @@ async function draw2DMap(ctx, plotData, analysisState) {
   ctx.fillText('LEYENDA', infoBoxX + 22, legendY);
   legendY += 28;
 
-  if (!groupedLegend.length) {
+  if (isClimateVariableLegend) {
+    const values = cells
+      .map((cell) => Number(cell?.value))
+      .filter((value) => Number.isFinite(value));
+    const minVal = values.length ? Math.min(...values) : null;
+    const maxVal = values.length ? Math.max(...values) : null;
+    const gradient = buildContinuousGradientFromCells(
+      cells,
+      legendVariableCode === 'precip' ? ['#dc2626', '#2563eb'] : undefined
+    );
+
+    legendY = drawDualLegendBar(ctx, {
+      x: infoBoxX + 22,
+      y: legendY,
+      w: infoBoxW - 44,
+      title: dataKind?.label || 'Escala continua',
+      min: minVal,
+      max: maxVal,
+      unit: legendUnit,
+      gradient,
+    });
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(30, 64, 175, 0.9)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.rect(infoBoxX + 22, legendY, 32, 18);
+    ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = '#334155';
+    ctx.font = '15px Arial';
+    ctx.fillText('Área de interés', infoBoxX + 64, legendY + 14);
+    legendY += 28;
+  } else if (!groupedLegend.length) {
+
     const values = cells
       .map((cell) => Number(cell?.value))
       .filter((value) => Number.isFinite(value));
@@ -2676,14 +2778,16 @@ async function draw2DMap(ctx, plotData, analysisState) {
         isIndex
           ? ''
           : (legendEntry.hasValue
-              ? legendEntry.min.toFixed(2) + ' a ' + legendEntry.max.toFixed(2)
+              ? (legendUnit
+                  ? legendEntry.min.toFixed(2) + ' a ' + legendEntry.max.toFixed(2) + ' ' + legendUnit
+                  : legendEntry.min.toFixed(2) + ' a ' + legendEntry.max.toFixed(2))
               : 'N/A')
       );
       ctx.fillStyle = legendEntry.color;
       ctx.fillRect(infoBoxX + 22, legendY, 32, 18);
       ctx.fillStyle = '#334155';
-      ctx.font = '13px Arial';
-      const rawText = rangeText ? (legendEntry.label + ': ' + rangeText) : legendEntry.label;
+      ctx.font = '15px Arial';
+      const rawText = composeLegendEntryText(legendEntry.label, rangeText);
       const safeText = fitLegendText(ctx, rawText, infoBoxW - 90);
       ctx.fillText(safeText, infoBoxX + 62, legendY + 14);
       legendY += rowStep;
@@ -2962,6 +3066,8 @@ async function draw2DWatershedMap(ctx, plotData, analysisState) {
   const legendFrequencyCode = resolvePrecipFrequencyCode(plotData, analysisState);
   const indexCode = String(dataKind?.code || legendVariableCode || '').trim().toUpperCase();
   const isIndex = METEOROLOGICAL_INDICES.has(indexCode) || HYDROLOGICAL_INDICES.has(indexCode);
+  const isClimateVariableLegend = ['precip', 'tmin', 'tmean', 'tmax', 'pet'].includes(legendVariableCode);
+  const legendUnit = resolveVariableUnit(legendVariableCode);
 
   const mapLegend = new Map();
   cuencasData.forEach((c) => {
@@ -3004,7 +3110,40 @@ async function draw2DWatershedMap(ctx, plotData, analysisState) {
   ctx.fillText('LEYENDA', infoBoxX + 22, legendY);
   legendY += 28;
 
-  if (groupedLegend.length) {
+  if (isClimateVariableLegend) {
+    const values = cuencasData
+      .map((item) => Number(item?.value))
+      .filter((value) => Number.isFinite(value));
+    const minVal = values.length ? Math.min(...values) : null;
+    const maxVal = values.length ? Math.max(...values) : null;
+    const gradient = buildContinuousGradientFromCells(
+      cuencasData,
+      legendVariableCode === 'precip' ? ['#dc2626', '#2563eb'] : undefined
+    );
+
+    const nextY = drawDualLegendBar(ctx, {
+      x: infoBoxX + 22,
+      y: legendY,
+      w: infoBoxW - 44,
+      title: dataKind?.label || 'Escala continua',
+      min: minVal,
+      max: maxVal,
+      unit: legendUnit,
+      gradient,
+    });
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(30, 64, 175, 0.9)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    const areaY = Math.min(nextY, legendBottomLimit - 20);
+    ctx.rect(infoBoxX + 22, areaY, 32, 18);
+    ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = '#334155';
+    ctx.font = '15px Arial';
+    ctx.fillText('Área de interés', infoBoxX + 64, areaY + 14);
+  } else if (groupedLegend.length) {
     let offsetY = legendY;
     const rowStep = 28;
     let hiddenCount = 0;
@@ -3020,13 +3159,17 @@ async function draw2DWatershedMap(ctx, plotData, analysisState) {
       const rangeText = fixedRangeText || (
         isIndex
           ? ''
-          : (legendEntry.hasValue ? legendEntry.min.toFixed(2) + ' a ' + legendEntry.max.toFixed(2) : 'N/A')
+          : (legendEntry.hasValue
+              ? (legendUnit
+                  ? legendEntry.min.toFixed(2) + ' a ' + legendEntry.max.toFixed(2) + ' ' + legendUnit
+                  : legendEntry.min.toFixed(2) + ' a ' + legendEntry.max.toFixed(2))
+              : 'N/A')
       );
       ctx.fillStyle = legendEntry.color;
       ctx.fillRect(infoBoxX + 22, offsetY, 32, 18);
       ctx.fillStyle = '#334155';
-      ctx.font = '13px Arial';
-      const legendText = rangeText ? (legendEntry.label + ': ' + rangeText) : legendEntry.label;
+      ctx.font = '15px Arial';
+      const legendText = composeLegendEntryText(legendEntry.label, rangeText);
       ctx.fillText(fitLegendText(ctx, legendText, infoBoxW - 90), infoBoxX + 62, offsetY + 14);
       offsetY += rowStep;
     }
