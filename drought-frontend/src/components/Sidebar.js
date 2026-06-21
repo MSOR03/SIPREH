@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { AlertCircle, CheckCircle2, Info, Database, Droplets, Grid3x3, MapPin } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Info, Database, Droplets, Grid3x3, MapPin, Building2, Map } from 'lucide-react';
 import HistoricalSection from './sidebar/HistoricalSection';
 import PredictionSection from './sidebar/PredictionSection';
 import PredictionHistorySection from './sidebar/PredictionHistorySection';
@@ -39,7 +39,14 @@ const timeHorizons = [
 ];
 
 const RESOLUTION_SOURCE_BY_VALUE = { 0.25: 'ERA5', 0.1: 'ERA5_LAND/IMERG', 0.05: 'CHIRPS' };
-const SPATIAL_UNIT_LABELS = { grid: 'Grid', cuencas: 'Cuencas', embalses: 'Embalses', estaciones: 'Estaciones' };
+const SPATIAL_UNIT_LABELS = { grid: 'Grid', cuencas: 'Cuencas', municipios: 'Municipios', perimetro: 'Perímetro urbano', embalses: 'Embalses', estaciones: 'Estaciones' };
+
+// Unidades espaciales que agregan celdas por zona (mismo flujo que cuencas)
+export const ZONAL_SPATIAL_UNITS = ['cuencas', 'municipios', 'perimetro'];
+// Mapeo unidad espacial del frontend → zone_type del backend
+export const SPATIAL_UNIT_ZONE_TYPE = { cuencas: 'cuenca', municipios: 'municipio', perimetro: 'perimetro' };
+// Etiqueta legible por tipo de entidad zonal seleccionada
+const ZONE_TYPE_LABELS = { cuenca: 'Cuenca', municipio: 'Municipio', perimetro: 'Perímetro urbano' };
 const ALL_INDICES = [...hydrometIndices, ...hydrologicalIndices];
 
 export default function Sidebar({
@@ -67,15 +74,16 @@ export default function Sidebar({
   const isHydromet = (analysisState.dataCategory || 'hydromet') === 'hydromet';
   const isHydrological = (analysisState.dataCategory || 'hydromet') === 'hydrological';
   const is2DMode = analysisState.visualizationType === '2D';
-  const needsSelection = !is2DMode && (analysisState.spatialUnit || 'grid') !== 'cuencas';
-  const hasSelection = selectedStation || selectedCell || (selectedEntity?.type === 'cuenca');
+  const isZonalUnit = ZONAL_SPATIAL_UNITS.includes(analysisState.spatialUnit || 'grid');
+  const needsSelection = !is2DMode && !isZonalUnit;
+  const hasSelection = selectedStation || selectedCell || (selectedEntity && ZONE_TYPE_LABELS[selectedEntity.type]);
 
   const selectionText = selectedStation
     ? selectedStation.name
     : selectedCell
       ? `Celda [${selectedCell.center[0].toFixed(2)}, ${selectedCell.center[1].toFixed(2)}]`
-      : selectedEntity?.type === 'cuenca'
-        ? `Cuenca: ${selectedEntity.layer}`
+      : selectedEntity && ZONE_TYPE_LABELS[selectedEntity.type]
+        ? `${ZONE_TYPE_LABELS[selectedEntity.type]}: ${selectedEntity.layer}`
         : null;
 
   const currentVariables = useMemo(
@@ -98,6 +106,8 @@ export default function Sidebar({
     return [
       { value: 'grid', label: 'Celdas', icon: Grid3x3 },
       { value: 'cuencas', label: 'Cuencas', icon: Droplets },
+      { value: 'municipios', label: 'Municipios', icon: Building2 },
+      { value: 'perimetro', label: 'Perímetro urbano', icon: Map },
     ];
   }, [isHydrological]);
 
@@ -194,10 +204,10 @@ export default function Sidebar({
     ]
   );
 
-  const isCuencasMode = (analysisState.spatialUnit || 'grid') === 'cuencas';
+  const isCuencasMode = isZonalUnit;
   const showDataSource = isHydromet && (
-    (is2DMode && ['grid', 'cuencas'].includes(analysisState.spatialUnit || 'grid'))
-    || (!is2DMode && isCuencasMode)
+    (is2DMode && (['grid'].includes(analysisState.spatialUnit || 'grid') || isZonalUnit))
+    || (!is2DMode && isZonalUnit)
   );
   const showSpatialUnit = is2DMode || (!is2DMode && isHydromet);
 

@@ -36,8 +36,13 @@ SOURCE_BY_DATA_SOURCE = {
 # Override variable+dataset (mayor precedencia que todo lo demás).
 # Usado cuando una variable tiene fuente distinta al default del dataset.
 # PDSI en CHIRPS usa SAT_LSCDF (no SAT_RAW como el resto de variables CHIRPS).
+# Temperatura (tmean/tmin/tmax) en IMERG está bajo SAT_RAW, no SAT_LSCDF
+# (SAT_LSCDF es la fuente de precipitación de IMERG; la temperatura no se almacena ahí).
 SOURCE_BY_VAR_AND_DS: dict = {
     ("PDSI", "CHIRPS"): "SAT_LSCDF",
+    ("tmean", "IMERG"): "SAT_RAW",
+    ("tmin", "IMERG"): "SAT_RAW",
+    ("tmax", "IMERG"): "SAT_RAW",
 }
 
 # Índices de sequía que NO usan la columna 'scale' como filtro.

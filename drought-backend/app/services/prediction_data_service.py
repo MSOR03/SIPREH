@@ -15,8 +15,8 @@ from app.services.historical_data_service import HistoricalDataService
 from app.services.cache import CacheService
 from app.services.cloud_storage import CloudStorageService
 from app.services.watershed_relations import (
-    get_relations_for_source,
-    CUENCA_NAMES,
+    get_zone_relations,
+    get_zone_names,
 )
 
 logger = logging.getLogger("prediction")
@@ -754,12 +754,14 @@ class PredictionDataService:
         var: str,
         scale: int,
         horizon: int,
+        zone_type: str = "cuenca",
     ) -> Dict[str, Any]:
         """
-        Retorna las 7 cuencas con valor ponderado por area para un horizonte.
-        Solo usa celdas CHIRPS que intersectan con las cuencas.
+        Retorna las zonas con valor ponderado por area para un horizonte.
+        ``zone_type``: cuenca (default), municipio o perimetro.
+        Solo usa celdas CHIRPS que intersectan con las zonas.
         """
-        cache_key = f"pred:ws_spatial:{parquet_url}:{var}:{scale}:{horizon}"
+        cache_key = f"pred:ws_spatial:{parquet_url}:{var}:{scale}:{horizon}:{zone_type}"
         cached = self.cache.get(cache_key)
         if cached:
             return cached
@@ -768,8 +770,13 @@ class PredictionDataService:
         source_info = self.historical._resolve_parquet_source(parquet_url)
         parquet_source = source_info["source_expr"]
 
-        relations = get_relations_for_source("CHIRPS")
+        zone_names = get_zone_names(zone_type)
+        relations = get_zone_relations("CHIRPS", zone_type)
         all_cell_ids = list({r["cell_id"] for r in relations})
+        if not all_cell_ids:
+            result = {"var": var, "scale": scale, "horizon": horizon, "cuencas": [], "statistics": {}}
+            self.cache.set(cache_key, result, expire=900)
+            return result
         cell_list_sql = ", ".join(f"'{c}'" for c in all_cell_ids)
 
         query = f"""
@@ -791,10 +798,10 @@ class PredictionDataService:
             if val is not None and np.isfinite(val):
                 cell_values[cid] = float(val)
 
-        # Aggregate per cuenca
+        # Aggregate per zona
         cuencas = []
         all_vals = []
-        for dn in range(1, 8):
+        for dn in zone_names:
             cuenca_rels = [r for r in relations if r["dn"] == dn]
             weighted_sum = 0.0
             total_area = 0.0
@@ -809,7 +816,7 @@ class PredictionDataService:
             avg_val = (weighted_sum / total_area) if total_area > 0 else None
             cuenca = {
                 "dn": dn,
-                "nombre": CUENCA_NAMES.get(dn, f"Cuenca {dn}"),
+                "nombre": zone_names.get(dn, f"Zona {dn}"),
                 "value": round(avg_val, 4) if avg_val is not None else None,
                 "cell_count": cell_count,
                 "color": None,
@@ -862,13 +869,15 @@ class PredictionDataService:
         scale: int,
         cuenca_dn: int,
         base_date: Optional[date] = None,
+        zone_type: str = "cuenca",
     ) -> Dict[str, Any]:
         """
-        Retorna los 12 horizontes ponderados por area para una cuenca.
+        Retorna los 12 horizontes ponderados por area para una zona.
+        ``zone_type``: cuenca (default), municipio o perimetro.
         Incluye value, q1, q3, iqr_min, iqr_max.
         """
         base_tag = base_date.isoformat() if base_date else "na"
-        cache_key = f"pred:ws_ts:{parquet_url}:{var}:{scale}:{cuenca_dn}:{base_tag}"
+        cache_key = f"pred:ws_ts:{parquet_url}:{var}:{scale}:{cuenca_dn}:{base_tag}:{zone_type}"
         cached = self.cache.get(cache_key)
         if cached:
             return cached
@@ -877,10 +886,11 @@ class PredictionDataService:
         source_info = self.historical._resolve_parquet_source(parquet_url)
         parquet_source = source_info["source_expr"]
 
-        relations = get_relations_for_source("CHIRPS")
+        zone_names = get_zone_names(zone_type)
+        relations = get_zone_relations("CHIRPS", zone_type)
         cuenca_rels = [r for r in relations if r["dn"] == cuenca_dn]
         if not cuenca_rels:
-            raise ValueError(f"No hay relaciones para cuenca DN={cuenca_dn} con fuente CHIRPS")
+            raise ValueError(f"No hay relaciones para zona DN={cuenca_dn} ({zone_type}) con fuente CHIRPS")
 
         cell_areas = {r["cell_id"]: r["area_m2"] for r in cuenca_rels}
         cell_list_sql = ", ".join(f"'{c}'" for c in cell_areas)
@@ -929,7 +939,7 @@ class PredictionDataService:
                 "var": var,
                 "scale": scale,
                 "cuenca_dn": cuenca_dn,
-                "cuenca_nombre": CUENCA_NAMES.get(cuenca_dn, f"Cuenca {cuenca_dn}"),
+                "cuenca_nombre": zone_names.get(cuenca_dn, f"Zona {cuenca_dn}"),
                 "data": [],
                 "statistics": {},
             }
@@ -965,7 +975,7 @@ class PredictionDataService:
             "var": var,
             "scale": scale,
             "cuenca_dn": cuenca_dn,
-            "cuenca_nombre": CUENCA_NAMES.get(cuenca_dn, f"Cuenca {cuenca_dn}"),
+            "cuenca_nombre": zone_names.get(cuenca_dn, f"Zona {cuenca_dn}"),
             "data": data,
             "statistics": statistics,
         }

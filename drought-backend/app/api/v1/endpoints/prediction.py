@@ -425,12 +425,16 @@ def prediction_watershed_spatial(
             detail="Archivo de prediccion no encontrado o sin cloud_key",
         )
 
+    if request.zone_type not in ("cuenca", "municipio", "perimetro"):
+        raise HTTPException(status_code=400, detail="zone_type debe ser cuenca, municipio o perimetro")
+
     try:
         result = _prediction_service.query_watershed_spatial(
             parquet_url=cloud_key,
             var=request.var,
             scale=request.scale,
             horizon=request.horizon,
+            zone_type=request.zone_type,
         )
         return orjson_response(result)
     except Exception as e:
@@ -466,6 +470,9 @@ def prediction_watershed_timeseries(
             detail="Archivo de prediccion no encontrado o sin cloud_key",
         )
 
+    if request.zone_type not in ("cuenca", "municipio", "perimetro"):
+        raise HTTPException(status_code=400, detail="zone_type debe ser cuenca, municipio o perimetro")
+
     issued_at = _resolve_prediction_issued_at(request.parquet_file_id, db)
 
     try:
@@ -475,6 +482,7 @@ def prediction_watershed_timeseries(
             scale=request.scale,
             cuenca_dn=request.cuenca_dn,
             base_date=issued_at,
+            zone_type=request.zone_type,
         )
         return orjson_response(result)
     except Exception as e:

@@ -56,10 +56,12 @@ class PredictionWatershedSpatialRequest(BaseModel):
     var: str = Field(..., description="Indice de sequia: SPI, SPEI, RAI, EDDI, PDSI")
     scale: int = Field(..., description="Escala temporal en meses (1, 3, 6, 12)")
     horizon: int = Field(..., ge=1, le=12, description="Horizonte de prediccion (1-12)")
+    zone_type: str = Field("cuenca", description="Unidad espacial: cuenca, municipio o perimetro")
 
 
 class PredictionWatershedTimeSeriesRequest(BaseModel):
     parquet_file_id: int = Field(..., description="ID del archivo parquet de prediccion")
     var: str = Field(..., description="Indice de sequia: SPI, SPEI, RAI, EDDI, PDSI")
     scale: int = Field(..., description="Escala temporal en meses (1, 3, 6, 12)")
-    cuenca_dn: int = Field(..., ge=1, le=7, description="DN de la cuenca (1-7)")
+    cuenca_dn: int = Field(..., ge=1, le=7, description="DN de la zona (cuenca 1-7; municipio/perimetro = 1)")
+    zone_type: str = Field("cuenca", description="Unidad espacial: cuenca, municipio o perimetro")

@@ -879,10 +879,12 @@ def get_watershed_spatial(
 
     if request.data_source.upper() not in ("ERA5", "IMERG", "CHIRPS"):
         raise HTTPException(status_code=400, detail="data_source debe ser ERA5, IMERG o CHIRPS")
+    if request.zone_type not in ("cuenca", "municipio", "perimetro"):
+        raise HTTPException(status_code=400, detail="zone_type debe ser cuenca, municipio o perimetro")
 
     endpoint_cache_key = (
         f"endpoint:ws_spatial:{request.parquet_file_id}:{request.variable}:"
-        f"{request.data_source}:{'interval' if interval_mode else 'single'}:"
+        f"{request.data_source}:{request.zone_type}:{'interval' if interval_mode else 'single'}:"
         f"{request.target_date}:{request.start_date}:{request.end_date}:"
         f"{request.scale}:{request.frequency}"
     )
@@ -905,6 +907,7 @@ def get_watershed_spatial(
             use_interval=interval_mode,
             scale=request.scale,
             frequency=request.frequency,
+            zone_type=request.zone_type,
         )
 
         var_info = historical_service.COLUMN_MAPPING.get(request.variable, {})
@@ -915,6 +918,7 @@ def get_watershed_spatial(
             "unit": var_info.get("unit", ""),
             "date": used_date if not interval_mode else request.end_date,
             "data_source": request.data_source,
+            "zone_type": request.zone_type,
             "cuencas": cuencas,
             "statistics": statistics,
         }
@@ -940,14 +944,16 @@ def get_watershed_timeseries(
 
     if request.data_source.upper() not in ("ERA5", "IMERG", "CHIRPS"):
         raise HTTPException(status_code=400, detail="data_source debe ser ERA5, IMERG o CHIRPS")
-    if request.cuenca_dn < 1 or request.cuenca_dn > 7:
-        raise HTTPException(status_code=400, detail="cuenca_dn debe estar entre 1 y 7")
+    if request.zone_type not in ("cuenca", "municipio", "perimetro"):
+        raise HTTPException(status_code=400, detail="zone_type debe ser cuenca, municipio o perimetro")
+    if request.cuenca_dn < 1:
+        raise HTTPException(status_code=400, detail="cuenca_dn inválido")
     if request.start_date > request.end_date:
         raise HTTPException(status_code=400, detail="start_date no puede ser mayor que end_date")
 
     endpoint_cache_key = (
         f"endpoint:ws_ts:{request.parquet_file_id}:{request.variable}:"
-        f"{request.data_source}:{request.cuenca_dn}:"
+        f"{request.data_source}:{request.zone_type}:{request.cuenca_dn}:"
         f"{request.start_date}:{request.end_date}:{request.scale}:{request.frequency}"
     )
     cached = cache_service.get(endpoint_cache_key)
@@ -959,7 +965,7 @@ def get_watershed_timeseries(
         raise HTTPException(status_code=404, detail="Archivo parquet no encontrado o sin cloud_key")
 
     try:
-        from app.services.watershed_relations import CUENCA_NAMES
+        from app.services.watershed_relations import get_zone_names
         data_points, statistics = historical_service.query_watershed_timeseries(
             parquet_url=cloud_key,
             variable=request.variable,
@@ -969,16 +975,18 @@ def get_watershed_timeseries(
             end_date=request.end_date,
             scale=request.scale,
             frequency=request.frequency,
+            zone_type=request.zone_type,
         )
 
         var_info = historical_service.COLUMN_MAPPING.get(request.variable, {})
-        cuenca_name = CUENCA_NAMES.get(request.cuenca_dn, f"Cuenca {request.cuenca_dn}")
+        cuenca_name = get_zone_names(request.zone_type).get(request.cuenca_dn, f"Zona {request.cuenca_dn}")
 
         response_data = {
             "variable": request.variable,
             "variable_name": var_info.get("name", request.variable),
             "unit": var_info.get("unit", ""),
             "data_source": request.data_source,
+            "zone_type": request.zone_type,
             "cuenca": {"dn": request.cuenca_dn, "nombre": cuenca_name},
             "frequency": request.frequency or "D",
             "data": data_points,

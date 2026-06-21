@@ -167,6 +167,7 @@ class WatershedSpatialRequest(BaseModel):
     use_interval: bool = Field(False, description="Si true, usa rango y promedia")
     scale: Optional[int] = Field(None, description="Escala temporal (1, 3, 6, 12) — solo índices")
     frequency: Optional[str] = Field(None, description="Frecuencia: 'D' o 'M'")
+    zone_type: str = Field("cuenca", description="Unidad espacial: cuenca, municipio o perimetro")
 
 
 class WatershedCuencaValue(BaseModel):
@@ -196,8 +197,9 @@ class WatershedTimeSeriesRequest(BaseModel):
     parquet_file_id: int = Field(..., description="ID del archivo parquet")
     variable: str = Field(..., description="Variable o índice")
     data_source: str = Field(..., description="Fuente de datos: ERA5, IMERG o CHIRPS")
-    cuenca_dn: int = Field(..., description="DN de la cuenca (1-7)")
+    cuenca_dn: int = Field(..., description="DN de la zona (cuenca 1-7; municipio/perimetro = 1)")
     start_date: date = Field(..., description="Fecha inicial")
     end_date: date = Field(..., description="Fecha final")
     scale: Optional[int] = Field(None, description="Escala temporal — solo índices")
     frequency: Optional[str] = Field(None, description="Frecuencia: 'D' o 'M'")
+    zone_type: str = Field("cuenca", description="Unidad espacial: cuenca, municipio o perimetro")

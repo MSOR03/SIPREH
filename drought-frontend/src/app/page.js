@@ -9,6 +9,19 @@ import GuidedTour from '@/components/GuidedTour';
 import { useToast } from '@/contexts/ToastContext';
 import { downloadAnalysisImage, downloadAnalysisJson } from '@/utils/exporters';
 
+// Unidades espaciales que agregan celdas por zona (mismo flujo que cuencas)
+const ZONAL_UNITS = ['cuencas', 'municipios', 'perimetro'];
+// Unidad espacial del frontend → zone_type del backend
+const SPATIAL_UNIT_TO_ZONE = { cuencas: 'cuenca', municipios: 'municipio', perimetro: 'perimetro' };
+// Unidad espacial del frontend → clave de capa en mapLayers
+const ZONE_LAYER_KEY = { cuencas: 'cuencas', municipios: 'municipioBogota', perimetro: 'perimetroUrbano' };
+// Tipos de entidad zonal seleccionables en el mapa
+const ZONE_ENTITY_TYPES = ['cuenca', 'municipio', 'perimetro'];
+// zone_type (entidad) → unidad espacial del frontend
+const ZONE_TO_UNIT = { cuenca: 'cuencas', municipio: 'municipios', perimetro: 'perimetro' };
+const isZonalUnit = (u) => ZONAL_UNITS.includes(u);
+const isZoneEntity = (e) => Boolean(e) && ZONE_ENTITY_TYPES.includes(e.type);
+
 // Helper: resolve effective resolution for a file object, preferring backend metadata fields
 function getFileResolution(f) {
   const dsResMap = { ERA5: 0.25, IMERG: 0.1, ERA5_LAND: 0.1, CHIRPS: 0.05 };
@@ -210,10 +223,10 @@ export default function Home() {
     const is2DMode = analysisState.visualizationType === '2D';
     const useSpatialInterval = is2DMode && Boolean(analysisState.useSpatialInterval);
     
-    // Validaciones: para 1D requiere celda/estación/cuenca, para 2D no
-    if (!is2DMode && !selectedStation && !selectedCell && !(selectedEntity?.type === 'cuenca')) {
+    // Validaciones: para 1D requiere celda/estación/zona, para 2D no
+    if (!is2DMode && !selectedStation && !selectedCell && !isZoneEntity(selectedEntity)) {
       showError(
-        'Debes seleccionar una estación, celda o cuenca del mapa antes de graficar',
+        'Debes seleccionar una estación, celda o zona (cuenca/municipio/perímetro) del mapa antes de graficar',
         'Selección Requerida'
       );
       return;
@@ -315,8 +328,11 @@ export default function Home() {
             '¡Listo!'
           );
 
-        } else if (analysisState.spatialUnit === 'cuencas') {
-          // ===== 2D CUENCAS: promedio ponderado por cuenca =====
+        } else if (isZonalUnit(analysisState.spatialUnit)) {
+          // ===== 2D ZONAL (cuenca/municipio/perímetro): promedio ponderado por área =====
+          const zoneType = SPATIAL_UNIT_TO_ZONE[analysisState.spatialUnit];
+          const zoneLayerKey = ZONE_LAYER_KEY[analysisState.spatialUnit];
+          const zoneLabel = { cuencas: 'Cuencas', municipios: 'Municipios', perimetro: 'Perímetro urbano' }[analysisState.spatialUnit];
           // spatialResolution is kept in sync with the UI selector (RadioCard), so use it as primary truth
           const dataSource = analysisState.dataSource || 'CHIRPS';
           const sourceResMap = { ERA5: 0.25, IMERG: 0.1, ERA5_LAND: 0.1, CHIRPS: 0.05 };
@@ -345,6 +361,7 @@ export default function Home() {
             useInterval: useSpatialInterval,
             scale: analysisState.droughtIndex ? analysisState.indexScale : null,
             frequency: (!analysisState.droughtIndex && analysisState.variable === 'precip') ? analysisState.frequency : null,
+            zoneType: zoneType,
           });
 
           const periodSubtitle = response.is_interval
@@ -353,7 +370,7 @@ export default function Home() {
 
           setPlotData({
             type: '2D',
-            title: `${response.variable_name} - Cuencas`,
+            title: `${response.variable_name} - ${zoneLabel}`,
             subtitle: `${periodSubtitle} | Fuente: ${dataSource}`,
             variable: response.variable,
             unit: response.unit,
@@ -361,15 +378,16 @@ export default function Home() {
             cuencasData: response.cuencas,
             statistics: response.statistics,
             isCuencas: true,
+            spatialUnit: analysisState.spatialUnit,
             dataSource: dataSource,
           });
 
-          // Auto-enable cuencas layer
-          setMapLayers(prev => ({ ...prev, cuencas: true }));
+          // Auto-enable la capa zonal correspondiente
+          setMapLayers(prev => ({ ...prev, [zoneLayerKey]: true }));
 
           const validCuencas = response.cuencas?.filter(c => c.value !== null).length || 0;
           showSuccess(
-            `Mapa de cuencas generado: ${validCuencas} cuencas con dato válido (${dataSource})`,
+            `Mapa de ${zoneLabel.toLowerCase()} generado: ${validCuencas} con dato válido (${dataSource})`,
             '¡Listo!'
           );
 
@@ -573,8 +591,10 @@ export default function Home() {
             `Serie generada para estación ${selectedStation.name} (${response.statistics?.count || 0} registros)`,
             '¡Listo!'
           );
-        } else if (selectedEntity?.type === 'cuenca') {
-          // ===== 1D CUENCA: serie temporal ponderada =====
+        } else if (isZoneEntity(selectedEntity)) {
+          // ===== 1D ZONAL (cuenca/municipio/perímetro): serie temporal ponderada =====
+          const zoneType = selectedEntity.type;
+          const zoneLabel = { cuenca: 'Cuenca', municipio: 'Municipio', perimetro: 'Perímetro urbano' }[zoneType];
           const dataSource = analysisState.dataSource || 'CHIRPS';
           const sourceResMap = { ERA5: 0.25, ERA5_LAND: 0.1, IMERG: 0.1, CHIRPS: 0.05 };
           const targetResolution = sourceResMap[dataSource] || 0.05;
@@ -601,6 +621,7 @@ export default function Home() {
             endDate: analysisState.endDate,
             scale: analysisState.droughtIndex ? analysisState.indexScale : null,
             frequency: (!analysisState.droughtIndex) ? analysisState.frequency : null,
+            zoneType: zoneType,
           });
 
           const freqLabel = response.frequency === 'M' ? 'Mensual' : 'Diaria';
@@ -608,7 +629,7 @@ export default function Home() {
 
           setPlotData({
             type: '1D',
-            title: `${response.variable_name} - Cuenca ${cuencaName}`,
+            title: `${response.variable_name} - ${zoneLabel} ${cuencaName}`,
             subtitle: `Fuente: ${dataSource} | Frecuencia: ${freqLabel}`,
             variable: String(response.variable || variable || '').trim().toUpperCase(),
             unit: response.unit,
@@ -618,10 +639,11 @@ export default function Home() {
             cuencaDn: selectedEntity?.dn ?? null,
             cuencaNombre: cuencaName,
             isCuencaTimeSeries: true,
+            spatialUnit: ZONE_TO_UNIT[zoneType],
           });
 
           showSuccess(
-            `Serie de tiempo generada para cuenca ${cuencaName} (${response.statistics?.count || 0} registros)`,
+            `Serie de tiempo generada para ${zoneLabel.toLowerCase()} ${cuencaName} (${response.statistics?.count || 0} registros)`,
             '¡Listo!'
           );
         }
@@ -639,7 +661,11 @@ export default function Home() {
   // Handle Prediction Plot
   const handlePredictionPlot = useCallback(async () => {
     const is2D = predictionState.visualizationType === '2D';
-    const isCuencas = predictionState.spatialUnit === 'cuencas';
+    const isCuencas = isZonalUnit(predictionState.spatialUnit);
+    const zoneType = SPATIAL_UNIT_TO_ZONE[predictionState.spatialUnit];
+    const zoneLayerKey = ZONE_LAYER_KEY[predictionState.spatialUnit];
+    const zoneLabel = { cuencas: 'Cuencas', municipios: 'Municipios', perimetro: 'Perímetro urbano' }[predictionState.spatialUnit];
+    const zoneLabelSingular = { cuencas: 'Cuenca', municipios: 'Municipio', perimetro: 'Perímetro urbano' }[predictionState.spatialUnit];
 
     // Validations
     if (!predictionState.droughtIndex) {
@@ -650,8 +676,8 @@ export default function Home() {
       showWarning('Por favor selecciona una escala temporal', 'Escala requerida');
       return;
     }
-    if (!is2D && isCuencas && selectedEntity?.type !== 'cuenca') {
-      showError('Selecciona una cuenca del mapa para la prediccion 1D por cuencas', 'Seleccion Requerida');
+    if (!is2D && isCuencas && !(isZoneEntity(selectedEntity) && selectedEntity.type === zoneType)) {
+      showError(`Selecciona una ${zoneLabelSingular?.toLowerCase()} del mapa para la prediccion 1D`, 'Seleccion Requerida');
       return;
     }
     if (!is2D && !isCuencas && !selectedCell) {
@@ -683,31 +709,33 @@ export default function Home() {
 
       if (is2D) {
         if (isCuencas) {
-          // === 2D CUENCAS: promedio ponderado por horizonte ===
+          // === 2D ZONAL: promedio ponderado por horizonte ===
           const response = await predictionApi.getWatershedSpatial({
             fileId: predFileId,
             var: predictionState.droughtIndex,
             scale: predictionState.scale,
             horizon: predictionState.horizon,
+            zoneType: zoneType,
           });
 
           setPlotData({
             type: 'prediction-2d',
-            title: `Prediccion ${predictionState.droughtIndex} (${predictionState.scale}m) - Horizonte ${predictionState.horizon} - Cuencas`,
-            subtitle: `${response.cuencas?.length || 0} cuencas | Escala: ${predictionState.scale} meses`,
+            title: `Prediccion ${predictionState.droughtIndex} (${predictionState.scale}m) - Horizonte ${predictionState.horizon} - ${zoneLabel}`,
+            subtitle: `${response.cuencas?.length || 0} ${zoneLabel.toLowerCase()} | Escala: ${predictionState.scale} meses`,
             variable: predictionState.droughtIndex,
             cuencasData: response.cuencas,
             statistics: response.statistics,
             isCuencas: true,
+            spatialUnit: predictionState.spatialUnit,
             resolution: 0.05,
             predictionMeta: { index: predictionState.droughtIndex, scale: predictionState.scale, horizon: predictionState.horizon },
           });
 
-          setMapLayers(prev => ({ ...prev, cuencas: true }));
+          setMapLayers(prev => ({ ...prev, [zoneLayerKey]: true }));
 
           const validCuencas = response.cuencas?.filter(c => c.value !== null).length || 0;
           showSuccess(
-            `Mapa de cuencas prediccion generado: ${validCuencas} cuencas`,
+            `Mapa de ${zoneLabel.toLowerCase()} prediccion generado: ${validCuencas}`,
             '!Listo!'
           );
         } else {
@@ -741,29 +769,31 @@ export default function Home() {
         }
       } else {
         if (isCuencas) {
-          // === 1D CUENCA: 12 horizontes ponderados por area ===
+          // === 1D ZONAL: 12 horizontes ponderados por area ===
           const response = await predictionApi.getWatershedTimeSeries({
             fileId: predFileId,
             var: predictionState.droughtIndex,
             scale: predictionState.scale,
             cuencaDn: selectedEntity.dn,
+            zoneType: zoneType,
           });
 
           const cuencaName = response.cuenca_nombre || selectedEntity.layer;
 
           setPlotData({
             type: 'prediction-1d',
-            title: `Prediccion ${predictionState.droughtIndex} (${predictionState.scale}m) - Cuenca ${cuencaName}`,
+            title: `Prediccion ${predictionState.droughtIndex} (${predictionState.scale}m) - ${zoneLabelSingular} ${cuencaName}`,
             subtitle: `12 horizontes | Ponderado por area`,
             variable: predictionState.droughtIndex,
             data: response.data,
             statistics: response.statistics,
             predictionMeta: { index: predictionState.droughtIndex, scale: predictionState.scale, cuencaDn: selectedEntity.dn },
             isCuencaTimeSeries: true,
+            spatialUnit: predictionState.spatialUnit,
           });
 
           showSuccess(
-            `Prediccion generada para cuenca ${cuencaName} (${response.data?.length || 0} horizontes)`,
+            `Prediccion generada para ${zoneLabelSingular.toLowerCase()} ${cuencaName} (${response.data?.length || 0} horizontes)`,
             '!Listo!'
           );
         } else {
@@ -799,7 +829,7 @@ export default function Home() {
 
   const handlePredictionAnomalyPlot = useCallback(async () => {
     const is2D = predictionState.visualizationType === '2D';
-    const isCuencas = predictionState.spatialUnit === 'cuencas';
+    const isCuencas = isZonalUnit(predictionState.spatialUnit);
     const index = String(predictionState.droughtIndex || '').toUpperCase();
 
     if (!is2D || isCuencas || index !== 'SPI') {
@@ -1033,7 +1063,11 @@ export default function Home() {
   // Handle Prediction History Plot
   const handlePredictionHistoryPlot = useCallback(async () => {
     const is2D = predictionHistoryState.visualizationType === '2D';
-    const isCuencas = predictionHistoryState.spatialUnit === 'cuencas';
+    const isCuencas = isZonalUnit(predictionHistoryState.spatialUnit);
+    const zoneType = SPATIAL_UNIT_TO_ZONE[predictionHistoryState.spatialUnit];
+    const zoneLayerKey = ZONE_LAYER_KEY[predictionHistoryState.spatialUnit];
+    const zoneLabel = { cuencas: 'Cuencas', municipios: 'Municipios', perimetro: 'Perímetro urbano' }[predictionHistoryState.spatialUnit];
+    const zoneLabelSingular = { cuencas: 'Cuenca', municipios: 'Municipio', perimetro: 'Perímetro urbano' }[predictionHistoryState.spatialUnit];
 
     if (!predictionHistoryState.selectedFileId) {
       showWarning('Por favor selecciona una prediccion (fecha de emision)', 'Prediccion requerida');
@@ -1047,8 +1081,8 @@ export default function Home() {
       showWarning('Por favor selecciona una escala temporal', 'Escala requerida');
       return;
     }
-    if (!is2D && isCuencas && selectedEntity?.type !== 'cuenca') {
-      showError('Selecciona una cuenca del mapa para la prediccion 1D por cuencas', 'Seleccion Requerida');
+    if (!is2D && isCuencas && !(isZoneEntity(selectedEntity) && selectedEntity.type === zoneType)) {
+      showError(`Selecciona una ${zoneLabelSingular?.toLowerCase()} del mapa para la prediccion 1D`, 'Seleccion Requerida');
       return;
     }
     if (!is2D && !isCuencas && !selectedCell) {
@@ -1068,22 +1102,24 @@ export default function Home() {
 
       if (is2D) {
         if (isCuencas) {
-          // === 2D CUENCAS: prediccion historica por cuenca ===
+          // === 2D ZONAL: prediccion historica por zona ===
           const response = await predictionHistoryApi.getWatershedSpatial({
             fileId: predFileId,
             var: predictionHistoryState.droughtIndex,
             scale: predictionHistoryState.scale,
             horizon: predictionHistoryState.horizon,
+            zoneType: zoneType,
           });
 
           setPlotData({
             type: 'prediction-history-2d',
-            title: `Historico ${predictionHistoryState.droughtIndex} (${predictionHistoryState.scale}m) - Horizonte ${predictionHistoryState.horizon} - Cuencas`,
-            subtitle: `${response.cuencas?.length || 0} cuencas | Escala: ${predictionHistoryState.scale} meses | Prediccion historica`,
+            title: `Historico ${predictionHistoryState.droughtIndex} (${predictionHistoryState.scale}m) - Horizonte ${predictionHistoryState.horizon} - ${zoneLabel}`,
+            subtitle: `${response.cuencas?.length || 0} ${zoneLabel.toLowerCase()} | Escala: ${predictionHistoryState.scale} meses | Prediccion historica`,
             variable: predictionHistoryState.droughtIndex,
             cuencasData: response.cuencas,
             statistics: response.statistics,
             isCuencas: true,
+            spatialUnit: predictionHistoryState.spatialUnit,
             resolution: 0.05,
             predictionMeta: {
               index: predictionHistoryState.droughtIndex,
@@ -1094,11 +1130,11 @@ export default function Home() {
             },
           });
 
-          setMapLayers(prev => ({ ...prev, cuencas: true }));
+          setMapLayers(prev => ({ ...prev, [zoneLayerKey]: true }));
 
           const validCuencas = response.cuencas?.filter(c => c.value !== null).length || 0;
           showSuccess(
-            `Mapa de cuencas prediccion historica generado: ${validCuencas} cuencas`,
+            `Mapa de ${zoneLabel.toLowerCase()} prediccion historica generado: ${validCuencas}`,
             '!Listo!'
           );
         } else {
@@ -1138,19 +1174,20 @@ export default function Home() {
         }
       } else {
         if (isCuencas) {
-          // === 1D CUENCA: prediccion historica por cuenca ===
+          // === 1D ZONAL: prediccion historica por zona ===
           const response = await predictionHistoryApi.getWatershedTimeSeries({
             fileId: predFileId,
             var: predictionHistoryState.droughtIndex,
             scale: predictionHistoryState.scale,
             cuencaDn: selectedEntity.dn,
+            zoneType: zoneType,
           });
 
           const cuencaName = response.cuenca_nombre || selectedEntity.layer;
 
           setPlotData({
             type: 'prediction-history-1d',
-            title: `Historico ${predictionHistoryState.droughtIndex} (${predictionHistoryState.scale}m) - Cuenca ${cuencaName}`,
+            title: `Historico ${predictionHistoryState.droughtIndex} (${predictionHistoryState.scale}m) - ${zoneLabelSingular} ${cuencaName}`,
             subtitle: `12 horizontes | Ponderado por area | Prediccion historica`,
             variable: predictionHistoryState.droughtIndex,
             data: response.data,
@@ -1163,10 +1200,11 @@ export default function Home() {
               isHistory: true,
             },
             isCuencaTimeSeries: true,
+            spatialUnit: predictionHistoryState.spatialUnit,
           });
 
           showSuccess(
-            `Prediccion historica generada para cuenca ${cuencaName} (${response.data?.length || 0} horizontes)`,
+            `Prediccion historica generada para ${zoneLabelSingular.toLowerCase()} ${cuencaName} (${response.data?.length || 0} horizontes)`,
             '!Listo!'
           );
         } else {
@@ -1214,16 +1252,18 @@ export default function Home() {
     console.log('Map and selections reset');
   }, []);
 
-  // Handle entity (cuenca/embalse) selection — drill-down to 1D when in cuencas 2D
+  // Handle entity (cuenca/municipio/perimetro/embalse) selection — drill-down a 1D en modo zonal 2D
   const handleEntitySelect = useCallback(async (entity) => {
     setSelectedEntity(entity);
-    if (!entity || entity.type !== 'cuenca' || !plotData?.isCuencas) return;
+    if (!isZoneEntity(entity) || !plotData?.isCuencas) return;
+    const zoneType = entity.type;
+    const zoneLabelSingular = { cuenca: 'Cuenca', municipio: 'Municipio', perimetro: 'Perímetro urbano' }[zoneType];
 
-    // Drill-down: cuenca 2D → cuenca 1D
+    // Drill-down: zona 2D → zona 1D
     try {
       const { historicalApi, predictionApi, predictionHistoryApi } = await import('@/services/api');
 
-      // === Prediction cuencas drill-down ===
+      // === Prediction zonal drill-down ===
       if (plotData.predictionMeta) {
         const meta = plotData.predictionMeta;
         const index = meta.index;
@@ -1241,7 +1281,7 @@ export default function Home() {
           fileId = predFile.file_id;
         }
 
-        showInfo(`Consultando prediccion para cuenca ${entity.layer}...`, 'Cargando');
+        showInfo(`Consultando prediccion para ${zoneLabelSingular.toLowerCase()} ${entity.layer}...`, 'Cargando');
 
         const api = meta.isHistory ? predictionHistoryApi : predictionApi;
         const response = await api.getWatershedTimeSeries({
@@ -1249,6 +1289,7 @@ export default function Home() {
           var: index,
           scale: scale,
           cuencaDn: entity.dn,
+          zoneType: zoneType,
         });
 
         const cuencaName = response.cuenca_nombre || entity.layer;
@@ -1262,20 +1303,21 @@ export default function Home() {
 
         setPlotData({
           type: `${typePrefix}-1d`,
-          title: `${meta.isHistory ? 'Historico ' : 'Prediccion '}${index} (${scale}m) - Cuenca ${cuencaName}`,
+          title: `${meta.isHistory ? 'Historico ' : 'Prediccion '}${index} (${scale}m) - ${zoneLabelSingular} ${cuencaName}`,
           subtitle: `12 horizontes | Ponderado por area${meta.isHistory ? ' | Prediccion historica' : ''}`,
           variable: index,
           data: response.data,
           statistics: response.statistics,
           predictionMeta: { ...meta, cuencaDn: entity.dn },
           isCuencaTimeSeries: true,
+          spatialUnit: ZONE_TO_UNIT[zoneType],
         });
 
-        showSuccess(`Prediccion generada para cuenca ${cuencaName}`, '¡Listo!');
+        showSuccess(`Prediccion generada para ${zoneLabelSingular.toLowerCase()} ${cuencaName}`, '¡Listo!');
         return;
       }
 
-      // === Historical cuencas drill-down ===
+      // === Historical zonal drill-down ===
       const variable = analysisState.droughtIndex || analysisState.variable;
       if (!variable) return;
 
@@ -1289,7 +1331,7 @@ export default function Home() {
       const file = historicalFiles.find(f => Math.abs((f.resolution || 0.1) - targetResolution) < 0.01);
       if (!file) return;
 
-      showInfo(`Consultando serie temporal para cuenca ${entity.layer}...`, 'Cargando');
+      showInfo(`Consultando serie temporal para ${zoneLabelSingular.toLowerCase()} ${entity.layer}...`, 'Cargando');
 
       const response = await historicalApi.getWatershedTimeSeries({
         fileId: file.file_id,
@@ -1300,6 +1342,7 @@ export default function Home() {
         endDate: analysisState.endDate,
         scale: analysisState.droughtIndex ? analysisState.indexScale : null,
         frequency: (!analysisState.droughtIndex) ? analysisState.frequency : null,
+        zoneType: zoneType,
       });
 
       const freqLabel = response.frequency === 'M' ? 'Mensual' : 'Diaria';
@@ -1309,7 +1352,7 @@ export default function Home() {
 
       setPlotData({
         type: '1D',
-        title: `${response.variable_name} - Cuenca ${cuencaName}`,
+        title: `${response.variable_name} - ${zoneLabelSingular} ${cuencaName}`,
         subtitle: `Fuente: ${dataSource} | Frecuencia: ${freqLabel}`,
         variable: String(response.variable || variable || '').trim().toUpperCase(),
         unit: response.unit,
@@ -1319,12 +1362,13 @@ export default function Home() {
         cuencaDn: entity?.dn ?? null,
         cuencaNombre: cuencaName,
         isCuencaTimeSeries: true,
+        spatialUnit: ZONE_TO_UNIT[zoneType],
       });
 
-      showSuccess(`Serie de tiempo generada para cuenca ${cuencaName}`, '¡Listo!');
+      showSuccess(`Serie de tiempo generada para ${zoneLabelSingular.toLowerCase()} ${cuencaName}`, '¡Listo!');
     } catch (error) {
-      console.error('Error in cuenca drill-down:', error);
-      showError(error.message || 'Error al consultar serie de cuenca', 'Error');
+      console.error('Error in zonal drill-down:', error);
+      showError(error.message || 'Error al consultar serie de la zona', 'Error');
     }
   }, [plotData, analysisState, predictionCells, showInfo, showSuccess, showError]);
 

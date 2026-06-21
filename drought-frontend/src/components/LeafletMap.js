@@ -6,6 +6,45 @@ import { HYDRO_STATIONS } from '../utils/hydroStations';
 
 const BOGOTA_CENTER = [4.7110, -74.0721];
 
+// Colorea una capa de zona (municipio / perímetro urbano) según los datos
+// espaciales agregados, replicando el comportamiento de las cuencas. Como cada
+// tipo tiene una sola zona (dn=1), se mapea por DN con fallback al primer dato.
+function applyZoneSpatialColoring(layerRef, spatialData, typeLabel, defaultStyle, defaultHover) {
+  if (!layerRef?.current) return;
+
+  if (spatialData && spatialData.length > 0) {
+    const dnMap = {};
+    for (const z of spatialData) dnMap[z.dn] = z;
+    layerRef.current.eachLayer(layer => {
+      const dn = layer.feature?.properties?.DN ?? 1;
+      const data = dnMap[dn] ?? spatialData[0];
+      if (data && data.color) {
+        const baseStyle = { fillColor: data.color, fillOpacity: 0.6, color: '#1f2937', weight: 2, opacity: 0.9, dashArray: '' };
+        const hoverStyle = { fillColor: data.color, fillOpacity: 0.78, color: '#111827', weight: 3, opacity: 1, dashArray: '' };
+        layer.setStyle(baseStyle);
+        layer._baseStyle = { ...baseStyle };
+        layer._hoverStyle = { ...hoverStyle };
+        const name = data.nombre || layer.feature?.properties?.Nombre || typeLabel;
+        const valStr = data.value != null ? data.value.toFixed(3) : 'N/A';
+        const catStr = data.category ? ` | ${data.category}` : '';
+        layer.unbindTooltip();
+        layer.bindTooltip(`<b>${typeLabel}: ${name}</b><br/>Valor: ${valStr}${catStr}`, { sticky: true });
+      } else {
+        const noDataStyle = { fillColor: '#CCCCCC', fillOpacity: 0.3, color: '#6b7280', weight: 1, opacity: 0.6, dashArray: '' };
+        layer.setStyle(noDataStyle);
+        layer._baseStyle = { ...noDataStyle };
+        layer._hoverStyle = { ...noDataStyle, fillOpacity: 0.45, weight: 2 };
+      }
+    });
+  } else {
+    layerRef.current.eachLayer(layer => {
+      layer.setStyle(defaultStyle);
+      layer._baseStyle = { ...defaultStyle };
+      layer._hoverStyle = { ...defaultHover };
+    });
+  }
+}
+
 
 const stations = HYDRO_STATIONS.map(s => ({
   id: s.codigo,
@@ -40,7 +79,9 @@ export default function LeafletMap({
   showPerimetroUrbano = false, // Visibilidad del perímetro urbano de Bogotá
   showMunicipioBogota = false, // Visibilidad del municipio de Bogotá
   cuencasSpatialData = null, // Datos espaciales por cuenca [{dn, nombre, value, color, ...}]
-  selectedEntity = null,  // Entidad seleccionada (cuenca o embalse) { layer, type, dn, area }
+  municipiosSpatialData = null, // Datos espaciales por municipio [{dn, nombre, value, color, ...}]
+  perimetroSpatialData = null,  // Datos espaciales por perímetro urbano [{dn, nombre, value, color, ...}]
+  selectedEntity = null,  // Entidad seleccionada (cuenca/embalse/municipio/perimetro) { layer, type, dn, area }
   onEntitySelect,         // Callback al seleccionar una entidad
 }) {
   const prioritizeSpatialHover = Array.isArray(spatialDataCells) && spatialDataCells.length > 0;
@@ -393,16 +434,25 @@ export default function LeafletMap({
               dashArray: '',
             };
 
+            // Etiqueta legible por tipo de entidad zonal
+            const ENTITY_TYPE_LABELS = {
+              cuenca: 'Cuenca', embalse: 'Embalse', municipio: 'Municipio', perimetro: 'Perímetro urbano',
+            };
+
             // Build entity click handler
-            const makeEntityHandler = (feature, layer, type, defaultStyle, hoverStyle) => {
-              const name = feature.properties.Nombre || feature.properties.layer || type;
-              const dn = feature.properties.DN;
-              const areaM2 = feature.properties['Area m2'];
+            // opts permite forzar dn/nombre/área para zonas cuyo geojson no trae esas
+            // propiedades (municipio, perímetro urbano → una sola zona con dn=1).
+            const makeEntityHandler = (feature, layer, type, defaultStyle, hoverStyle, opts = {}) => {
+              const name = opts.nameOverride
+                || feature.properties.Nombre || feature.properties.layer || ENTITY_TYPE_LABELS[type] || type;
+              const dn = opts.dnOverride != null ? opts.dnOverride : feature.properties.DN;
+              const areaM2 = opts.areaOverride != null ? opts.areaOverride : feature.properties['Area m2'];
               const areakm2 = areaM2 ? (areaM2 / 1e6).toFixed(1) : 'N/A';
+              const typeLabel = ENTITY_TYPE_LABELS[type] || type;
 
               layer.bindTooltip(
-                `<b>${type === 'cuenca' ? 'Cuenca' : 'Embalse'}: ${name}</b><br>Área: ${areakm2} km²<br>DN: ${dn}`,
-                { sticky: true, direction: 'top', className: type === 'cuenca' ? 'cuenca-tooltip' : 'embalse-tooltip' }
+                `<b>${typeLabel}: ${name}</b><br>Área: ${areakm2} km²`,
+                { sticky: true, direction: 'top', className: `${type}-tooltip` }
               );
 
               // Store base styles on the layer so they can be updated later (e.g. cuencasSpatialData)
@@ -462,43 +512,38 @@ export default function LeafletMap({
             });
             embalsesLayerRef.current = embalsesLayer;
             // Don't add to map yet — visibility controlled by showEmbalses prop
-            // Perímetro Urbano de Bogotá
-            // Perímetro Urbano: azul institucional, opacidad baja, borde delgado
+            // Perímetro Urbano de Bogotá — clickable + coloreable por datos (como cuencas)
+            const perimetroDefaultStyle = {
+              color: '#b08d57', weight: 3, opacity: 1,
+              fill: true, fillColor: '#b08d57', fillOpacity: 0.1, dashArray: '4 2',
+            };
+            const perimetroHoverStyle = { weight: 4, fillOpacity: 0.25, dashArray: '' };
             const perimetroUrbanoLayer = L.geoJSON(perimetroUrbanoGeoData, {
               pane: 'perimetroPane',
-              style: {
-                color: '#b08d57', // Marrón claro
-                weight: 3,
-                opacity: 1,
-                fill: false,
-                fillOpacity: 0,
-                dashArray: '4 2',
-              },
+              style: () => ({ ...perimetroDefaultStyle }),
               interactive: true,
               onEachFeature: (feature, layer) => {
-                // Cambiar nombre a 'Perímetro urbano'
-                const nombre = feature.properties?.Nombre || 'Perímetro urbano';
-                layer.bindTooltip(nombre, {sticky: true, direction: 'top', className: 'perimetro-tooltip'});
-              }
+                makeEntityHandler(feature, layer, 'perimetro', perimetroDefaultStyle, perimetroHoverStyle, {
+                  dnOverride: 1, nameOverride: 'Centro Urb',
+                });
+              },
             });
             perimetroUrbanoLayerRef.current = perimetroUrbanoLayer;
-            // Municipio de Bogotá: naranja institucional, opacidad baja, borde delgado
+            // Municipio de Bogotá — clickable + coloreable por datos (como cuencas)
+            const municipioDefaultStyle = {
+              color: '#6b4f27', weight: 3, opacity: 1,
+              fill: true, fillColor: '#6b4f27', fillOpacity: 0.1, dashArray: '4 2',
+            };
+            const municipioHoverStyle = { weight: 4, fillOpacity: 0.25, dashArray: '' };
             const municipioBogotaLayer = L.geoJSON(municipioBogotaGeoData, {
               pane: 'municipioPane',
-              style: {
-                color: '#6b4f27', // Café
-                weight: 3,
-                opacity: 1,
-                fill: false,
-                fillOpacity: 0,
-                dashArray: '4 2',
-              },
+              style: () => ({ ...municipioDefaultStyle }),
               interactive: true,
               onEachFeature: (feature, layer) => {
-                // Cambiar nombre a 'Municipio'
-                const nombre = feature.properties?.Nombre || 'Municipio';
-                layer.bindTooltip(nombre, {sticky: true, direction: 'top', className: 'municipio-tooltip'});
-              }
+                makeEntityHandler(feature, layer, 'municipio', municipioDefaultStyle, municipioHoverStyle, {
+                  dnOverride: 1, nameOverride: feature.properties?.MpNombre || 'Bogotá',
+                });
+              },
             });
             municipioBogotaLayerRef.current = municipioBogotaLayer;
             // Fit bounds al primer polígono que se cargue
@@ -845,7 +890,25 @@ export default function LeafletMap({
     }
   }, [cuencasSpatialData, cuencasLoaded]);
 
-  // Highlight selected entity (cuenca or embalse)
+  // Apply municipios spatial data coloring (misma lógica que cuencas)
+  useEffect(() => {
+    applyZoneSpatialColoring(
+      municipioBogotaLayerRef, municipiosSpatialData, 'Municipio',
+      { color: '#6b4f27', weight: 3, opacity: 1, fill: true, fillColor: '#6b4f27', fillOpacity: 0.1, dashArray: '4 2' },
+      { weight: 4, fillOpacity: 0.25, dashArray: '' },
+    );
+  }, [municipiosSpatialData, cuencasLoaded]);
+
+  // Apply perímetro urbano spatial data coloring (misma lógica que cuencas)
+  useEffect(() => {
+    applyZoneSpatialColoring(
+      perimetroUrbanoLayerRef, perimetroSpatialData, 'Perímetro urbano',
+      { color: '#b08d57', weight: 3, opacity: 1, fill: true, fillColor: '#b08d57', fillOpacity: 0.1, dashArray: '4 2' },
+      { weight: 4, fillOpacity: 0.25, dashArray: '' },
+    );
+  }, [perimetroSpatialData, cuencasLoaded]);
+
+  // Highlight selected entity (cuenca/embalse/municipio/perimetro)
   useEffect(() => {
     // Reset embalses always
     if (embalsesLayerRef.current) {
@@ -856,14 +919,14 @@ export default function LeafletMap({
       });
     }
 
-    // Reset cuencas to their current base style (data-driven or default)
-    if (cuencasLayerRef.current) {
-      cuencasLayerRef.current.eachLayer(layer => {
-        layer.setStyle(layer._baseStyle || {
-          color: '#0d9488', weight: 2, opacity: 0.8, fillColor: '#14b8a6', fillOpacity: 0.15,
+    // Reset zonal layers (cuencas/municipio/perímetro) to su estilo base actual
+    [cuencasLayerRef, municipioBogotaLayerRef, perimetroUrbanoLayerRef].forEach(ref => {
+      if (ref.current) {
+        ref.current.eachLayer(layer => {
+          if (layer._baseStyle) layer.setStyle(layer._baseStyle);
         });
-      });
-    }
+      }
+    });
 
     // Helper: re-establish area-based z-order — largest cuencas drawn first so
     // smaller sub-cuencas (e.g. Chisaca inside La Regadera) always end on top.
@@ -883,18 +946,27 @@ export default function LeafletMap({
     }
 
     // Highlight the selected entity
-    const targetLayer = selectedEntity.type === 'cuenca'
-      ? cuencasLayerRef.current
-      : embalsesLayerRef.current;
+    const layerByType = {
+      cuenca: cuencasLayerRef.current,
+      embalse: embalsesLayerRef.current,
+      municipio: municipioBogotaLayerRef.current,
+      perimetro: perimetroUrbanoLayerRef.current,
+    };
+    const hasDataByType = {
+      cuenca: cuencasSpatialData,
+      municipio: municipiosSpatialData,
+      perimetro: perimetroSpatialData,
+    };
+    const targetLayer = layerByType[selectedEntity.type];
     if (!targetLayer) return;
 
     targetLayer.eachLayer(layer => {
-      const dn = layer.feature?.properties?.DN;
+      const dn = layer.feature?.properties?.DN ?? 1;
       if (dn === selectedEntity.dn) {
         layer.setStyle({
           weight: 4,
           opacity: 1,
-          fillOpacity: cuencasSpatialData ? 0.75 : 0.35,
+          fillOpacity: hasDataByType[selectedEntity.type] ? 0.75 : 0.35,
         });
         layer.bringToFront();
       }
