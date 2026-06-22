@@ -11,6 +11,7 @@ from app.services.auth import create_user, get_user_by_email
 from app.schemas.user import UserCreate
 from app.core.config import settings
 from app.models.parquet_file import ParquetFile
+from app.db.seed_zones import seed_zone_relations
 
 
 def _normalize_parquet_metadata(db) -> int:
@@ -84,6 +85,19 @@ def init_db():
             print(f"✓ Normalized metadata for {normalized_count} parquet file(s)")
         else:
             print("✓ Parquet metadata already normalized")
+
+        # Seed zone↔cell relations (cuenca/municipio/perimetro). Idempotent upsert.
+        zone_stats = seed_zone_relations(db)
+        if any(zone_stats.values()):
+            print(
+                "✓ Zone relations seeded: "
+                f"+{zone_stats['cells_added']} cells, "
+                f"+{zone_stats['zones_added']} zones, "
+                f"+{zone_stats['relations_added']} relations, "
+                f"~{zone_stats['relations_updated']} updated"
+            )
+        else:
+            print("✓ Zone relations already up to date")
     finally:
         db.close()
     
