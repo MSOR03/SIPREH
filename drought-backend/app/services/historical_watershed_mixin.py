@@ -20,7 +20,7 @@ from app.services.watershed_relations import (
     get_zone_cell_ids,
     get_zone_names,
 )
-from app.services.historical_spatial_mixin import _vectorized_colors
+from app.services.historical_spatial_mixin import _vectorized_colors, _vectorized_precip_colors
 
 
 class WatershedMixin:
@@ -192,7 +192,10 @@ class WatershedMixin:
         # dependa del rango de las zonas mostradas (que con valores casi uniformes
         # —p.ej. temperatura ~13.5 en todas las cuencas, o una sola zona en
         # municipio/perímetro— colapsaba a gris con la escala relativa).
+        is_precip = str(variable).strip().lower() == "precip"
         variable_scale = None if is_drought_index else self._get_scale_for_variable(variable, frequency)
+        if is_precip:
+            variable_scale = None
 
         if is_drought_index or variable_scale:
             temp_df = pd.DataFrame({"value": values_for_color})
@@ -203,8 +206,9 @@ class WatershedMixin:
             for i, c in enumerate(cuenca_values):
                 row = temp_df.iloc[i]
                 c["color"] = row.get("color", "#CCCCCC") if pd.notna(row.get("color")) else "#CCCCCC"
-                c["category"] = row.get("category") if pd.notna(row.get("category")) else None
-                c["severity"] = int(row["severity"]) if pd.notna(row.get("severity")) else None
+                if is_drought_index:
+                    c["category"] = row.get("category") if pd.notna(row.get("category")) else None
+                    c["severity"] = int(row["severity"]) if pd.notna(row.get("severity")) else None
         else:
             # Variables sin paleta absoluta (p.ej. balance hídrico): escala relativa.
             valid = values_for_color.dropna()
@@ -217,13 +221,12 @@ class WatershedMixin:
                     # sí hay dato. Centramos el rango para asignar el color medio.
                     vmin -= 0.5
                     vmax += 0.5
-                colors = _vectorized_colors(values_for_color, vmin, vmax)
+                colors = _vectorized_precip_colors(values_for_color, vmin, vmax) if is_precip else _vectorized_colors(values_for_color, vmin, vmax)
             else:
                 colors = pd.Series(["#CCCCCC"] * len(cuenca_values))
             for i, c in enumerate(cuenca_values):
                 c["color"] = colors.iloc[i]
-                c["category"] = None
-                c["severity"] = None
+                # Sin categorías/severidad para variables no índice
 
         return cuenca_values
 

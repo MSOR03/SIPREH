@@ -372,8 +372,15 @@ export default function MapArea({
           {isDualSpatialView ? (
             <div className="h-full grid grid-cols-1 xl:grid-cols-2 gap-3 p-3">
               <div className="relative rounded-xl border border-gray-300 dark:border-gray-700 overflow-hidden">
-                <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[1001] px-4 py-1.5 rounded-md bg-white/95 dark:bg-gray-800/95 border border-gray-200 dark:border-gray-700 text-sm md:text-base font-bold tracking-wide uppercase text-gray-700 dark:text-gray-200 text-center shadow-sm whitespace-nowrap">
-                  {dualSpatialMaps.left.title}
+                <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[1001] px-4 py-1.5 rounded-md bg-white/95 dark:bg-gray-800/95 border border-gray-200 dark:border-gray-700 text-center shadow-sm">
+                  <div className="text-sm md:text-base font-bold tracking-wide text-gray-700 dark:text-gray-200 whitespace-nowrap">
+                    {dualSpatialMaps.left.title}
+                  </div>
+                  {dualSpatialMaps.left.trainingLabel && (
+                    <div className="text-xs font-medium text-blue-600 dark:text-blue-400 mt-0.5 whitespace-nowrap">
+                      {dualSpatialMaps.left.trainingLabel}
+                    </div>
+                  )}
                 </div>
                 <div className="absolute bottom-2 left-2 z-[1001] w-64 max-w-[75%]">
                   <ContinuousMapLegend
@@ -381,7 +388,7 @@ export default function MapArea({
                     min={dualSpatialMaps.left.statistics?.min}
                     max={dualSpatialMaps.left.statistics?.max}
                     unit="mm"
-                    gradient="linear-gradient(to right, #0078e7, #00c5ff, #2bcf7f, #f5d142)"
+                    gradient="linear-gradient(to right, #f5d142, #2bcf7f, #00c5ff, #0078e7)"
                   />
                 </div>
                 <LeafletMap
@@ -416,8 +423,15 @@ export default function MapArea({
               </div>
 
               <div className="relative rounded-xl border border-gray-300 dark:border-gray-700 overflow-hidden">
-                <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[1001] px-4 py-1.5 rounded-md bg-white/95 dark:bg-gray-800/95 border border-gray-200 dark:border-gray-700 text-sm md:text-base font-bold tracking-wide uppercase text-gray-700 dark:text-gray-200 text-center shadow-sm whitespace-nowrap">
-                  {dualSpatialMaps.right.title}
+                <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[1001] px-4 py-1.5 rounded-md bg-white/95 dark:bg-gray-800/95 border border-gray-200 dark:border-gray-700 text-center shadow-sm">
+                  <div className="text-sm md:text-base font-bold tracking-wide text-gray-700 dark:text-gray-200 whitespace-nowrap">
+                    {dualSpatialMaps.right.title}
+                  </div>
+                  {dualSpatialMaps.right.trainingLabel && (
+                    <div className="text-xs font-medium text-blue-600 dark:text-blue-400 mt-0.5 whitespace-nowrap">
+                      {dualSpatialMaps.right.trainingLabel}
+                    </div>
+                  )}
                 </div>
                 <div className="absolute bottom-2 left-2 z-[1001] w-64 max-w-[75%]">
                   <ContinuousMapLegend
@@ -762,21 +776,19 @@ export default function MapArea({
                         />
                         <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate flex-1">{c.nombre}</span>
                         <span className="text-xs font-bold text-gray-900 dark:text-gray-100 tabular-nums">{c.value != null ? c.value.toFixed(3) : 'N/A'}</span>
-                        {c.category && <span className="text-[10px] text-gray-500 dark:text-gray-400 truncate max-w-[80px]">{c.category}</span>}
+                        {isDroughtIndex && c.category && <span className="text-[10px] text-gray-500 dark:text-gray-400 truncate max-w-[80px]">{c.category}</span>}
                       </div>
                     ))}
                   </div>
-                  {/* Color legend: drought index uses DroughtLegend, continuous uses gradient bar */}
-                  {isDroughtIndex && plotData.cuencasData.some(c => c.category) ? (
+                  {/* Leyenda: índices de sequía en categorías; variables climáticas en escala continua */}
+                  {isDroughtIndex && plotData.cuencasData.some(c => c.category && c.color) ? (
                     <DroughtLegend gridCells={plotData.cuencasData} />
                   ) : plotData.statistics && plotData.statistics.min != null && plotData.statistics.max != null ? (
-                    <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] text-gray-500 dark:text-gray-400 tabular-nums">{plotData.statistics.min.toFixed(2)}</span>
-                        <div className="flex-1 h-3 rounded" style={{ background: 'linear-gradient(to right, #0000ff, #00aaff, #00ff00, #ffff00, #ff0000)' }} />
-                        <span className="text-[10px] text-gray-500 dark:text-gray-400 tabular-nums">{plotData.statistics.max.toFixed(2)}</span>
-                      </div>
-                    </div>
+                    <VariableContinuousLegend
+                      gridCells={plotData.cuencasData}
+                      min={plotData.statistics.min}
+                      max={plotData.statistics.max}
+                    />
                   ) : null}
                   <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
                     <span className={`font-medium ${plotData.type === 'prediction-history-2d' ? 'text-purple-600 dark:text-purple-400' : plotData.type === 'prediction-2d' ? 'text-green-600 dark:text-green-400' : 'text-teal-600 dark:text-teal-400'}`}>Haz click en una cuenca del mapa para ver la serie de tiempo.</span>
@@ -828,8 +840,16 @@ export default function MapArea({
                     Los colores representan {isDroughtIndex ? 'las categorías de sequía' : 'los valores de la variable'}.
                     <span className="text-blue-600 dark:text-blue-400 font-medium"> Haz click en una celda para ver el detalle 1D.</span>
                   </p>
-                  {/* Leyenda de colores para índices de sequía — dinámica desde datos del backend */}
-                  {hasCategorizedCells && <DroughtLegend gridCells={plotData.gridCells} />}
+                  {/* Leyenda de colores: índices discretos; variables climáticas en escala continua */}
+                  {isDroughtIndex
+                    ? (hasCategorizedCells && <DroughtLegend gridCells={plotData.gridCells} />)
+                    : (plotData.statistics?.min != null && plotData.statistics?.max != null && (
+                        <VariableContinuousLegend
+                          gridCells={plotData.gridCells}
+                          min={plotData.statistics.min}
+                          max={plotData.statistics.max}
+                        />
+                      ))}
                 </div>
               </div>
             ) : (plotData.type === 'Serie de Tiempo' || plotData.type === '1D') && plotData.data ? (
@@ -950,6 +970,36 @@ const DroughtLegend = memo(function DroughtLegend({ gridCells }) {
             <span className="text-gray-700 dark:text-gray-300">{label}</span>
           </div>
         ))}
+      </div>
+    </div>
+  );
+});
+
+const VariableContinuousLegend = memo(function VariableContinuousLegend({ gridCells, min, max }) {
+  const colors = useMemo(() => {
+    const valid = (gridCells || [])
+      .filter((c) => Number.isFinite(c?.value) && typeof c?.color === 'string')
+      .sort((a, b) => a.value - b.value);
+
+    if (!valid.length) {
+      return ['#0000ff', '#00aaff', '#00ff00', '#ffff00', '#ff0000'];
+    }
+
+    const sampleAt = (q) => valid[Math.max(0, Math.min(valid.length - 1, Math.floor((valid.length - 1) * q)))]?.color;
+    return [sampleAt(0), sampleAt(0.25), sampleAt(0.5), sampleAt(0.75), sampleAt(1)].filter(Boolean);
+  }, [gridCells]);
+
+  const gradient = `linear-gradient(to right, ${colors.join(', ')})`;
+  const hasMin = Number.isFinite(min);
+  const hasMax = Number.isFinite(max);
+
+  return (
+    <div className="mt-4">
+      <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">Leyenda (escala continua):</p>
+      <div className="h-3 rounded border border-gray-300 dark:border-gray-600" style={{ background: gradient }}></div>
+      <div className="mt-1 flex items-center justify-between text-[10px] text-gray-600 dark:text-gray-400 tabular-nums">
+        <span>{hasMin ? min.toFixed(2) : 'N/A'}</span>
+        <span>{hasMax ? max.toFixed(2) : 'N/A'}</span>
       </div>
     </div>
   );

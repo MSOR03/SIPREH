@@ -196,6 +196,72 @@ const key = normalizeLegendLabel(categoryLabel);
 
   return null;
 }
+
+function formatLegendCategoryLabel(label) {
+  const text = String(label || '').trim();
+  if (!text) return 'Sin categoría';
+  return text
+    .split(/\s+/)
+    .map((part) => (part ? part.charAt(0).toUpperCase() + part.slice(1) : part))
+    .join(' ');
+}
+
+function formatLegendRangeForDisplay(rangeText) {
+  const text = String(rangeText || '').trim();
+  if (!text) return '';
+
+  const lessThanTo = text.match(/^<\s*(-?\d+(?:\.\d+)?)$/);
+  if (lessThanTo) return `menor a ${lessThanTo[1]}`;
+
+  const greaterEq = text.match(/^>=\s*(-?\d+(?:\.\d+)?)$/);
+  if (greaterEq) return `${greaterEq[1]} o más`;
+
+  return text.replace(/\s+a\s+<\s+/g, ' a ').replace(/\s+/g, ' ').trim();
+}
+
+function composeLegendEntryText(label, rangeText) {
+  const prettyLabel = formatLegendCategoryLabel(label);
+  const prettyRange = formatLegendRangeForDisplay(rangeText);
+  return prettyRange ? `${prettyLabel} (${prettyRange})` : prettyLabel;
+}
+
+function resolveVariableUnit(variableCode) {
+  const normalized = String(variableCode || '')
+    .trim()
+    .split(/\s*-\s*|\s+/)[0]
+    .toLowerCase();
+
+  if (normalized === 'precip' || normalized === 'pet') return 'mm';
+  if (normalized === 'tmin' || normalized === 'tmean' || normalized === 'tmax') return '°C';
+  return '';
+}
+
+function buildContinuousGradientFromCells(cells, fallbackColors = ['#94a3b8', '#2563eb']) {
+  const valid = (Array.isArray(cells) ? cells : [])
+    .filter((cell) => Number.isFinite(Number(cell?.value)) && typeof cell?.color === 'string')
+    .sort((a, b) => Number(a.value) - Number(b.value));
+
+  if (!valid.length) {
+    return [
+      { at: 0, color: fallbackColors[0] || '#94a3b8' },
+      { at: 1, color: fallbackColors[1] || '#2563eb' },
+    ];
+  }
+
+  const sampleAt = (q) => {
+    const index = Math.max(0, Math.min(valid.length - 1, Math.floor((valid.length - 1) * q)));
+    return valid[index]?.color || '#94a3b8';
+  };
+
+  return [
+    { at: 0, color: sampleAt(0) },
+    { at: 0.25, color: sampleAt(0.25) },
+    { at: 0.5, color: sampleAt(0.5) },
+    { at: 0.75, color: sampleAt(0.75) },
+    { at: 1, color: sampleAt(1) },
+  ];
+}
+
 function resolveDataKind(rawValue) {
   const value = String(rawValue || '').trim();
   const upper = value.toUpperCase();
@@ -1500,8 +1566,9 @@ function drawAnalysisTypeIndicator(ctx, plotData) {
   ctx.textAlign = 'left';
 }
 
-function drawPanelInstitutionalTitle(ctx, title, x, y, w) {
-  const h = 32;
+function drawPanelInstitutionalTitle(ctx, title, x, y, w, subtitle = null) {
+  const hasSubtitle = Boolean(subtitle);
+  const h = hasSubtitle ? 52 : 32;
   ctx.save();
   ctx.fillStyle = '#d1fae5';
   ctx.strokeStyle = '#065f46';
@@ -1512,7 +1579,12 @@ function drawPanelInstitutionalTitle(ctx, title, x, y, w) {
   ctx.fillStyle = '#065f46';
   ctx.font = 'bold 15px Arial';
   ctx.textAlign = 'center';
-  ctx.fillText(String(title || '').toUpperCase(), x + w / 2, y + 22);
+  ctx.fillText(String(title || ''), x + w / 2, y + 22);
+  if (hasSubtitle) {
+    ctx.font = 'bold 12px Arial';
+    ctx.fillStyle = '#1d4ed8';
+    ctx.fillText(String(subtitle), x + w / 2, y + 40);
+  }
   ctx.textAlign = 'left';
   ctx.restore();
 }
@@ -1970,7 +2042,7 @@ function drawGraticule(ctx, bounds, frame) {
     ctx.font = 'bold 12px Arial';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
-    ctx.fillText(text, x, y + 18); // +18px más abajo (antes +10)
+    ctx.fillText(text, x, y + 3); // subir un poco más las etiquetas de longitud
     ctx.restore();
   };
 
@@ -2351,18 +2423,20 @@ async function draw2DMap(ctx, plotData, analysisState) {
     ctx.fillText('Sistema de coordenadas: WGS84 (EPSG:4326)', bottomMetaBox.x + 360, metaTextY);
     ctx.restore();
 
-    const drawDualPanel = async (panel, title, panelPoints, legendConfig) => {
+    const drawDualPanel = async (panel, title, panelPoints, legendConfig, trainingLabel = null) => {
       ctx.save();
       ctx.fillStyle = '#f8fafc';
       ctx.strokeStyle = '#cbd5e1';
       drawCard(ctx, panel.x, panel.y, panel.w, panel.h, 14);
       ctx.restore();
 
-      drawPanelInstitutionalTitle(ctx, title, panel.x + 10, panel.y + 10, panel.w - 20);
+      drawPanelInstitutionalTitle(ctx, title, panel.x + 10, panel.y + 10, panel.w - 20, trainingLabel);
+
+      const titleBlockHeight = trainingLabel ? 52 : 32;
 
       const frame = {
         x: panel.x + 18,
-        y: panel.y + 54,
+        y: panel.y + 10 + titleBlockHeight + 12,
         w: panel.w - 36,
         h: panel.h - 82,
         pad: 18,
@@ -2419,24 +2493,25 @@ async function draw2DMap(ctx, plotData, analysisState) {
 
     await drawDualPanel(
       leftPanel,
-      plotData?.dualSpatialMaps?.left?.title || 'MEDIA',
+      plotData?.dualSpatialMaps?.left?.title || 'MEDIA DE PRECIPITACIÓN (mm)',
       leftPoints,
       {
         title: 'Media',
         min: plotData?.dualSpatialMaps?.left?.statistics?.min,
         max: plotData?.dualSpatialMaps?.left?.statistics?.max,
         gradient: [
-          { at: 0, color: '#0078e7' },
-          { at: 0.33, color: '#00c5ff' },
-          { at: 0.66, color: '#2bcf7f' },
-          { at: 1, color: '#f5d142' },
+          { at: 0, color: '#f5d142' },
+          { at: 0.33, color: '#2bcf7f' },
+          { at: 0.66, color: '#00c5ff' },
+          { at: 1, color: '#0078e7' },
         ],
-      }
+      },
+      plotData?.dualSpatialMaps?.left?.trainingLabel || null
     );
 
     await drawDualPanel(
       rightPanel,
-      plotData?.dualSpatialMaps?.right?.title || 'ANOMALIA',
+      plotData?.dualSpatialMaps?.right?.title || 'ANOMALIA DE PRECIPITACIÓN (mm)',
       rightPoints,
       {
         title: 'Anomalia',
@@ -2448,7 +2523,8 @@ async function draw2DMap(ctx, plotData, analysisState) {
           { at: 0.5, color: '#e8e8e8' },
           { at: 1, color: '#1f4dbf' },
         ],
-      }
+      },
+      plotData?.dualSpatialMaps?.right?.trainingLabel || null
     );
 
     return;
@@ -2550,6 +2626,8 @@ async function draw2DMap(ctx, plotData, analysisState) {
     .split(/\s*-\s*|\s+/)[0]
     .toLowerCase();
   const legendFrequencyCode = resolvePrecipFrequencyCode(plotData, analysisState);
+  const isClimateVariableLegend = ['precip', 'tmin', 'tmean', 'tmax', 'pet'].includes(legendVariableCode);
+  const legendUnit = resolveVariableUnit(legendVariableCode);
 
   infoY = wrapText(
     ctx,
@@ -2618,7 +2696,41 @@ async function draw2DMap(ctx, plotData, analysisState) {
   ctx.fillText('LEYENDA', infoBoxX + 22, legendY);
   legendY += 28;
 
-  if (!groupedLegend.length) {
+  if (isClimateVariableLegend) {
+    const values = cells
+      .map((cell) => Number(cell?.value))
+      .filter((value) => Number.isFinite(value));
+    const minVal = values.length ? Math.min(...values) : null;
+    const maxVal = values.length ? Math.max(...values) : null;
+    const gradient = buildContinuousGradientFromCells(
+      cells,
+      legendVariableCode === 'precip' ? ['#dc2626', '#2563eb'] : undefined
+    );
+
+    legendY = drawDualLegendBar(ctx, {
+      x: infoBoxX + 22,
+      y: legendY,
+      w: infoBoxW - 44,
+      title: dataKind?.label || 'Escala continua',
+      min: minVal,
+      max: maxVal,
+      unit: legendUnit,
+      gradient,
+    });
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(30, 64, 175, 0.9)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.rect(infoBoxX + 22, legendY, 32, 18);
+    ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = '#334155';
+    ctx.font = '15px Arial';
+    ctx.fillText('Área de interés', infoBoxX + 64, legendY + 14);
+    legendY += 28;
+  } else if (!groupedLegend.length) {
+
     const values = cells
       .map((cell) => Number(cell?.value))
       .filter((value) => Number.isFinite(value));
@@ -2666,14 +2778,16 @@ async function draw2DMap(ctx, plotData, analysisState) {
         isIndex
           ? ''
           : (legendEntry.hasValue
-              ? legendEntry.min.toFixed(2) + ' a ' + legendEntry.max.toFixed(2)
+              ? (legendUnit
+                  ? legendEntry.min.toFixed(2) + ' a ' + legendEntry.max.toFixed(2) + ' ' + legendUnit
+                  : legendEntry.min.toFixed(2) + ' a ' + legendEntry.max.toFixed(2))
               : 'N/A')
       );
       ctx.fillStyle = legendEntry.color;
       ctx.fillRect(infoBoxX + 22, legendY, 32, 18);
       ctx.fillStyle = '#334155';
-      ctx.font = '13px Arial';
-      const rawText = rangeText ? (legendEntry.label + ': ' + rangeText) : legendEntry.label;
+      ctx.font = '15px Arial';
+      const rawText = composeLegendEntryText(legendEntry.label, rangeText);
       const safeText = fitLegendText(ctx, rawText, infoBoxW - 90);
       ctx.fillText(safeText, infoBoxX + 62, legendY + 14);
       legendY += rowStep;
@@ -2952,6 +3066,8 @@ async function draw2DWatershedMap(ctx, plotData, analysisState) {
   const legendFrequencyCode = resolvePrecipFrequencyCode(plotData, analysisState);
   const indexCode = String(dataKind?.code || legendVariableCode || '').trim().toUpperCase();
   const isIndex = METEOROLOGICAL_INDICES.has(indexCode) || HYDROLOGICAL_INDICES.has(indexCode);
+  const isClimateVariableLegend = ['precip', 'tmin', 'tmean', 'tmax', 'pet'].includes(legendVariableCode);
+  const legendUnit = resolveVariableUnit(legendVariableCode);
 
   const mapLegend = new Map();
   cuencasData.forEach((c) => {
@@ -2994,7 +3110,40 @@ async function draw2DWatershedMap(ctx, plotData, analysisState) {
   ctx.fillText('LEYENDA', infoBoxX + 22, legendY);
   legendY += 28;
 
-  if (groupedLegend.length) {
+  if (isClimateVariableLegend) {
+    const values = cuencasData
+      .map((item) => Number(item?.value))
+      .filter((value) => Number.isFinite(value));
+    const minVal = values.length ? Math.min(...values) : null;
+    const maxVal = values.length ? Math.max(...values) : null;
+    const gradient = buildContinuousGradientFromCells(
+      cuencasData,
+      legendVariableCode === 'precip' ? ['#dc2626', '#2563eb'] : undefined
+    );
+
+    const nextY = drawDualLegendBar(ctx, {
+      x: infoBoxX + 22,
+      y: legendY,
+      w: infoBoxW - 44,
+      title: dataKind?.label || 'Escala continua',
+      min: minVal,
+      max: maxVal,
+      unit: legendUnit,
+      gradient,
+    });
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(30, 64, 175, 0.9)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    const areaY = Math.min(nextY, legendBottomLimit - 20);
+    ctx.rect(infoBoxX + 22, areaY, 32, 18);
+    ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = '#334155';
+    ctx.font = '15px Arial';
+    ctx.fillText('Área de interés', infoBoxX + 64, areaY + 14);
+  } else if (groupedLegend.length) {
     let offsetY = legendY;
     const rowStep = 28;
     let hiddenCount = 0;
@@ -3010,13 +3159,17 @@ async function draw2DWatershedMap(ctx, plotData, analysisState) {
       const rangeText = fixedRangeText || (
         isIndex
           ? ''
-          : (legendEntry.hasValue ? legendEntry.min.toFixed(2) + ' a ' + legendEntry.max.toFixed(2) : 'N/A')
+          : (legendEntry.hasValue
+              ? (legendUnit
+                  ? legendEntry.min.toFixed(2) + ' a ' + legendEntry.max.toFixed(2) + ' ' + legendUnit
+                  : legendEntry.min.toFixed(2) + ' a ' + legendEntry.max.toFixed(2))
+              : 'N/A')
       );
       ctx.fillStyle = legendEntry.color;
       ctx.fillRect(infoBoxX + 22, offsetY, 32, 18);
       ctx.fillStyle = '#334155';
-      ctx.font = '13px Arial';
-      const legendText = rangeText ? (legendEntry.label + ': ' + rangeText) : legendEntry.label;
+      ctx.font = '15px Arial';
+      const legendText = composeLegendEntryText(legendEntry.label, rangeText);
       ctx.fillText(fitLegendText(ctx, legendText, infoBoxW - 90), infoBoxX + 62, offsetY + 14);
       offsetY += rowStep;
     }
