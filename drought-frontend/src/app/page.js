@@ -26,7 +26,7 @@ const isZoneEntity = (e) => Boolean(e) && ZONE_ENTITY_TYPES.includes(e.type);
 function getFileResolution(f) {
   const dsResMap = { ERA5: 0.25, IMERG: 0.1, ERA5_LAND: 0.1, CHIRPS: 0.05 };
   if (f.data_source && dsResMap[f.data_source] != null) return dsResMap[f.data_source];
-  const lvlResMap = { LOW: 0.25, MEDIUM: 0.1, HIGH: 0.05 };
+  const lvlResMap = { LOW: 0.25, MEDIUM: 0.1, MEDIUM_ERA5LAND: 0.1, HIGH: 0.05 };
   if (f.resolution_level && lvlResMap[f.resolution_level] != null) return lvlResMap[f.resolution_level];
   // Filename-based fallback — check era5_land/era5land BEFORE generic era5
   const nm = (f.filename || '').toLowerCase();
@@ -409,8 +409,13 @@ export default function Home() {
           return;
         }
         
-        const fileResolution = file.resolution;
-        
+        // No usar el raw file.resolution: en algunos archivos (p.ej. ERA5_LAND)
+        // el metadata puede traerlo mal (0.25 en vez de 0.1), lo que hace que el
+        // mapa dibuje celdas demasiado grandes y se solapen. Usar la misma lógica
+        // que la grilla interactiva (data_source/resolution_level), con la
+        // resolución seleccionada por el usuario como respaldo.
+        const fileResolution = getFileResolution(file) ?? targetResolution;
+
         // Llamar API para datos espaciales
         const response = await historicalApi.getSpatialData({
           fileId: file.file_id,
@@ -1345,12 +1350,19 @@ export default function Home() {
 
       const SOURCE_BY_RES = { 0.25: 'ERA5', 0.1: 'IMERG', 0.05: 'CHIRPS' };
       const dataSource = plotData.dataSource || SOURCE_BY_RES[analysisState.spatialResolution] || analysisState.dataSource || 'CHIRPS';
-      const sourceResMap = { ERA5: 0.25, IMERG: 0.1, CHIRPS: 0.05 };
+      const sourceResMap = { ERA5: 0.25, ERA5_LAND: 0.1, IMERG: 0.1, CHIRPS: 0.05 };
       const targetResolution = sourceResMap[dataSource] || 0.05;
 
       const files = await historicalApi.getFiles();
       const historicalFiles = files.filter(f => !f.dataset_type || f.dataset_type === 'historical');
-      const file = historicalFiles.find(f => Math.abs((f.resolution || 0.1) - targetResolution) < 0.01);
+      // Usar getFileResolution (no el raw f.resolution, que puede venir mal en
+      // prod). A 0.1° coexisten IMERG y ERA5_LAND: desambiguar por data_source.
+      const file = historicalFiles.find(f => {
+        const eff = getFileResolution(f);
+        if (eff == null || Math.abs(eff - targetResolution) >= 0.01) return false;
+        if (Math.abs(targetResolution - 0.1) < 0.001 && f.data_source && dataSource && f.data_source !== dataSource) return false;
+        return true;
+      });
       if (!file) return;
 
       showInfo(`Consultando serie temporal para ${zoneLabelSingular.toLowerCase()} ${entity.layer}...`, 'Cargando');
@@ -1592,7 +1604,14 @@ export default function Home() {
         const resolution = plotData.resolution || 0.05;
         const files = await historicalApi.getFiles();
         const historicalOnly = files.filter(f => !f.dataset_type || f.dataset_type === 'historical');
-        const file = historicalOnly.find(f => Math.abs((f.resolution || 0.1) - resolution) < 0.01);
+        // Usar getFileResolution (no el raw f.resolution, que puede venir mal en
+        // prod). A 0.1° coexisten IMERG y ERA5_LAND: desambiguar por data_source.
+        const file = historicalOnly.find(f => {
+          const eff = getFileResolution(f);
+          if (eff == null || Math.abs(eff - resolution) >= 0.01) return false;
+          if (Math.abs(resolution - 0.1) < 0.001 && f.data_source && plotData.dataSource && f.data_source !== plotData.dataSource) return false;
+          return true;
+        });
         if (!file) { showError(`No se encontro archivo para resolucion ${resolution}°`, 'Error'); return; }
 
         showInfo(`Consultando serie 1D para celda ${cellId}...`, 'Cargando');
