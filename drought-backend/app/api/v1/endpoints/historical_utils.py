@@ -37,6 +37,10 @@ def infer_resolution_from_filename(filename: Optional[str]) -> Optional[float]:
         return 0.05
     if "imerg" in name:
         return 0.10
+    # Comprobar era5_land / era5land ANTES del genérico era5
+    # ("era5_land" contiene la subcadena "era5", así que el orden importa)
+    if "era5_land" in name or "era5land" in name:
+        return 0.10
     if "era5" in name:
         return 0.25
     return None
