@@ -16,21 +16,24 @@
 \contentsline {section}{\numberline {3.3}Base de datos}{11}{section.3.3}%
 \contentsline {chapter}{\numberline {4}Arquitectura del Sistema}{12}{chapter.4}%
 \contentsline {section}{\numberline {4.1}Descripción y estructura del SIPREH}{12}{section.4.1}%
+\contentsline {section}{\numberline {4.2}Relaciones geográficas entre celdas y zonas}{13}{section.4.2}%
 \contentsline {chapter}{\numberline {5}Principales Funcionalidades del Sistema}{14}{chapter.5}%
 \contentsline {section}{\numberline {5.1}Datos históricos}{14}{section.5.1}%
 \contentsline {section}{\numberline {5.2}Predicción actual}{15}{section.5.2}%
+\contentsline {paragraph}{Cómo se calcula.}{15}{section*.7}%
+\contentsline {paragraph}{De dónde sale la climatología.}{15}{section*.8}%
 \contentsline {section}{\numberline {5.3}Predicción histórica}{16}{section.5.3}%
 \contentsline {section}{\numberline {5.4}Administración}{16}{section.5.4}%
-\contentsline {paragraph}{Convención de nombre de archivo.}{16}{section*.8}%
-\contentsline {paragraph}{Pasos para cargar un nuevo archivo.}{17}{section*.9}%
-\contentsline {paragraph}{Actualización de un archivo existente.}{17}{section*.10}%
-\contentsline {chapter}{\numberline {6}Funcionamiento del Sistema}{19}{chapter.6}%
-\contentsline {section}{\numberline {6.1}Flujograma de acceso del usuario}{19}{section.6.1}%
-\contentsline {section}{\numberline {6.2}Flujograma de acceso del administrador}{20}{section.6.2}%
-\contentsline {chapter}{\numberline {7}Estructura del Proyecto}{21}{chapter.7}%
-\contentsline {section}{\numberline {7.1}Estructura del frontend}{21}{section.7.1}%
-\contentsline {section}{\numberline {7.2}Estructura del backend}{22}{section.7.2}%
-\contentsline {chapter}{\numberline {8}Despliegues}{24}{chapter.8}%
-\contentsline {section}{\numberline {8.1}Despliegue frontend}{24}{section.8.1}%
-\contentsline {section}{\numberline {8.2}Despliegue backend}{24}{section.8.2}%
-\contentsline {section}{\numberline {8.3}Despliegue base de datos}{26}{section.8.3}%
+\contentsline {paragraph}{Convención de nombre de archivo.}{17}{section*.10}%
+\contentsline {paragraph}{Pasos para cargar un nuevo archivo.}{17}{section*.11}%
+\contentsline {paragraph}{Actualización de un archivo existente.}{18}{section*.12}%
+\contentsline {chapter}{\numberline {6}Funcionamiento del Sistema}{20}{chapter.6}%
+\contentsline {section}{\numberline {6.1}Flujograma de acceso del usuario}{20}{section.6.1}%
+\contentsline {section}{\numberline {6.2}Flujograma de acceso del administrador}{21}{section.6.2}%
+\contentsline {chapter}{\numberline {7}Estructura del Proyecto}{22}{chapter.7}%
+\contentsline {section}{\numberline {7.1}Estructura del frontend}{22}{section.7.1}%
+\contentsline {section}{\numberline {7.2}Estructura del backend}{23}{section.7.2}%
+\contentsline {chapter}{\numberline {8}Despliegues}{25}{chapter.8}%
+\contentsline {section}{\numberline {8.1}Despliegue frontend}{25}{section.8.1}%
+\contentsline {section}{\numberline {8.2}Despliegue backend}{26}{section.8.2}%
+\contentsline {section}{\numberline {8.3}Almacenamiento y base de datos}{28}{section.8.3}%

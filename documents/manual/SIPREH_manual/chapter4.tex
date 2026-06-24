@@ -93,7 +93,7 @@ La Figura~\ref{fig:arquitectura_sipreh} muestra el flujo de datos desde las fuen
 \begin{scope}[on background layer]
   \node[band, fit=(mapa)(charts)(admpan)] (b4) {};
 \end{scope}
-\node[btitle] at (b4.north west) {Frontend --- Next.js 14 · React 18};
+\node[btitle] at (b4.north west) {Frontend --- Next.js 16 · React 18};
 
 %% Flechas R3 → R4 (apibox → tres componentes frontend)
 %% Bus horizontal a y≈-7.15 (por debajo del band backend)
@@ -131,6 +131,34 @@ El flujo de datos dentro del sistema sigue estos pasos:
     \item \textbf{Visualización:} Next.js consume la API y renderiza el mapa (Leaflet.js), las gráficas 1D (uPlot) y las gráficas de predicción (Canvas 2D).
 \end{enumerate}
 
+\section{Relaciones geográficas entre celdas y zonas}
+\label{sec:relaciones_geograficas}
+
+Muchas consultas de SIPREH no se piden por celda, sino por \textbf{zona}: una cuenca, un municipio o un perímetro urbano. Para responderlas, el sistema necesita saber qué celdas caen dentro de cada zona y en qué proporción. Esa correspondencia es \emph{metadata geográfica} y, por eso, vive en la base de datos relacional, no en la capa de datos científicos.
+
+El modelo es una relación muchos-a-muchos normalizada, repartida en tres tablas:
+
+\begin{center}
+\small
+\begin{tabular}{@{}lp{8.6cm}@{}}
+\toprule
+\textbf{Tabla} & \textbf{Qué guarda} \\
+\midrule
+\texttt{grid\_cells}         & Las celdas del grid, identificadas por su fuente/resolución (ERA5, ERA5-Land, IMERG o CHIRPS) y su \texttt{cell\_id} (\texttt{lon\_lat}). \\
+\texttt{spatial\_zones}      & Las entidades espaciales: cuenca, municipio o perímetro, cada una con su tipo, su identificador y su nombre. \\
+\texttt{zone\_cell\_relations}& La unión entre ambas. Cada fila enlaza una zona con una celda y guarda el \textbf{área de intersección} (\texttt{area\_m2}) como peso de esa unión. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
 \begin{definition}
-\textbf{Agregación por cuenca:} el backend pondera el aporte de cada celda por la fracción de su área que intersecta el polígono de la cuenca. Las fracciones se precomputan al iniciar el sistema, por lo que la agregación en tiempo de consulta se reduce a un promedio ponderado.
+\textbf{Agregación por zona:} el valor de una zona es el promedio de sus celdas ponderado por el área que cada celda aporta a la zona:
+\[
+\text{valor}_{\text{zona}} = \frac{\sum_c \text{valor}_c \times \text{área}_c}{\sum_c \text{área}_c}
+\]
+Como las áreas de intersección están precalculadas y almacenadas en \texttt{zone\_cell\_relations}, la agregación en tiempo de consulta se reduce a esta suma ponderada, sin recomputar geometría.
 \end{definition}
+
+\begin{remark}
+Guardar las relaciones en tablas (en lugar de calcularlas al vuelo en cada petición) tiene dos ventajas: las consultas por zona son inmediatas y el cruce geométrico ---costoso--- se hace una sola vez. Añadir un nuevo conjunto de zonas se reduce a poblar \texttt{spatial\_zones} y \texttt{zone\_cell\_relations} mediante el sembrado correspondiente, de forma idempotente y sin tocar la interfaz.
+\end{remark}

@@ -1,187 +1,182 @@
 \chapter{Despliegues}
 \label{ch:despliegues}
 
-Este capítulo describe los procedimientos recomendados para el despliegue de cada componente del SIPREH en entornos de producción: el frontend, el backend y la base de datos. Se presentan tanto las opciones de despliegue en la nube como las instrucciones para entornos locales de desarrollo.
+SIPREH se despliega siguiendo la misma separación que define su arquitectura: el frontend y el backend viven en plataformas distintas y se comunican únicamente a través de la API HTTP. En la práctica esto significa dos despliegues independientes que pueden actualizarse por separado:
+
+\begin{itemize}
+    \item El \textbf{frontend} se publica como sitio estático en \textbf{GitHub Pages}.
+    \item El \textbf{backend} corre como servicio web en \textbf{Railway}, acompañado de la base de datos relacional y del bucket de objetos en Cloudflare R2.
+\end{itemize}
+
+Este capítulo describe cómo funciona cada despliegue en producción y qué se necesita para reproducirlo.
 
 \section{Despliegue frontend}
 \label{sec:deploy_frontend}
 
-El frontend de SIPREH es una aplicación Next.js 14, compatible con despliegue en cualquier plataforma que soporte Node.js o exportación estática.
+El frontend es una aplicación \textbf{Next.js 16} que, para producción, se compila como \textbf{exportación estática}. En lugar de un servidor Node.js permanente, el resultado es una carpeta \texttt{out/} con HTML, CSS y JavaScript que cualquier hosting de archivos estáticos puede servir. GitHub Pages cumple ese rol sin costo adicional.
 
-\subsection*{Opción recomendada: Vercel}
+\subsection*{Cómo se publica}
 
-Vercel es la plataforma de referencia para aplicaciones Next.js. El despliegue se realiza en tres pasos:
+El despliegue está automatizado con GitHub Actions. El flujo vive en \texttt{.github/workflows/deploy.yml} y se dispara con cada \textit{push} a la rama \texttt{main}. No hay que ejecutar nada a mano: basta con fusionar a \texttt{main}.
+
+El flujo realiza dos trabajos encadenados:
 
 \begin{enumerate}
-    \item Vincular el repositorio del frontend a un proyecto de Vercel desde \href{https://vercel.com/new}{vercel.com/new}.
-    \item Configurar las variables de entorno en el panel de Vercel:
-\begin{verbatim}
-NEXT_PUBLIC_API_URL=https://api.sipreh.ejemplo.co/api/v1
-\end{verbatim}
-    \item Vercel detecta automáticamente el framework Next.js, ejecuta \texttt{npm run build} y despliega el resultado. Cada \textit{push} a la rama principal desencadena un redespliegue automático.
+    \item \textbf{Build.} Instala las dependencias del frontend con \texttt{npm ci}, compila la exportación estática con \texttt{npm run build} y sube la carpeta \texttt{out/} como artefacto de Pages.
+    \item \textbf{Deploy.} Publica ese artefacto en el entorno \texttt{github-pages}, que queda disponible en la URL del proyecto.
 \end{enumerate}
 
-\subsection*{Opción alternativa: servidor propio con Docker}
+\subsection*{La pieza clave: a qué backend apunta el sitio}
+
+Como el sitio es estático, la dirección del backend se ``hornea'' en el código \textbf{durante el build}, no en tiempo de ejecución. Por eso la variable que la define debe estar disponible en el momento de compilar:
 
 \begin{verbatim}
-# Construir la imagen del frontend
-docker build -t sipreh-frontend .
-
-# Ejecutar el contenedor
-docker run -p 3000:3000 \
-  -e NEXT_PUBLIC_API_URL=https://api.sipreh.ejemplo.co/api/v1 \
-  sipreh-frontend
+NEXT_PUBLIC_API_URL=https://<tu-backend>.up.railway.app/api/v1
 \end{verbatim}
 
+En el flujo de GitHub Actions, este valor se inyecta desde una \textit{variable de repositorio} llamada \texttt{RENDER\_BACKEND\_URL}. Para cambiar de backend (por ejemplo, al migrar de entorno), se edita esa variable en \texttt{Settings $\to$ Secrets and variables $\to$ Actions} del repositorio y se vuelve a desplegar.
+
 \begin{remark}
-En producción, se recomienda ubicar un proxy inverso (Nginx o Caddy) frente al contenedor Next.js para gestionar los certificados TLS, la compresión de respuestas y el caché de activos estáticos.
+Como la URL del backend queda fijada en el build, un cambio en \texttt{RENDER\_BACKEND\_URL} solo surte efecto tras un nuevo despliegue. Volver a ejecutar el flujo (o hacer un \textit{push} a \texttt{main}) regenera el sitio con la nueva dirección.
 \end{remark}
+
+\subsection*{El detalle del \texttt{basePath}}
+
+Un sitio de GitHub Pages de proyecto no se sirve en la raíz del dominio, sino bajo una subruta con el nombre del repositorio (por ejemplo, \texttt{https://<organización>.github.io/SIPREH/}). Si la aplicación asumiera que vive en la raíz, las imágenes y los enlaces internos se romperían.
+
+Para evitarlo, \texttt{next.config.mjs} detecta la variable \texttt{GITHUB\_ACTIONS} (que GitHub define automáticamente en cada ejecución) y, solo en ese caso, configura \texttt{basePath} y \texttt{assetPrefix} con el nombre del repositorio. En desarrollo local esa variable no existe, así que la aplicación funciona en \texttt{localhost:3000} sin prefijo y sin cambios.
+
+\begin{example}
+Comportamiento según el entorno, controlado por una sola condición en \texttt{next.config.mjs}:
+\begin{verbatim}
+# Local (GITHUB_ACTIONS no definida)
+http://localhost:3000/
+
+# GitHub Pages (GITHUB_ACTIONS=true)
+https://<organización>.github.io/SIPREH/
+\end{verbatim}
+\end{example}
 
 \section{Despliegue backend}
 \label{sec:deploy_backend}
 
-El backend es una aplicación FastAPI + Uvicorn. Se distribuye como imagen Docker para facilitar la reproducibilidad del entorno.
+El backend es una aplicación \textbf{FastAPI + Uvicorn} que se despliega en \textbf{Railway}. Railway construye el servicio directamente desde el repositorio y lo mantiene en línea, exponiéndolo en una URL pública del tipo \texttt{https://<servicio>.up.railway.app}.
 
-\subsection*{Variables de entorno requeridas}
+\subsection*{Modo producción}
+
+El punto de entrada \texttt{run.py} decide automáticamente si está en producción. Cuando detecta la variable \texttt{RAILWAY\_ENVIRONMENT} (que Railway inyecta sola) o \texttt{RENDER}, o cuando \texttt{DEBUG} no está definida, desactiva la recarga automática de código y escucha en el puerto que la plataforma indique mediante la variable \texttt{PORT}. En desarrollo local, en cambio, la recarga queda activa para agilizar el trabajo.
+
+\begin{remark}
+No es necesario configurar el puerto manualmente en Railway: la plataforma asigna \texttt{PORT} y \texttt{run.py} la respeta. Tampoco se necesita un \texttt{Procfile} ni un servidor de procesos externo; Uvicorn es el servidor de la aplicación.
+\end{remark}
+
+\subsection*{Variables de entorno}
+
+Toda la configuración se carga desde variables de entorno (en local, desde un archivo \texttt{.env}; en Railway, desde el panel del servicio). La gran mayoría son opcionales y tienen valores por defecto razonables: el backend arranca aunque falten R2, Redis o Groq, degradándose con elegancia. Las relevantes para un despliegue completo son:
 
 \begin{verbatim}
-# Base de datos
-DATABASE_URL=postgresql://user:password@db:5432/sipreh
+# Base de datos relacional (metadatos, usuarios, registro de archivos)
+DATABASE_URL=postgresql://user:password@host:5432/sipreh
 
-# Almacenamiento R2
-R2_ENDPOINT_URL=https://<account_id>.r2.cloudflarestorage.com
-R2_ACCESS_KEY_ID=<clave_de_acceso>
-R2_SECRET_ACCESS_KEY=<clave_secreta>
-R2_BUCKET_NAME=sipreh-data
+# Seguridad
+SECRET_KEY=<clave_secreta_larga_y_aleatoria>
+BACKEND_CORS_ORIGINS=["https://<organización>.github.io"]
 
-# Autenticación JWT
-SECRET_KEY=<clave_secreta_aleatoria_256_bits>
-ACCESS_TOKEN_EXPIRE_MINUTES=60
-REFRESH_TOKEN_EXPIRE_DAYS=30
+# Almacenamiento de objetos (Cloudflare R2, compatible con S3)
+CLOUD_STORAGE_PROVIDER=cloudflare-r2
+CLOUD_STORAGE_ENDPOINT=https://<account_id>.r2.cloudflarestorage.com
+CLOUD_STORAGE_ACCOUNT_ID=<account_id>
+CLOUD_STORAGE_ACCESS_KEY=<clave_de_acceso>
+CLOUD_STORAGE_SECRET_KEY=<clave_secreta>
+CLOUD_STORAGE_BUCKET=drought-data
+CLOUD_STORAGE_REGION=auto
 
-# Caché Redis
-REDIS_URL=redis://redis:6379/0
+# Caché de resultados (opcional pero muy recomendable)
+REDIS_URL=redis://<host>:6379/0
 
-# IA (opcional)
+# Resúmenes con IA (opcional)
 GROQ_API_KEY=<clave_groq>
 
-# Almacenamiento en disco
-LOCAL_PARQUET_CACHE_DIR=/data/parquet_cache
-LOCAL_CACHE_MAX_GB=10
-\end{verbatim}
-
-\subsection*{Despliegue con Docker Compose}
-
-El archivo \texttt{docker-compose.yml} del repositorio orquesta el backend junto con Redis y, opcionalmente, PostgreSQL:
-
-\begin{verbatim}
-version: "3.9"
-services:
-  backend:
-    build: .
-    ports:
-      - "8000:8000"
-    env_file: .env
-    volumes:
-      - parquet_cache:/data/parquet_cache
-    depends_on:
-      - redis
-      - db
-
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-
-  db:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: sipreh
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-
-volumes:
-  parquet_cache:
-  pgdata:
-\end{verbatim}
-
-Para iniciar todos los servicios:
-
-\begin{verbatim}
-docker compose up -d
+# Usuario administrador inicial
+ADMIN_EMAIL=admin@sipreh.co
+ADMIN_PASSWORD=<contraseña_inicial>
 \end{verbatim}
 
 \begin{remark}
-La primera vez que el backend se inicia, ejecuta automáticamente las migraciones de base de datos (creación de tablas) mediante Alembic. No es necesario ejecutar migraciones manualmente en el primer despliegue.
+\texttt{BACKEND\_CORS\_ORIGINS} debe incluir el dominio de GitHub Pages desde el que el frontend hace las peticiones; de lo contrario el navegador bloqueará las respuestas por política de CORS. Es el ajuste que más suele olvidarse al conectar ambos despliegues por primera vez.
 \end{remark}
 
-\subsection*{Verificación del despliegue}
+\subsection*{Inicialización de la base de datos}
 
-Una vez levantado el backend, la documentación interactiva de la API está disponible en:
+La primera vez que se prepara un entorno, se ejecuta \texttt{python init\_db.py}. Este script crea las tablas, da de alta el usuario administrador definido por \texttt{ADMIN\_EMAIL}/\texttt{ADMIN\_PASSWORD} y normaliza metadatos antiguos. El esquema se genera directamente con SQLAlchemy (\texttt{create\_all}); el proyecto no usa migraciones Alembic, de modo que para un primer despliegue basta con este paso.
+
+\subsection*{Verificación}
+
+Una vez en línea, la API publica su documentación interactiva, útil para comprobar que el servicio responde:
 
 \begin{itemize}
-    \item \texttt{http://localhost:8000/docs} --- Swagger UI (interfaz de prueba interactiva).
-    \item \texttt{http://localhost:8000/redoc} --- ReDoc (documentación de referencia).
-    \item \texttt{http://localhost:8000/api/v1/historical/catalog} --- Catálogo de datos disponibles (requiere autenticación).
+    \item \texttt{/docs} --- Swagger UI (interfaz de prueba interactiva).
+    \item \texttt{/redoc} --- ReDoc (documentación de referencia).
+    \item \texttt{/api/v1/historical/catalog} --- catálogo de datos disponibles (requiere autenticación).
 \end{itemize}
 
-\section{Despliegue base de datos}
+\section{Almacenamiento y base de datos}
 \label{sec:deploy_db}
 
-SIPREH utiliza dos sistemas de persistencia con requisitos de despliegue independientes.
+SIPREH separa deliberadamente dos tipos de almacenamiento: la base de datos relacional, que guarda solo metadatos, y el bucket de objetos, que guarda los datos científicos pesados. Cada uno se despliega de forma distinta.
 
 \subsection*{Base de datos relacional}
 
+Contiene los metadatos del sistema: usuarios, el registro de archivos Parquet y las relaciones geográficas entre celdas y zonas. Es liviana, y por eso su despliegue es sencillo:
+
 \begin{itemize}
-    \item \textbf{Desarrollo local:} SQLite no requiere instalación adicional. El archivo de base de datos se crea automáticamente en la ruta especificada por \texttt{DATABASE\_URL} al iniciar el backend.
-    \item \textbf{Producción:} Se recomienda PostgreSQL 15 o superior, alojado en un servicio gestionado (Supabase, Neon, AWS RDS, Railway) o en el mismo servidor mediante la imagen Docker \texttt{postgres:16-alpine}.
+    \item \textbf{Desarrollo:} SQLite, sin instalación. El archivo se crea solo al iniciar el backend, en la ruta de \texttt{DATABASE\_URL}.
+    \item \textbf{Producción:} PostgreSQL, idealmente como servicio gestionado. Railway ofrece PostgreSQL como complemento del mismo proyecto, lo que mantiene backend y base de datos juntos.
 \end{itemize}
 
 \begin{example}
-Cadena de conexión para distintos entornos:
+Una misma variable cubre ambos entornos:
 \begin{verbatim}
 # SQLite (desarrollo local)
-DATABASE_URL=sqlite:///./sipreh.db
+DATABASE_URL=sqlite:///./droughtmonitor.db
 
-# PostgreSQL (producción)
-DATABASE_URL=postgresql://sipreh_user:password@db.host:5432/sipreh
+# PostgreSQL (producción, p. ej. en Railway)
+DATABASE_URL=postgresql://sipreh_user:password@host:5432/sipreh
 \end{verbatim}
 \end{example}
 
 \subsection*{Almacenamiento de objetos Cloudflare R2}
 
-El bucket R2 almacena todos los archivos Parquet de datos. Para configurarlo:
+El bucket R2 guarda todos los archivos Parquet con los datos hidrometeorológicos. La configuración inicial es:
 
 \begin{enumerate}
-    \item Crear una cuenta en \href{https://www.cloudflare.com/}{Cloudflare} y activar el servicio R2 en el dashboard.
-    \item Crear un bucket con el nombre configurado en \texttt{R2\_BUCKET\_NAME} (por ejemplo, \texttt{sipreh-data}).
-    \item Crear un token de API R2 con permisos de lectura y escritura sobre el bucket.
-    \item Configurar las variables \texttt{R2\_ENDPOINT\_URL}, \texttt{R2\_ACCESS\_KEY\_ID} y \texttt{R2\_SECRET\_ACCESS\_KEY} en el archivo \texttt{.env} del backend.
-    \item Verificar la conectividad ejecutando la sincronización desde el panel de administración de SIPREH.
+    \item Crear una cuenta en \href{https://www.cloudflare.com/}{Cloudflare} y activar R2 desde el panel.
+    \item Crear un bucket con el nombre que usará \texttt{CLOUD\_STORAGE\_BUCKET} (por ejemplo, \texttt{drought-data}).
+    \item Generar un token de API de R2 con permisos de lectura y escritura sobre ese bucket.
+    \item Llevar las credenciales a las variables \texttt{CLOUD\_STORAGE\_*} del backend.
+    \item Probar la conexión ejecutando la sincronización desde el panel de administración de SIPREH.
 \end{enumerate}
 
 \begin{remark}
-Cloudflare R2 no cobra costos de egreso (\textit{egress}) para transferencias hacia servidores Cloudflare Workers ni hacia Internet, a diferencia de Amazon S3. Esto lo hace especialmente ventajoso para el patrón de acceso de SIPREH, donde los archivos Parquet (típicamente de 100 MB a varios GB) se descargan desde el bucket con cada nuevo despliegue o al recibir la primera petición sobre un archivo.
+A diferencia de Amazon S3, Cloudflare R2 no cobra por egreso (\textit{egress}). Esto encaja con el patrón de acceso de SIPREH, donde los archivos Parquet (de 100 MB a varios GB) se descargan desde el bucket en el primer acceso o tras un nuevo despliegue.
 \end{remark}
 
 \begin{definition}
-\textbf{Egress} (en almacenamiento en la nube): transferencia de datos desde el proveedor de nube hacia el exterior (Internet u otro proveedor). Muchos servicios de almacenamiento como Amazon S3 o Google Cloud Storage cobran por GB de egreso, lo que puede representar un costo significativo para aplicaciones que sirven archivos de datos grandes frecuentemente.
+\textbf{Egress} (en almacenamiento en la nube): transferencia de datos desde el proveedor hacia el exterior. Servicios como Amazon S3 o Google Cloud Storage cobran por GB de egreso, un costo que puede crecer rápido en aplicaciones que sirven archivos de datos grandes con frecuencia.
 \end{definition}
 
-\subsection*{Resumen de requisitos de infraestructura}
+\subsection*{Resumen de infraestructura}
 
 \begin{center}
 \begin{tabular}{@{}llll@{}}
 \toprule
-\textbf{Componente} & \textbf{Entorno dev} & \textbf{Entorno prod} & \textbf{Mínimo recomendado} \\
+\textbf{Componente} & \textbf{Entorno dev} & \textbf{Entorno prod} & \textbf{Plataforma} \\
 \midrule
-Frontend       & \texttt{localhost:3000} & Vercel / Nginx         & 512 MB RAM, 1 vCPU \\
-Backend        & \texttt{localhost:8000} & Docker + proxy inverso & 2 GB RAM, 2 vCPU \\
-Redis          & \texttt{localhost:6379} & Redis gestionado       & 256 MB RAM \\
-PostgreSQL     & SQLite                  & PostgreSQL 15+         & 1 GB RAM, 1 vCPU \\
-Parquet cache  & Disco local             & Volumen Docker / NFS   & 10 GB disco SSD \\
-Objetos R2     & Bucket de prueba        & Bucket R2 producción   & Sin límite práctico \\
+Frontend       & \texttt{localhost:3000} & Sitio estático        & GitHub Pages \\
+Backend        & \texttt{localhost:8000} & Servicio web FastAPI  & Railway \\
+Base relacional& SQLite                  & PostgreSQL 15+        & Railway \\
+Caché          & \texttt{localhost:6379} & Redis gestionado      & Railway / externo \\
+Datos Parquet  & Caché en disco local    & Bucket de objetos     & Cloudflare R2 \\
 \bottomrule
 \end{tabular}
 \end{center}
