@@ -362,6 +362,8 @@ def check_files_integrity(
                         data_source = "IMERG"
                     elif "chirps" in nm_ci:
                         data_source = "CHIRPS"
+                    elif "era5_land" in nm_ci or "era5land" in nm_ci:
+                        data_source = "ERA5_LAND"
                     elif "era5" in nm_ci:
                         data_source = "ERA5"
 
@@ -451,6 +453,8 @@ def list_available_files(
             return "IMERG"
         if "chirps" in nm:
             return "CHIRPS"
+        if "era5_land" in nm or "era5land" in nm:
+            return "ERA5_LAND"
         if "era5" in nm:
             return "ERA5"
         return None
