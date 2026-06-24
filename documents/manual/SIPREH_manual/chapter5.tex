@@ -31,9 +31,10 @@ PDSI & Sin escala    & Balance hídrico con oferta, demanda y humedad de suelo. 
 \toprule
 \textbf{Fuente} & \textbf{Resolución} & \textbf{Proveedor} & \textbf{Clave} \\
 \midrule
-ERA5-Land & 0.1° ($\approx$11 km) & ECMWF       & \texttt{historical\_era5\_land} \\
-IMERG     & 0.1° ($\approx$11 km) & NASA GPM    & \texttt{historical\_imerg} \\
 CHIRPS    & 0.05° ($\approx$5.5 km)& UCSB/USGS  & \texttt{historical\_chirps} \\
+IMERG     & 0.1° ($\approx$11 km) & NASA GPM    & \texttt{historical\_imerg} \\
+ERA5-Land & 0.1° ($\approx$11 km) & ECMWF       & \texttt{historical\_era5\_land} \\
+ERA5      & 0.25° ($\approx$28 km)& ECMWF       & \texttt{historical\_era5} \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -75,7 +76,25 @@ Cada predicción incluye:
 
 \subsection*{Anomalías de precipitación}
 
-Además del valor central del índice, la sección de predicción actual muestra un mapa de \textbf{anomalías de precipitación}: la diferencia entre la precipitación predicha y la climatología histórica del mismo mes y celda. Esto permite identificar de un vistazo si el pronóstico es más seco o húmedo que la media histórica.
+Junto al mapa del índice, la predicción actual puede mostrar un mapa de \textbf{anomalías de precipitación}: el déficit o superávit de lluvia previsto, expresado en milímetros. La idea es traducir el SPI predicho ---que es un número adimensional--- a una cantidad física de lluvia, mucho más fácil de interpretar para la gestión del recurso.
+
+\paragraph{Cómo se calcula.} El SPI mide cuántas desviaciones estándar se aparta la precipitación de su valor normal. Para devolverlo a milímetros, SIPREH lo multiplica por la \textbf{desviación estándar histórica} de la precipitación acumulada de la celda:
+\[
+A_{c} = \mathrm{SPI}_{c} \times \sigma^{P}_{c}
+\]
+donde $\mathrm{SPI}_{c}$ es el valor predicho del índice en la celda $c$ y $\sigma^{P}_{c}$ es la desviación estándar de la precipitación agregada de esa celda a lo largo del período climatológico de referencia. El resultado $A_c$ está en milímetros: positivo indica más lluvia que lo normal, negativo indica déficit.
+
+\paragraph{De dónde sale la climatología.} La referencia $\sigma^{P}_{c}$ se construye siempre a partir de la precipitación observada de \textbf{CHIRPS}, con estos pasos por celda:
+
+\begin{enumerate}
+    \item Se acumula la precipitación mensual en una ventana móvil del tamaño de la escala (por ejemplo, 3 meses para una escala de 3).
+    \item Se toma ese acumulado para el período climatológico estándar \textbf{1991--2020} y se calcula su media y su desviación estándar.
+    \item La ventana se evalúa en el mes que corresponde al horizonte: el mes de emisión se desplaza tantos meses como el horizonte solicitado. Así, una emisión de enero con horizonte 12 compara contra los eneros del año siguiente, y el período 1991--2020 se desplaza a 1992--2021.
+\end{enumerate}
+
+\begin{remark}
+El mapa de anomalías solo está disponible para el índice \textbf{SPI} y exige que la \textbf{escala de agregación coincida con el horizonte} de predicción (\texttt{escala = horizonte}). Es la condición que garantiza que el acumulado predicho y el acumulado climatológico se midan sobre la misma ventana de meses.
+\end{remark}
 
 \begin{center}
 \small
@@ -83,23 +102,19 @@ Además del valor central del índice, la sección de predicción actual muestra
 \toprule
 \textbf{Tipo de anomalía} & \textbf{Significado} & \textbf{Color} \\
 \midrule
-Anomalía positiva fuerte  & Precipitación muy por encima del promedio & Azul oscuro \\
-Anomalía positiva         & Precipitación sobre el promedio           & Azul \\
-Normal                    & Precipitación cercana al promedio histórico & Blanco \\
-Anomalía negativa         & Precipitación bajo el promedio            & Naranja \\
-Anomalía negativa fuerte  & Precipitación muy por debajo del promedio & Rojo \\
+Anomalía positiva fuerte  & Lluvia muy por encima de lo normal & Azul intenso \\
+Anomalía positiva         & Lluvia sobre lo normal             & Azul claro \\
+Normal                    & Lluvia cercana a la climatología   & Gris \\
+Anomalía negativa         & Lluvia bajo lo normal              & Rojo claro \\
+Anomalía negativa fuerte  & Lluvia muy por debajo de lo normal & Rojo intenso \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-El mapa de anomalías se actualiza al cambiar el horizonte de predicción (1 a 12 meses) en el panel lateral. La anomalía se calcula como:
-\[
-A_{c,t} = \hat{P}_{c,t} - \overline{P}_{c,m}
-\]
-donde $\hat{P}_{c,t}$ es la precipitación predicha en la celda $c$ para el tiempo $t$, y $\overline{P}_{c,m}$ es la media histórica de la celda $c$ para el mes $m$ correspondiente.
+El mapa se actualiza al cambiar el horizonte en el panel lateral.
 
 \begin{remark}
-Las anomalías se visualizan en unidades absolutas (mm/mes). Una anomalía negativa sostenida en múltiples horizontes es señal temprana de déficit hídrico acumulado.
+Como las anomalías quedan en milímetros, son directamente comparables con registros de lluvia y con la demanda hídrica. Un déficit sostenido a lo largo de varios horizontes es una señal temprana de sequía acumulada.
 \end{remark}
 
 \begin{remark}
@@ -124,7 +139,7 @@ El módulo de administración centraliza la gestión operativa del sistema. Solo
 
 La carga de datos es el flujo de trabajo más frecuente del administrador. A continuación se describe el proceso completo.
 
-\paragraph{Convención de nombre de archivo.} El nombre del archivo determina la resolución espacial que detecta automáticamente el sistema. Debe contener una de las siguientes palabras clave (sin distinción de mayúsculas):
+\paragraph{Convención de nombre de archivo.} Idealmente, la resolución y la fuente de cada archivo se registran de forma explícita en sus metadatos. Como respaldo, el sistema también sabe inferirlas a partir del nombre del archivo, que debe contener una de estas palabras clave (sin distinción de mayúsculas):
 
 \begin{center}
 \small
@@ -132,21 +147,31 @@ La carga de datos es el flujo de trabajo más frecuente del administrador. A con
 \toprule
 \textbf{Palabra clave en el nombre} & \textbf{Fuente detectada} & \textbf{Resolución} \\
 \midrule
-\texttt{ERA5\_LAND} o \texttt{era5land} & ERA5-Land & 0.10° \\
-\texttt{IMERG}                          & IMERG     & 0.10° \\
-\texttt{CHIRPS}                         & CHIRPS    & 0.05° \\
+\texttt{CHIRPS}                         & CHIRPS    & 0.05° ($\approx$5.5 km) \\
+\texttt{IMERG}                          & IMERG     & 0.10° ($\approx$11 km) \\
+\texttt{ERA5\_LAND} o \texttt{era5land} & ERA5-Land & 0.10° ($\approx$11 km) \\
+\texttt{ERA5}                           & ERA5      & 0.25° ($\approx$28 km) \\
 \bottomrule
 \end{tabular}
 \end{center}
 
+\begin{remark}
+ERA5 y ERA5-Land son fuentes distintas con resoluciones distintas (0.25° y 0.10° respectivamente), y el texto \texttt{era5\_land} contiene la palabra \texttt{era5}. Por eso la detección comprueba siempre \texttt{ERA5\_LAND} \emph{antes} que \texttt{ERA5}: de lo contrario un archivo de ERA5-Land se confundiría con ERA5 y se dibujaría con celdas del tamaño equivocado. La misma regla de orden se aplica al inferir la fuente y la resolución, tanto en el backend como en el frontend.
+\end{remark}
+
 \begin{example}
 Nombres de archivo válidos:
 \begin{itemize}
-    \item \texttt{grid\_ERA5\_LAND\_2024.parquet} $\to$ detectado como ERA5-Land, 0.10°.
-    \item \texttt{historical\_CHIRPS\_SPI.parquet} $\to$ detectado como CHIRPS, 0.05°.
+    \item \texttt{grid\_ERA5\_LAND\_2024.parquet} $\to$ ERA5-Land, 0.10°.
+    \item \texttt{grid\_ERA5\_2024.parquet} $\to$ ERA5, 0.25°.
+    \item \texttt{historical\_CHIRPS\_SPI.parquet} $\to$ CHIRPS, 0.05°.
     \item \texttt{prediction\_main.parquet} $\to$ archivo de predicción (no requiere clave de fuente).
 \end{itemize}
 \end{example}
+
+\begin{remark}
+La resolución no es un dato cosmético: el frontend la usa para dibujar el tamaño de cada celda en el mapa. Si una fuente quedara registrada con la resolución de otra, las celdas se renderizarían demasiado grandes o demasiado pequeñas y se solaparían. Por eso conviene que cada archivo lleve su resolución correcta en los metadatos y que el nombre respete la convención anterior.
+\end{remark}
 
 \paragraph{Pasos para cargar un nuevo archivo.}
 
