@@ -1,3 +1,4 @@
+% !TeX root = main.tex
 \chapter{Introducción}
 \label{ch:introduccion}
 
@@ -10,17 +11,18 @@ SIPREH se enmarca en el proyecto \textit{Sistema de Análisis y Alerta de Sequí
 \section{Propósito del sistema}
 \label{sec:proposito}
 
-SIPREH fue concebido para responder a la necesidad institucional de contar con una herramienta integrada que permita monitorear, analizar y predecir condiciones de sequía sobre el área metropolitana de Bogotá y sus embalses de abastecimiento. El sistema cubre un dominio geográfico aproximado de 4.0°N--5.5°N, 73.5°W--74.5°W.
+SIPREH fue creado como una herramienta de gestión para apoyar a las entidades responsables de la toma de decisiones en torno a la gestión del recurso hídrico desde una perspectiva de planeación. El sistema permite el estudio de las sequías meteorológicas en la ciudad de Bogotá y sus cuencas abastecedoras mediante un enfoque tanto retrospectivo como predictivo, proporcionando una base técnica e informada para la toma oportuna de decisiones.
+
+Para ello, SIPREH integra información hidrometeorológica, productos derivados del análisis satelital, técnicas de Machine Learning y un tablero interactivo que facilita el acceso, la visualización y la interpretación de la información de manera clara, intuitiva y eficiente.
 
 Sus propósitos centrales son:
 
 \begin{itemize}
-    \item Monitorear el estado de sequía sobre Bogotá y sus cuencas de abastecimiento mediante índices meteorológicos e hidrológicos calculados sobre múltiples fuentes de datos.
-    \item Analizar series históricas de índices de sequía con cobertura espacial continua y resolución temporal mensual.
-    \item Visualizar predicciones probabilísticas de hasta doce meses de horizonte con cuantificación explícita de incertidumbre.
-    \item Facilitar la comparación entre distintas versiones de predicción emitidas en diferentes fechas.
-    \item Habilitar la exportación de datos para análisis externos e integración con otros sistemas de gestión.
-    \item Proveer un módulo de administración para la carga, configuración y sincronización de archivos de datos.
+    \item Monitorear el estado de la sequía meteorológica en Bogotá y sus cuencas abastecedoras mediante índices de sequía ampliamente utilizados en la literatura científica y en el ámbito institucional.
+    \item Analizar series históricas de datos hidrometeorológicos con el fin de consolidar bases de datos robustas que sirvan como insumo para la implementación de técnicas de Machine Learning.
+    \item Proveer a las entidades responsables de la gestión del recurso hídrico en Bogotá y sus cuencas abastecedoras predicciones probabilísticas de las condiciones de sequía meteorológica, considerando diferentes horizontes de predicción y niveles de agregación temporal que apoyen la toma de decisiones.
+    \item Facilitar la consulta y el análisis temporal de la información mediante la generación de visualizaciones unidimensionales (1D) y bidimensionales (2D), con capacidad de exportación para la elaboración de productos gráficos que favorezcan una interpretación clara e intuitiva de los resultados.
+    \item Permitir a la entidad o entidades responsables de la administración del sistema garantizar su continuidad y sostenibilidad mediante la carga, configuración y sincronización de la información que alimenta la visualización y el análisis de datos históricos y predictivos.
 \end{itemize}
 
 \section{Objetivos principales del sistema}
@@ -29,38 +31,35 @@ Sus propósitos centrales son:
 El desarrollo de SIPREH persigue los siguientes objetivos técnicos y operativos:
 
 \begin{enumerate}
-    \item \textbf{Integración multifuente:} Consolidar en una única plataforma datos de reanálisis (ERA5, ERA5-Land), precipitación satelital (IMERG, CHIRPS) y registros observados de 29 estaciones hidrológicas del IDEAM.
+    \item \textbf{Caracterización retrospectiva y predictiva de la sequía:} Permitir el análisis retrospectivo de la sequía hidrológica y el análisis retrospectivo y predictivo de la sequía meteorológica mediante la consulta integrada de información histórica, horizontes y niveles de agregación para la predicción.
 
-    \item \textbf{Cómputo y visualización de índices:} Calcular y desplegar diez índices de sequía —cinco meteorológicos (SPI, SPEI, RAI, EDDI, PDSI) y cinco hidrológicos (SDI, SRI, MFI, DDI, HDI)— a múltiples escalas temporales (1, 3, 6 y 12 meses).
+    \item \textbf{Visualización interactiva de la información:} Facilitar la exploración espacial y temporal de la información mediante mapas interactivos, series de tiempo y representaciones gráficas unidimensionales (1D) y bidimensionales (2D), favoreciendo la interpretación de las condiciones de sequía.
 
-    \item \textbf{Predicción con cuantificación de incertidumbre:} Incorporar predicciones de conjunto con bandas de incertidumbre (Q1, Q3, IQR) para horizontes de hasta 12 meses.
+    \item \textbf{Consulta y exportación de resultados:} Permitir la consulta y descarga de información histórica y predictiva, así como de gráficos y productos derivados del análisis, para apoyar la toma de decisiones.
+    
+    \item \textbf{Apoyo a la toma de decisiones:} Proporcionar a las entidades responsables de la gestión del recurso hídrico una herramienta de consulta que facilite el seguimiento de las condiciones de sequía mediante el acceso oportuno a información hidrometeorológica histórica y predictiva.
+    
+    \item \textbf{Gestión de la plataforma:} Proporcionar herramientas de administración que permitan la configuración del sistema, la sincronización de los conjuntos de datos y la gestión de usuarios.
 
-    \item \textbf{Interactividad geoespacial:} Proveer un mapa interactivo con drill-down a nivel de celda y polígonos de cuencas, integrado con gráficas de series de tiempo que responden al clic del usuario sin recarga de página.
+    \item \textbf{Continuidad y sostenibilidad:} Garantizar la continuidad operativa y la sostenibilidad del sistema mediante mecanismos que faciliten la actualización periódica de la información y la incorporación de nuevas versiones de datos históricos y predictivos.
 
-    \item \textbf{Eficiencia computacional:} Garantizar latencias de consulta compatibles con la exploración interactiva mediante caché de dos niveles (Redis e in-memory) y consultas analíticas sobre archivos Parquet con DuckDB.
-
-    \item \textbf{Trazabilidad de predicciones:} Archivar versiones históricas de predicción identificadas por fecha de emisión (\textit{issued\_at}), permitiendo la comparación retrospectiva de distintas corridas.
-
-    \item \textbf{Resumen asistido por IA:} Generar automáticamente interpretaciones en lenguaje natural del estado de sequía predicho, reduciendo la barrera de acceso para usuarios no especializados.
-
-    \item \textbf{Administración operativa:} Facilitar la gestión de archivos, conjuntos de datos, usuarios y sincronización con almacenamiento en la nube mediante un módulo de administración web.
 \end{enumerate}
 
 \section{Público objetivo}
 \label{sec:publico}
 
-SIPREH está diseñado para tres perfiles de usuario diferenciados, cada uno con necesidades y niveles de acceso distintos:
+SIPREH está diseñado para los siguientes perfiles de usuario diferenciados:
 
 \begin{definition}
-\textbf{Investigador o científico.} Usuario con formación técnica en hidrología, climatología o áreas afines. Explora series históricas de índices, compara fuentes de datos y exporta información para análisis cuantitativos. Requiere acceso a todos los índices disponibles, múltiples escalas temporales y capacidades de exportación en CSV y PNG.
+\textbf{Desarrollador.} Personal encargado de garantizar la continuidad del componente predictivo del sistema mediante el entrenamiento y actualización de modelos de Machine Learning, generando nuevos archivos .parquet con los resultados de las predicciones, los cuales constituyen el insumo para la visualización y el despliegue de la información en SIPREH.
 \end{definition}
 
 \begin{definition}
-\textbf{Gestor de recursos hídricos.} Profesional operativo de entidades como la Empresa de Acueducto y Alcantarillado de Bogotá (EAAB), la Corporación Autónoma Regional de Cundinamarca (CAR) o el Instituto Distrital de Gestión de Riesgos y Cambio Climático (IDIGER). Enfocado en el seguimiento de la condición actual de sequía y las alertas tempranas a corto plazo. Su interés principal reside en la visualización clara del estado actual y la predicción de los próximos meses.
+\textbf{Administrador del sistema.} Personal capacitado para la gestión de los archivos .parquet correspondientes a los datos históricos y predictivos utilizados por SIPREH, responsable de la actualización y sincronización de los conjuntos de datos, así como de la administración de usuarios y permisos de acceso al sistema.
 \end{definition}
 
 \begin{definition}
-\textbf{Administrador del sistema.} Usuario técnico responsable de la carga de archivos de datos, la configuración de conjuntos de datos, la gestión de cuentas de usuario y la sincronización con el almacenamiento en la nube. Accede al sistema mediante credenciales con privilegios de administrador y opera el módulo de administración integrado en la plataforma.
+\textbf{Tomador de decisiones del recurso hídrico.} Personal perteneciente a entidades como la EAAB, IDIGER e IDEAM, con competencias en la gestión del recurso hídrico, que emplea SIPREH como herramienta de consulta para apoyar la toma de decisiones a partir del análisis retrospectivo de la sequía hidrológica y del análisis retrospectivo y predictivo de la sequía meteorológica.
 \end{definition}
 
 \begin{remark}

@@ -4,16 +4,21 @@
 \setlength{\parskip}{0.5em}
 
 \usepackage{fontspec}
-\setmainfont{Roboto}[
-  BoldFont = {Roboto Bold},
-  ItalicFont = {Roboto Italic},
-  BoldItalicFont = {Roboto Bold Italic}
-]
-\setsansfont{Roboto}[
-  BoldFont = {Roboto Bold},
-  ItalicFont = {Roboto Italic},
-  BoldItalicFont = {Roboto Bold Italic}
-]
+\IfFontExistsTF{Roboto Bold}{
+	\setmainfont{Roboto}[
+		BoldFont = {Roboto Bold},
+		ItalicFont = {Roboto Italic},
+		BoldItalicFont = {Roboto Bold Italic}
+	]
+	\setsansfont{Roboto}[
+		BoldFont = {Roboto Bold},
+		ItalicFont = {Roboto Italic},
+		BoldItalicFont = {Roboto Bold Italic}
+	]
+}{
+	\setmainfont{Arial}
+	\setsansfont{Arial}
+}
 \renewcommand{\familydefault}{\sfdefault}
 
 \usepackage[spanish]{babel}
