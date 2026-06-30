@@ -7,18 +7,16 @@ Este capítulo presenta una visión general de la interfaz de SIPREH y sus funci
 \section{Descripción del sistema}
 \label{sec:descripcion_sistema}
 
-SIPREH es una aplicación web de página única (SPA) organizada en torno a un mapa interactivo central y un panel lateral contextual. La navegación principal se divide en tres secciones:
+SIPREH (Sistema Integrado de Predicción y Monitoreo de Sequías) es una plataforma web de consulta para el monitoreo y análisis de la sequía en Bogotá y sus cuencas abastecedoras. Permite el análisis retrospectivo de la sequía hidrológica y el análisis retrospectivo y predictivo de la sequía meteorológica mediante un tablero dinámico de datos accesible desde equipos de escritorio, con visualizaciones interactivas, series de tiempo, mapas temáticos y productos descargables. El acceso al sistema es de uso exclusivo para las entidades autorizadas por el administrador de la plataforma. La navegación principal se divide en tres secciones:
 
 \begin{enumerate}
-    \item \textbf{Datos históricos:} visualización de índices de sequía sobre el mapa y en gráficas de series de tiempo.
-    \item \textbf{Predicción actual:} mapa del pronóstico probabilístico vigente con horizonte de 12 meses.
-    \item \textbf{Predicción histórica:} comparación entre versiones de predicción emitidas en distintas fechas.
+    \item \textbf{Consulta histórica:} Permite la consulta del comportamiento histórico de variables hidroclimáticas, como precipitación, temperatura y evapotranspiración potencial, así como de índices de sequía hidrológica y meteorológica en el área de estudio, mediante mapas temáticos y series de tiempo interactivas.
+    \item \textbf{Predicción actual:} Permite la consulta de productos de predicción de la sequía meteorológica en el área de estudio, incluyendo anomalías de precipitación, diferentes niveles de agregación temporal y horizontes de predicción, mediante mapas dinámicos y representaciones gráficas unidimensionales (1D).
+    \item \textbf{Predicción histórica:} Permite la consulta de predicciones generadas en ejecuciones anteriores como base para evaluar el desempeño y la precisión de las predicciones del sistema a lo largo del tiempo.
 \end{enumerate}
 
-Los usuarios con rol de administrador también pueden acceder al panel de administración para gestionar archivos, conjuntos de datos, usuarios y sincronización con la nube.
-
 \begin{remark}
-La interfaz está optimizada para navegadores de escritorio con resolución mínima de 1366 $\times$ 768 píxeles.
+SIPREH puede ser consultado desde equipos de escritorio mediante un navegador web.
 \end{remark}
 
 \section{Funcionalidades principales}
@@ -27,31 +25,29 @@ La interfaz está optimizada para navegadores de escritorio con resolución mín
 \subsection{Gráficas 1D}
 \label{subsec:graficas1d}
 
-Las gráficas 1D muestran la serie de tiempo de un índice de sequía para una celda o cuenca seleccionada. Se activan al hacer clic sobre el mapa interactivo.
+Permiten la consulta mediante series de tiempo de variables hidroclimáticas e índices de sequía para la celda o cuenca seleccionada. Para el análisis retrospectivo, se encuentran disponibles variables como precipitación diaria y mensual, temperatura mínima, media y máxima, evapotranspiración potencial e índices de sequía hidrológica y meteorológica. Para el análisis predictivo, permiten visualizar las predicciones de sequía meteorológica de acuerdo con el horizonte de predicción y el nivel de agregación temporal seleccionados.
 
 Capacidades:
 \begin{itemize}
     \item Zoom y desplazamiento sobre el eje temporal.
-    \item Código de color por categoría de severidad.
+    \item Código de color por leyenda para variables hidroclimáticas, índices de sequía, medias de precipitación y anomalías de precipitación.
+    \item Registro historico de la evolución temporal de las variables hidroclimáticas e índices de sequía para la celda o cuenca seleccionada.
     \item Exportación de la gráfica como imagen PNG.
     \item Descarga de los datos en formato JSON.
 \end{itemize}
 
-\begin{remark}
-Las gráficas 1D utilizan la librería \texttt{uPlot} con el algoritmo de diezmado LTTB (\textit{Largest-Triangle-Three-Buckets}), que preserva la forma visual de la serie al reducir el número de puntos renderizados en registros extensos.
-\end{remark}
-
 \subsection{Gráficas 2D}
 \label{subsec:graficas2d}
 
-Las gráficas 2D corresponden al campo espacial del índice seleccionado para una fecha determinada, visualizado como un mapa de color continuo. El mapa se actualiza al cambiar la fecha, el índice o la escala en el panel lateral.
+Permiten la consulta espacial de la información mediante mapas temáticos. Para el análisis retrospectivo, posibilitan la visualización de variables hidroclimáticas, como precipitación diaria y mensual, temperatura mínima, media y máxima, evapotranspiración potencial, e índices de sequía hidrológica y meteorológica, considerando diferentes unidades espaciales, tales como celdas o cuencas. Para el análisis predictivo, permiten la consulta de predicciones de sequía meteorológica mediante mapas dinámicos. Adicionalmente, cuando el horizonte de predicción y el nivel de agregación temporal coinciden, el sistema habilita la visualización de la precipitación media correspondiente a la normal climatológica (1991–2020) y de la anomalía de precipitación asociada a la predicción seleccionada. Todos los mapas incorporan una leyenda dinámica, ajustada a la variable hidroclimática, índice de sequía o anomalía de precipitación consultada, facilitando la interpretación espacial de los resultados.
 
 Capacidades:
 \begin{itemize}
-    \item Campo espacial del índice con paleta de colores estándar de sequía.
-    \item Superposición de los siete polígonos de cuencas hidrográficas.
-    \item Marcadores de estaciones del IDEAM con acceso a sus series de tiempo.
-    \item Tres niveles de resolución según el nivel de zoom.
+    \item Campo espacial de variables hidroclimáticas e índices de sequía, cuya representación depende de la resolución espacial y el tamaño de celda de los diferentes productos de análisis satelital empleados.
+    \item La interfaz incorpora diferentes capas espaciales que permiten contextualizar los análisis y facilitar consultas retrospectivas y predictivas dentro del área de estudio. Estas capas incluyen la malla espacial de análisis (celdas), estaciones meteorológicas, cuencas hidrográficas, embalses, límite del área de estudio, perímetro urbano y el polígono del municipio de Bogotá.
+    \item Identificación de las estaciones meteorológicas consultadas para el análisis temporal de la sequía hidrológica en el área de estudio.
+    \item La malla espacial de análisis considera diferentes resoluciones de celda, definidas según las características de los productos satelitales consultados. Para el desarrollo del análisis se emplean resoluciones espaciales de 0.1° y 0.05°, asociadas a los productos hidroclimáticos CHIRPS, ERA5-Land e IMERG.
+    \item La interfaz permite la selección de unidades espaciales específicas dentro del campo de análisis, facilitando la generación de gráficos unidimensionales (1D) para evaluar la evolución temporal de las variables hidroclimáticas e índices de sequía correspondientes a la unidad espacial seleccionada.
     \item Exportación del mapa como imagen PNG.
 \end{itemize}
 
@@ -61,12 +57,12 @@ Capacidades:
 El sistema permite exportar los datos visualizados en dos formatos, generados directamente en el navegador:
 
 \begin{itemize}
-    \item \textbf{PNG:} captura de alta resolución de cualquier panel de mapa o gráfica. Se descarga con un encabezado institucional, tipo de análisis, leyenda y metadatos.
-    \item \textbf{JSON:} datos de la consulta activa (serie de tiempo 1D o campo espacial 2D), incluyendo valores, metadatos de variable, fuente, resolución y sistema de referencia (WGS84 EPSG:4326).
+    \item \textbf{PNG:} La exportación de resultados permite generar salidas en alta resolución de los paneles de visualización, incluyendo elementos institucionales, identificación del tipo de análisis, fecha y parámetros de consulta, representación espacial de los resultados, leyenda de clasificación, escala gráfica, sistema de coordenadas y metadatos de la unidad espacial o serie temporal analizada.
+    \item \textbf{JSON:} La exportación JSON estructura los resultados con metadatos completos (variable, resolución, fechas, fuente), definición de columnas y datos numéricos.
 \end{itemize}
 
 \begin{example}
-El JSON de una consulta 1D contiene columnas \texttt{Tiempo} y \texttt{Valor}. El JSON de una consulta 2D contiene \texttt{Cell\_id} y \texttt{Valor}. Para cuencas, incluye además \texttt{Cuenca\_DN}, \texttt{Nombre\_Cuenca} y \texttt{Categoria}.
+Cada archivo JSON contiene tres secciones: (i) \texttt{Tipo} indicando si es consulta 1D o 2D, (ii) \texttt{Metadata} con información descriptiva de la consulta (Variable, resolución, fechas y fuente), y (iii) \texttt{Datos} con los registros. Las columnas varían según el tipo: Para 1D incluye \texttt{Tiempo} y \texttt{Valor}; para 2D incluye \texttt{Cell\_id} y \texttt{Valor}; y para cuencas incluye \texttt{Cuenca\_DN}, \texttt{Nombre\_Cuenca}, \texttt{Valor} y \texttt{Categoria}.
 \end{example}
 
 \subsection{Administración}
@@ -75,8 +71,8 @@ El JSON de una consulta 1D contiene columnas \texttt{Tiempo} y \texttt{Valor}. E
 El panel de administración es exclusivo para usuarios con rol de administrador. Desde él se puede:
 
 \begin{itemize}
-    \item Cargar archivos Parquet de datos al sistema.
-    \item Configurar y activar conjuntos de datos.
+    \item Cargar archivos .parquet de datos al sistema (Datos históricos y de predicción).
+    \item Permite la sincronización de los conjuntos de datos y la configuración de la fecha de emisión de los productos de predicción, utilizada como referencia para la identificación de los horizontes de predicción y para el cálculo de la precipitación media de la normal climatológica y la anomalía de precipitación asociadas a las predicciones.
     \item Sincronizar el almacenamiento local con Cloudflare R2.
-    \item Gestionar usuarios (crear, modificar, desactivar cuentas).
+    \item Gestionar usuarios (Crear, modificar y desactivar usuarios).
 \end{itemize}
