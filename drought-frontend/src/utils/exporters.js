@@ -1,3 +1,5 @@
+import { getCartoTileUrl } from './basemap';
+
 
   // Declarar dividerY después de definir infoBoxY y infoBoxH, dentro de draw2DMap
   // fitLegendText debe estar antes de su uso
@@ -12,7 +14,7 @@
   };
 const DEFAULT_IMAGE_WIDTH = 1800;
 const DEFAULT_IMAGE_HEIGHT = 1100;
-const LEAFLET_BASEMAP_TILE_URL = 'https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png';
+const LEAFLET_BASEMAP_TILE_URL = getCartoTileUrl('light', { retina: false, subdomain: 'a' });
 
 const METEOROLOGICAL_INDICES = new Set(['SPI', 'SPEI', 'RAI', 'EDDI', 'PDSI']);
 const HYDROLOGICAL_INDICES = new Set(['SDI', 'SRI', 'MFI', 'DDI', 'HDI']);

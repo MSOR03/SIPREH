@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { getCellStyle } from '../utils/gridLevels';
 import { HYDRO_STATIONS } from '../utils/hydroStations';
+import { getCartoTileUrl } from '../utils/basemap';
 
 const BOGOTA_CENTER = [4.7110, -74.0721];
 
@@ -304,9 +305,7 @@ export default function LeafletMap({
 
         // CartoDB tiles — light_all / dark_all según tema activo
         const initialTheme = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
-        const tileUrl = initialTheme === 'dark'
-          ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-          : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+        const tileUrl = getCartoTileUrl(initialTheme);
         tileLayerRef.current = L.tileLayer(tileUrl, {
           attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
           subdomains: 'abcd',
@@ -756,10 +755,7 @@ export default function LeafletMap({
   // Swap tile layer URL when theme changes (dark_all <-> light_all)
   useEffect(() => {
     if (!tileLayerRef.current) return;
-    const url = theme === 'dark'
-      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-      : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
-    tileLayerRef.current.setUrl(url);
+    tileLayerRef.current.setUrl(getCartoTileUrl(theme));
   }, [theme]);
 
   // Toggle station marker visibility
