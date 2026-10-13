@@ -25,6 +25,7 @@ npm start            # Servidor produccion
 Crear `.env.local`:
 ```env
 NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_CARTO_API_KEY=tu_api_key   # gratis en https://carto.com/basemaps/apikey (mapa base)
 ```
 
 ## Estructura del Proyecto
